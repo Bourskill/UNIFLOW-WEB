@@ -60,11 +60,11 @@ export function anidarPiezas(piezas, opciones) {
       alturaFilaActual = 0;
     }
 
+    // Se conserva cualquier campo extra que traiga la pieza (imagenDataUrl,
+    // textos de personalización, etc.) — el nesting no sabe ni le importa qué
+    // contenido lleva cada pieza, solo dónde entra.
     resultados.push({
-      id: pieza.id,
-      piezaId: pieza.piezaId,
-      lineaPedidoId: pieza.lineaPedidoId,
-      talla: pieza.talla,
+      ...pieza,
       rotacionGrados: orientacion.rotacionGrados,
       posicion: { x, y },
       anchoCm: orientacion.anchoCm,

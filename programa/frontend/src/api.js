@@ -39,6 +39,49 @@ export function anidarDesdeMolderia(molderiaId, lineas, anchoLienzoCm) {
   });
 }
 
+export function listarDisenos() {
+  return pedirJson('/disenos');
+}
+
+export function crearDiseno(diseno) {
+  return pedirJson('/disenos', { method: 'POST', body: JSON.stringify(diseno) });
+}
+
+export function eliminarDiseno(id) {
+  return pedirJson('/disenos/' + id, { method: 'DELETE' });
+}
+
+export function listarProductos() {
+  return pedirJson('/productos');
+}
+
+export function crearProducto(producto) {
+  return pedirJson('/productos', { method: 'POST', body: JSON.stringify(producto) });
+}
+
+export function eliminarProducto(id) {
+  return pedirJson('/productos/' + id, { method: 'DELETE' });
+}
+
+export function listarPedidos() {
+  return pedirJson('/pedidos');
+}
+
+export function crearPedido(pedido) {
+  return pedirJson('/pedidos', { method: 'POST', body: JSON.stringify(pedido) });
+}
+
+export function eliminarPedido(id) {
+  return pedirJson('/pedidos/' + id, { method: 'DELETE' });
+}
+
+export function anidarDesdePedido(pedidoId, anchoLienzoCm) {
+  return pedirJson('/nesting/desde-pedido', {
+    method: 'POST',
+    body: JSON.stringify({ pedidoId, anchoLienzoCm }),
+  });
+}
+
 export async function generarPdf(resultadoNesting) {
   const respuesta = await fetch(BASE_URL + '/nesting/generar', {
     method: 'POST',

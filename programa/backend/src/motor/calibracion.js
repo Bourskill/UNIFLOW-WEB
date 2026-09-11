@@ -43,9 +43,23 @@ function calibrarProporcional(zona, talla, dimensionesPiezaPorTalla) {
   if (!alturaReferencia) {
     throw new Error('La zona "' + zona.id + '" no tiene referenciaProporcional.altoCm.');
   }
-  const factor = dimensionTalla.altoCm / alturaReferencia;
+  // "Automático" crece en la MISMA proporción que la pieza — para eso hace
+  // falta saber a qué talla corresponde ese alto de referencia (tallaReferencia).
+  // Sin esa talla base, no hay con qué comparar el crecimiento de la pieza y
+  // el factor queda matemáticamente mal planteado (se probó en vivo: sin este
+  // campo, el "factor" terminaba devolviendo el alto de la PIEZA como si fuera
+  // el de la letra — texto del tamaño de la camiseta entera).
+  const tallaReferencia = zona.tallaReferencia;
+  const dimensionBase = tallaReferencia && dimensionesPiezaPorTalla[tallaReferencia];
+  if (!dimensionBase) {
+    throw new Error(
+      'La zona "' + zona.id + '" no tiene una tallaReferencia válida (talla base a la que ' +
+      'corresponde referenciaProporcional.altoCm). Sin eso no se puede calcular cuánto crece.'
+    );
+  }
+  const factor = dimensionTalla.altoCm / dimensionBase.altoCm;
   return {
-    anchoCm: round2(zona.referenciaProporcional.altoCm * factor),
+    anchoCm: round2(alturaReferencia * factor),
     altoCm: round2(alturaReferencia * factor),
   };
 }

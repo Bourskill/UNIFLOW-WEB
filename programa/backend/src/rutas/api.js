@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { leerColeccion, escribirColeccion } from '../dominio/almacen.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
+import { resolverPiezasDePedido } from '../motor/resolverPedido.js';
 
 export const router = Router();
 
@@ -97,6 +98,41 @@ router.post('/nesting/desde-molderia', async (req, res) => {
         });
       }
     }
+  }
+
+  const resultado = anidarPiezas(piezasParaAnidar, { anchoLienzoCm, separacionCm });
+  res.json(resultado);
+});
+
+// Anida un pedido REAL: cada línea es una prenda con talla + nombre + número.
+// Resuelve producto → moldería (dimensiones) + diseño (arte) + elementos
+// (dónde va cada texto y con qué tamaño), y devuelve piezas con su contenido
+// ya calibrado — esto es lo que hace que la vista previa muestre la camiseta
+// real en vez de un rectángulo con el nombre de la pieza.
+router.post('/nesting/desde-pedido', async (req, res) => {
+  const { pedidoId, anchoLienzoCm, separacionCm } = req.body;
+  if (!pedidoId || !anchoLienzoCm) {
+    return res.status(400).json({ error: 'Faltan pedidoId o anchoLienzoCm' });
+  }
+
+  const [pedidos, productos, molderias, disenos] = await Promise.all([
+    leerColeccion('pedidos'),
+    leerColeccion('productos'),
+    leerColeccion('molderias'),
+    leerColeccion('disenos'),
+  ]);
+
+  const pedido = pedidos.find((p) => p.id === pedidoId);
+  if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+  if (!Array.isArray(pedido.lineas) || pedido.lineas.length === 0) {
+    return res.status(400).json({ error: 'Ese pedido todavía no tiene ninguna línea (prenda) cargada' });
+  }
+
+  let piezasParaAnidar;
+  try {
+    piezasParaAnidar = resolverPiezasDePedido({ pedido, productos, molderias, disenos });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
   }
 
   const resultado = anidarPiezas(piezasParaAnidar, { anchoLienzoCm, separacionCm });
