@@ -1,40 +1,169 @@
 .app {
-  max-width: 900px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 24px;
   font-family: system-ui, sans-serif;
 }
 
-.controles {
+.pestanas {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  gap: 8px;
   margin: 16px 0;
+  border-bottom: 1px solid #333;
 }
 
-.controles button {
-  font-size: 14px;
+.pestanas button {
   padding: 8px 14px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+}
+
+.pestanas button.activa {
+  border-bottom-color: #6cf;
+  font-weight: 600;
+}
+
+.pagina h2 {
+  margin-top: 0;
+}
+
+.tarjeta {
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+}
+
+.tarjeta label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.tarjeta input,
+.tarjeta select {
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background: transparent;
+  color: inherit;
+}
+
+.check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+}
+
+.fila-pieza {
+  border: 1px dashed #444;
   border-radius: 6px;
-  border: 1px solid #ccc;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fila-pieza-cabecera {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.fila-pieza-cabecera input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.tabla-tallas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.celda-talla {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.celda-talla input {
+  width: 100%;
+}
+
+.fila-linea {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.acciones {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.acciones button,
+.fila-pieza-cabecera button,
+.fila-linea button,
+.lista-molderias button {
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
 }
 
-.controles button:disabled {
+.acciones button.primario {
+  background: #2a6df4;
+  border-color: #2a6df4;
+  color: white;
+}
+
+.acciones button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
+.lista-molderias {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lista-molderias li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
 .metricas {
-  color: #444;
+  color: #999;
   font-size: 13px;
 }
 
 .error {
-  color: #b00020;
+  color: #ff6b6b;
 }
 
 .lienzo-nesting {
-  border: 1px solid #ccc;
+  border: 1px solid #444;
   border-radius: 4px;
 }

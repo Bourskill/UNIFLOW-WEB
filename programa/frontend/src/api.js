@@ -8,14 +8,35 @@ const ORIGEN = (import.meta.env.VITE_API_URL || 'http://localhost:4000')
   .replace(/\/api$/, '');
 const BASE_URL = ORIGEN + '/api';
 
-export async function anidarVistaPrevia(piezas, anchoLienzoCm) {
-  const respuesta = await fetch(BASE_URL + '/nesting/vista-previa', {
-    method: 'POST',
+async function pedirJson(ruta, opciones) {
+  const respuesta = await fetch(BASE_URL + ruta, {
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ piezas, anchoLienzoCm }),
+    ...opciones,
   });
-  if (!respuesta.ok) throw new Error('Falló el cálculo de nesting');
-  return respuesta.json();
+  if (!respuesta.ok) {
+    const cuerpo = await respuesta.json().catch(() => ({}));
+    throw new Error(cuerpo.error || 'Error de red (' + respuesta.status + ')');
+  }
+  return respuesta.status === 204 ? null : respuesta.json();
+}
+
+export function listarMolderias() {
+  return pedirJson('/molderias');
+}
+
+export function crearMolderia(molderia) {
+  return pedirJson('/molderias', { method: 'POST', body: JSON.stringify(molderia) });
+}
+
+export function eliminarMolderia(id) {
+  return pedirJson('/molderias/' + id, { method: 'DELETE' });
+}
+
+export function anidarDesdeMolderia(molderiaId, lineas, anchoLienzoCm) {
+  return pedirJson('/nesting/desde-molderia', {
+    method: 'POST',
+    body: JSON.stringify({ molderiaId, lineas, anchoLienzoCm }),
+  });
 }
 
 export async function generarPdf(resultadoNesting) {

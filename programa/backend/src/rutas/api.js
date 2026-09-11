@@ -55,6 +55,54 @@ router.post('/nesting/vista-previa', async (req, res) => {
   res.json(resultado);
 });
 
+// Resuelve piezas reales de una moldería (multiplicadas por talla y cantidad)
+// y las anida. Reemplaza tener que armar a mano el array de piezas en el
+// frontend — ahora el ancho/alto sale de la moldería, no de un ejemplo fijo.
+// Si falta la dimensión de una talla, falla explícito: no se asume nada
+// (ver claude/README.md — nunca dar una talla por buena).
+router.post('/nesting/desde-molderia', async (req, res) => {
+  const { molderiaId, lineas, anchoLienzoCm, separacionCm } = req.body;
+  if (!molderiaId || !Array.isArray(lineas) || lineas.length === 0 || !anchoLienzoCm) {
+    return res.status(400).json({ error: 'Faltan molderiaId, lineas o anchoLienzoCm' });
+  }
+
+  const molderias = await leerColeccion('molderias');
+  const molderia = molderias.find((m) => m.id === molderiaId);
+  if (!molderia) return res.status(404).json({ error: 'Moldería no encontrada' });
+  if (!Array.isArray(molderia.piezas) || molderia.piezas.length === 0) {
+    return res.status(400).json({ error: 'Esa moldería todavía no tiene piezas cargadas' });
+  }
+
+  const piezasParaAnidar = [];
+  let contador = 0;
+  for (const linea of lineas) {
+    const cantidad = Number(linea.cantidad) || 0;
+    for (let copia = 0; copia < cantidad; copia++) {
+      for (const pieza of molderia.piezas) {
+        const dimension = pieza.dimensionesPorTalla?.[linea.talla];
+        if (!dimension) {
+          return res.status(400).json({
+            error: 'La pieza "' + pieza.nombre + '" no tiene dimensión cargada para la talla ' +
+              linea.talla + '. No se genera nada hasta que esté completa.',
+          });
+        }
+        piezasParaAnidar.push({
+          id: 'g' + contador++,
+          piezaId: pieza.nombre,
+          lineaPedidoId: linea.talla + '#' + copia,
+          talla: linea.talla,
+          anchoCm: dimension.anchoCm,
+          altoCm: dimension.altoCm,
+          rotable: !!pieza.rotable,
+        });
+      }
+    }
+  }
+
+  const resultado = anidarPiezas(piezasParaAnidar, { anchoLienzoCm, separacionCm });
+  res.json(resultado);
+});
+
 // Genera el PDF final a partir de un layout ya anidado (normalmente el mismo
 // que devolvió /nesting/vista-previa, después de que el usuario lo confirmó).
 // Guarda el registro de generación pieza por pieza para poder hacer
