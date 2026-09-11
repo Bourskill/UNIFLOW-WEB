@@ -1,72 +1,125 @@
+/* ── Layout general: barra superior + panel lateral fijo + contenido ───── */
+
 .app {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 24px;
-  font-family: system-ui, sans-serif;
-}
-
-.pestanas {
+  height: 100vh;
   display: flex;
+  flex-direction: column;
+}
+
+.barra-superior {
+  height: 40px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  background: var(--c-bg-panel);
+  border-bottom: 1px solid var(--c-border-strong);
+}
+
+.marca {
+  display: flex;
+  align-items: center;
   gap: 8px;
-  margin: 16px 0;
-  border-bottom: 1px solid #333;
-}
-
-.pestanas button {
-  padding: 8px 14px;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 14px;
-  border-bottom: 2px solid transparent;
-}
-
-.pestanas button.activa {
-  border-bottom-color: #6cf;
+  font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--c-text);
 }
+
+.marca-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  background: linear-gradient(135deg, var(--c-accent), #1c5fa8);
+}
+
+.ruta-actual {
+  font-size: 11px;
+  color: var(--c-text-faint);
+}
+
+.cuerpo {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.panel-lateral {
+  width: 190px;
+  flex: none;
+  background: var(--c-bg-panel);
+  border-right: 1px solid var(--c-border-strong);
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item-nav {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: var(--c-text-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.item-nav:hover {
+  background: var(--c-bg-surface);
+  color: var(--c-text);
+}
+
+.item-nav.activo {
+  background: var(--c-accent-soft);
+  border-left-color: var(--c-accent);
+  color: var(--c-text);
+}
+
+.contenido {
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px 26px;
+}
+
+/* ── Encabezados y texto de ayuda ────────────────────────────────────── */
 
 .pagina h2 {
-  margin-top: 0;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.pagina h3,
+.pagina h4 {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--c-text-faint);
+  margin: 18px 0 8px;
 }
 
 .ayuda {
-  color: #999;
-  font-size: 13px;
-  max-width: 640px;
-  margin-top: -8px;
+  color: var(--c-text-muted);
+  font-size: 12px;
+  max-width: 560px;
+  margin: 6px 0 16px;
+  line-height: 1.5;
 }
 
-.miniatura {
-  max-width: 120px;
-  max-height: 120px;
-  border: 1px solid #444;
-  border-radius: 4px;
-  margin-top: 4px;
-}
-
-.fila-elemento {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: 6px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.fila-elemento input[type='number'] {
-  width: 60px;
-}
-
-.fila-elemento input:not([type='number']):not([type='color']) {
-  flex: 1;
-  min-width: 100px;
-}
+/* ── Tarjetas (equivalente a una sección de panel de Adobe) ─────────────── */
 
 .tarjeta {
-  border: 1px solid #333;
-  border-radius: 8px;
+  background: var(--c-bg-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 5px;
   padding: 16px;
   margin-bottom: 20px;
   display: flex;
@@ -79,16 +132,54 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 13px;
+  font-size: 11.5px;
+  color: var(--c-text-muted);
 }
 
+/* ── Controles de formulario ─────────────────────────────────────────── */
+
 .tarjeta input,
-.tarjeta select {
+.tarjeta select,
+.fila-linea select,
+.fila-linea input,
+.fila-elemento select,
+.fila-elemento input,
+.fila-pieza-cabecera input {
   padding: 6px 8px;
-  border-radius: 4px;
-  border: 1px solid #444;
-  background: transparent;
-  color: inherit;
+  border-radius: 3px;
+  border: 1px solid var(--c-border);
+  background: var(--c-bg-field);
+  color: var(--c-text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.tarjeta input::placeholder {
+  color: var(--c-text-faint);
+}
+
+.tarjeta input:focus,
+.tarjeta select:focus,
+.fila-linea select:focus,
+.fila-linea input:focus,
+.fila-elemento select:focus,
+.fila-elemento input:focus {
+  outline: none;
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-accent-soft);
+}
+
+.tarjeta input[type='color'] {
+  padding: 2px;
+  width: 34px;
+  height: 26px;
+}
+
+.tarjeta input[type='file'] {
+  border: 1px dashed var(--c-border);
+  background: var(--c-bg-field);
+  font-size: 11.5px;
+  color: var(--c-text-muted);
 }
 
 .check {
@@ -97,9 +188,12 @@
   gap: 6px !important;
 }
 
+/* ── Filas de pieza / elemento (dentro de una tarjeta) ───────────────── */
+
 .fila-pieza {
-  border: 1px dashed #444;
-  border-radius: 6px;
+  border: 1px solid var(--c-border);
+  background: var(--c-bg-field);
+  border-radius: 4px;
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -111,6 +205,10 @@
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.fila-pieza-cabecera strong {
+  font-size: 12.5px;
 }
 
 .fila-pieza-cabecera input {
@@ -128,76 +226,153 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12px;
+  font-size: 10.5px;
+  color: var(--c-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .celda-talla input {
   width: 100%;
 }
 
+.miniatura {
+  max-width: 100px;
+  max-height: 100px;
+  border: 1px solid var(--c-border);
+  border-radius: 3px;
+  margin-top: 4px;
+}
+
+.fila-elemento {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px;
+  border-radius: 4px;
+  background: var(--c-bg-panel);
+  border: 1px solid var(--c-border);
+}
+
+.fila-elemento input[type='number'] {
+  width: 56px;
+}
+
+.fila-elemento input:not([type='number']):not([type='color']) {
+  flex: 1;
+  min-width: 100px;
+}
+
 .fila-linea {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
+
+.fila-linea select:first-of-type {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.fila-linea select:nth-of-type(2) {
+  flex: 0 0 64px;
+}
+
+.fila-linea input {
+  flex: 1 1 90px;
+  min-width: 0;
+  width: auto;
+}
+
+/* ── Botones ─────────────────────────────────────────────────────────── */
 
 .acciones {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .acciones button,
 .fila-pieza-cabecera button,
 .fila-linea button,
+.fila-elemento button,
 .lista-molderias button {
-  font-size: 13px;
-  padding: 7px 12px;
-  border-radius: 6px;
-  border: 1px solid #555;
-  background: transparent;
-  color: inherit;
+  font-size: 11.5px;
+  padding: 6px 12px;
+  border-radius: 3px;
+  border: 1px solid var(--c-border);
+  background: var(--c-bg-surface);
+  color: var(--c-text-muted);
   cursor: pointer;
 }
 
+.acciones button:hover,
+.fila-pieza-cabecera button:hover,
+.fila-linea button:hover,
+.fila-elemento button:hover,
+.lista-molderias button:hover {
+  background: var(--c-bg-surface-hover);
+  color: var(--c-text);
+}
+
 .acciones button.primario {
-  background: #2a6df4;
-  border-color: #2a6df4;
-  color: white;
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.acciones button.primario:hover {
+  background: #4aa9ff;
 }
 
 .acciones button:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: default;
 }
+
+/* ── Listas ──────────────────────────────────────────────────────────── */
 
 .lista-molderias {
   list-style: none;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  max-width: 640px;
 }
 
 .lista-molderias li {
   display: flex;
   align-items: center;
   gap: 10px;
-  border: 1px solid #333;
-  border-radius: 6px;
+  background: var(--c-bg-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 4px;
   padding: 8px 12px;
+  font-size: 12.5px;
 }
 
+.lista-molderias li > *:not(button) {
+  flex: 1;
+}
+
+/* ── Estados y previsualización ──────────────────────────────────────── */
+
 .metricas {
-  color: #999;
-  font-size: 13px;
+  color: var(--c-text-muted);
+  font-size: 11.5px;
 }
 
 .error {
-  color: #ff6b6b;
+  color: var(--c-danger);
+  font-size: 12px;
 }
 
 .lienzo-nesting {
-  border: 1px solid #444;
+  border: 1px solid var(--c-border);
   border-radius: 4px;
+  background: var(--c-bg-field);
 }
