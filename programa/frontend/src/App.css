@@ -1,0 +1,40 @@
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+  font-family: system-ui, sans-serif;
+}
+
+.controles {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.controles button {
+  font-size: 14px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  cursor: pointer;
+}
+
+.controles button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.metricas {
+  color: #444;
+  font-size: 13px;
+}
+
+.error {
+  color: #b00020;
+}
+
+.lienzo-nesting {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}

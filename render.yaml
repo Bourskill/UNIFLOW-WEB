@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: uniflow-web-backend
+    env: node
+    rootDir: programa/backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/salud
+    plan: free

@@ -1,0 +1,22 @@
+# Contexto de sesión de Claude — no es parte del software, y menciona análisis
+# de un competidor real que no tiene por qué ser público. Ver claude/README.md.
+claude/
+CLAUDE.md
+.claude/
+
+node_modules/
+dist/
+dist-ssr/
+
+# Persistencia de desarrollo (backend/data/*.json) — no es fixture, es estado
+# real de pruebas locales; no corresponde versionarlo.
+programa/backend/data/
+
+*.log
+.env
+.env.local
+.env.*.local
+backend.log
+backend-error.log
+
+.DS_Store
