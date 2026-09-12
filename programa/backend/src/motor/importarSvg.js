@@ -9,7 +9,7 @@
 import { parse as parseSvg } from 'svgson';
 import svgpath from 'svgpath';
 import { pointsOnPath } from 'points-on-path';
-import { TALLAS_ORDEN } from '../dominio/modelos.js';
+import { asignarTallasPorNombre, poligonoYBoundingBoxDePuntos } from './geometriaComun.js';
 
 const NOMBRE_CONTORNO = /^(corte|contorno|cut|outline)$/i;
 const MAGENTA_RESERVADO = ['#ff00ff', '#f0f', 'magenta', 'rgb(255,0,255)'];
@@ -107,16 +107,7 @@ function poligonoYBoundingBox(pathD, mmPorUnidad, tolerancia) {
   // todos los puntos; un contorno de corte normal tiene un solo subtrazado.
   const subtrazados = pointsOnPath(pathD, tolerancia);
   const planos = subtrazados.flat();
-  const puntosMm = planos.map(([x, y]) => [x * mmPorUnidad, y * mmPorUnidad]);
-  const xs = puntosMm.map((p) => p[0]);
-  const ys = puntosMm.map((p) => p[1]);
-  return {
-    poligonoMm: puntosMm,
-    boundingBoxMm: {
-      anchoMm: Math.max(...xs) - Math.min(...xs),
-      altoMm: Math.max(...ys) - Math.min(...ys),
-    },
-  };
+  return poligonoYBoundingBoxDePuntos(planos, mmPorUnidad);
 }
 
 /**
@@ -227,13 +218,6 @@ export async function resolverGeometriaSvgManual(
 // evitar. Esto detecta automáticamente qué forma es cada talla por nombre, y
 // deja lo que no matchea para asignar a mano — nunca se adivina.
 
-const TALLAS_NORMALIZADAS = new Set(TALLAS_ORDEN.map((t) => t.toUpperCase()));
-
-function normalizarTalla(nombre) {
-  const limpio = (nombre || '').trim().toUpperCase();
-  return TALLAS_NORMALIZADAS.has(limpio) ? limpio : null;
-}
-
 /**
  * @param {string} svgTexto  un archivo con una forma por talla, cada una nombrada
  */
@@ -247,22 +231,7 @@ export async function analizarPiezaMultiTalla(svgTexto) {
   }
 
   const escala = extraerEscalaFisica(raiz);
-
-  const asignacionesCrudas = candidatos.map((c, indice) => ({
-    indice,
-    nombreDetectado: c.nombre,
-    tallaAsignada: normalizarTalla(c.nombre),
-  }));
-
-  // Si dos formas matchean la misma talla, ninguna se asigna sola — queda
-  // ambiguo y el usuario elige a mano cuál es la correcta.
-  const conteoPorTalla = {};
-  for (const a of asignacionesCrudas) {
-    if (a.tallaAsignada) conteoPorTalla[a.tallaAsignada] = (conteoPorTalla[a.tallaAsignada] || 0) + 1;
-  }
-  const asignaciones = asignacionesCrudas.map((a) =>
-    a.tallaAsignada && conteoPorTalla[a.tallaAsignada] > 1 ? { ...a, tallaAsignada: null } : a
-  );
+  const asignaciones = asignarTallasPorNombre(candidatos.map((c, indice) => ({ indice, nombre: c.nombre })));
 
   return {
     candidatos: candidatos.map((c, i) => ({ indice: i, nombre: c.nombre })),

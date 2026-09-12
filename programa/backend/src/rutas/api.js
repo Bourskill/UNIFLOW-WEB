@@ -6,6 +6,7 @@ import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
 import { resolverPiezasDePedido } from '../motor/resolverPedido.js';
 import { analizarPiezaMultiTalla, resolverGeometriasPorTalla } from '../motor/importarSvg.js';
+import { analizarPiezaMultiTallaDxf, resolverGeometriasPorTallaDxf } from '../motor/importarDxf.js';
 
 const router = Router();
 
@@ -68,14 +69,20 @@ router.get('/piezas', async (req, res) => {
   res.json(await leerColeccion('piezas'));
 });
 
-// Analiza el archivo (con todas las tallas nombradas adentro) y trata de
-// matchear cada forma contra una talla conocida (S/M/L/...). Lo que no
-// matchea queda para que el usuario lo asigne a mano.
+// Analiza el archivo (con todas las tallas nombradas adentro -- una forma
+// por talla en SVG, una capa por talla en DXF) y trata de matchear cada una
+// contra una talla conocida (S/M/L/...). Lo que no matchea queda para que
+// el usuario lo asigne a mano. `formato` decide qué motor de importación se
+// usa; nunca se adivina por el contenido del archivo.
 router.post('/piezas/analizar-multitalla', async (req, res) => {
-  const { svgTexto } = req.body;
-  if (!svgTexto) return res.status(400).json({ error: 'Falta svgTexto' });
+  const { texto, formato } = req.body;
+  if (!texto || !formato) return res.status(400).json({ error: 'Faltan texto o formato' });
+  if (formato !== 'svg' && formato !== 'dxf') {
+    return res.status(400).json({ error: 'Formato no soportado: ' + formato });
+  }
   try {
-    const resultado = await analizarPiezaMultiTalla(svgTexto);
+    const resultado =
+      formato === 'dxf' ? await analizarPiezaMultiTallaDxf(texto) : await analizarPiezaMultiTalla(texto);
     res.json(resultado);
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -87,16 +94,13 @@ router.post('/piezas/analizar-multitalla', async (req, res) => {
 // No guarda nada todavía — el frontend arma la Pieza final con esto y llama
 // a POST /piezas.
 router.post('/piezas/resolver-multitalla', async (req, res) => {
-  const { svgTexto, asignaciones, mmPorUnidad, anchoConocidoCm, indiceReferencia } = req.body;
-  if (!svgTexto || !asignaciones || Object.keys(asignaciones).length === 0) {
-    return res.status(400).json({ error: 'Faltan svgTexto o asignaciones' });
+  const { texto, formato, asignaciones, mmPorUnidad, anchoConocidoCm, indiceReferencia } = req.body;
+  if (!texto || !formato || !asignaciones || Object.keys(asignaciones).length === 0) {
+    return res.status(400).json({ error: 'Faltan texto, formato o asignaciones' });
   }
   try {
-    const resultado = await resolverGeometriasPorTalla(svgTexto, asignaciones, {
-      mmPorUnidad,
-      anchoConocidoCm,
-      indiceReferencia,
-    });
+    const resolver = formato === 'dxf' ? resolverGeometriasPorTallaDxf : resolverGeometriasPorTalla;
+    const resultado = await resolver(texto, asignaciones, { mmPorUnidad, anchoConocidoCm, indiceReferencia });
     res.json(resultado);
   } catch (error) {
     res.status(400).json({ error: error.message });

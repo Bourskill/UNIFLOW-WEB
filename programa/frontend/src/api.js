@@ -38,18 +38,19 @@ export function listarPiezas() {
   return pedirJson('/piezas');
 }
 
-// Un solo archivo con todas las tallas de la pieza adentro (nombradas
-// "S", "M", "L"...) — analizarPieza intenta matchear cada forma contra una
-// talla conocida; resolverPieza calcula la geometría real ya con el mapeo
-// confirmado (automático + correcciones a mano).
-export function analizarPieza(svgTexto) {
-  return pedirJson('/piezas/analizar-multitalla', { method: 'POST', body: JSON.stringify({ svgTexto }) });
+// Un solo archivo (.svg o .dxf) con todas las tallas de la pieza adentro
+// (cada forma/capa nombrada "S", "M", "L"...) — analizarPieza intenta
+// matchear cada una contra una talla conocida; resolverPieza calcula la
+// geometría real ya con el mapeo confirmado (automático + correcciones a
+// mano). `formato` decide qué motor usa el backend, nunca se adivina.
+export function analizarPieza(texto, formato) {
+  return pedirJson('/piezas/analizar-multitalla', { method: 'POST', body: JSON.stringify({ texto, formato }) });
 }
 
-export function resolverPieza(svgTexto, asignaciones, { mmPorUnidad, anchoConocidoCm, indiceReferencia } = {}) {
+export function resolverPieza(texto, formato, asignaciones, { mmPorUnidad, anchoConocidoCm, indiceReferencia } = {}) {
   return pedirJson('/piezas/resolver-multitalla', {
     method: 'POST',
-    body: JSON.stringify({ svgTexto, asignaciones, mmPorUnidad, anchoConocidoCm, indiceReferencia }),
+    body: JSON.stringify({ texto, formato, asignaciones, mmPorUnidad, anchoConocidoCm, indiceReferencia }),
   });
 }
 

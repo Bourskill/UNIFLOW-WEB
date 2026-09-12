@@ -13,12 +13,23 @@ function leerArchivoComoTexto(archivo) {
   });
 }
 
-// Un solo archivo con todas las tallas de la pieza adentro (cada una
-// nombrada: "S", "M", "L"...) — se analiza, se matchea cada forma contra una
-// talla conocida, y lo que no matchea se asigna a mano. Nunca se adivina.
+function formatoDeArchivo(archivo) {
+  const nombre = (archivo.name || '').toLowerCase();
+  if (nombre.endsWith('.dxf')) return 'dxf';
+  if (nombre.endsWith('.svg')) return 'svg';
+  return null;
+}
+
+// Un solo archivo (.svg o .dxf) con todas las tallas de la pieza adentro
+// (cada forma/capa nombrada: "S", "M", "L"...) — se analiza, se matchea cada
+// una contra una talla conocida, y lo que no matchea se asigna a mano. Nunca
+// se adivina. DXF es preferible cuando importa la medida exacta: trae su
+// propia unidad real (mm/cm/in) en la cabecera del archivo, en vez de
+// depender de que el SVG haya declarado un ancho físico.
 function ZonaSubidaPieza({ onGeometriaLista }) {
   const [estado, setEstado] = useState('vacio'); // vacio | analizando | revisando | resuelto | error
-  const [svgTexto, setSvgTexto] = useState(null);
+  const [archivoTexto, setArchivoTexto] = useState(null);
+  const [formato, setFormato] = useState(null);
   const [analisis, setAnalisis] = useState(null);
   const [asignacionesManual, setAsignacionesManual] = useState({});
   const [tallaNueva, setTallaNueva] = useState('');
@@ -31,6 +42,12 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
   const onDrop = useCallback(async (archivos) => {
     const archivo = archivos[0];
     if (!archivo) return;
+    const formatoDetectado = formatoDeArchivo(archivo);
+    if (!formatoDetectado) {
+      setError('Solo se acepta .svg o .dxf.');
+      setEstado('error');
+      return;
+    }
     setEstado('analizando');
     setError(null);
     setGeometrias(null);
@@ -38,8 +55,9 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
     onGeometriaLista(null);
     try {
       const texto = await leerArchivoComoTexto(archivo);
-      setSvgTexto(texto);
-      const r = await analizarPieza(texto);
+      setArchivoTexto(texto);
+      setFormato(formatoDetectado);
+      const r = await analizarPieza(texto, formatoDetectado);
       setAnalisis(r);
       setEstado('revisando');
     } catch (e) {
@@ -51,7 +69,7 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'image/svg+xml': ['.svg'] },
+    accept: { 'image/svg+xml': ['.svg'], 'application/dxf': ['.dxf'], 'image/vnd.dxf': ['.dxf'] },
     multiple: false,
   });
 
@@ -88,11 +106,11 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
       const opciones = necesitaEscala
         ? { anchoConocidoCm: Number(anchoConocidoCm), indiceReferencia: Number(indiceReferencia) }
         : { mmPorUnidad: analisis.mmPorUnidad };
-      const r = await resolverPieza(svgTexto, mapaFinal, opciones);
+      const r = await resolverPieza(archivoTexto, formato, mapaFinal, opciones);
       const geometriaPorTalla = Object.fromEntries(
         Object.entries(r.geometriasPorTalla).map(([talla, geo]) => [
           talla,
-          { ...geo, svgOriginal: svgTexto, validadoPorUsuario: true },
+          { ...geo, archivoOriginal: archivoTexto, formatoOriginal: formato, validadoPorUsuario: true },
         ])
       );
       setGeometrias(geometriaPorTalla);
@@ -114,8 +132,9 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
           }
         >
           <input {...getInputProps()} />
-          Arrastrá acá el archivo .svg con <strong>todas las tallas de esta pieza juntas</strong>,
-          cada una nombrada (ej. "S", "M", "L", "XL").
+          Arrastrá acá el archivo <strong>.svg o .dxf</strong> con{' '}
+          <strong>todas las tallas de esta pieza juntas</strong>, cada una nombrada (ej. "S", "M",
+          "L", "XL") — en DXF, una capa por talla.
         </div>
       )}
 
