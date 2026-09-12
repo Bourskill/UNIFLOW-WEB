@@ -10,6 +10,7 @@ import {
 } from '../api.js';
 import { TALLAS } from '../constantes.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
+import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso } from '../componentes/ui.jsx';
 
 function lineaVacia(productoId) {
   return { id: crypto.randomUUID(), productoId, talla: TALLAS[2], nombre: '', numero: '', piezasExcluidas: [] };
@@ -114,119 +115,149 @@ export function Pedidos({ recargarSenal }) {
   }
 
   return (
-    <div className="pagina">
-      <h2>Pedidos</h2>
-      <p className="ayuda">
-        Un pedido real es talla + nombre + número por prenda — es lo que hace falta para
-        personalizar de verdad, no solo cantidad por talla.
-      </p>
+    <div className="pagina flex flex-col gap-6">
+      <div>
+        <h2 className="text-lg font-semibold">Pedidos</h2>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+          Un pedido real es talla + nombre + número por prenda — es lo que hace falta para
+          personalizar de verdad, no solo cantidad por talla.
+        </p>
+      </div>
 
       {productos.length === 0 ? (
-        <p>Creá primero un producto (en la pestaña "Productos").</p>
+        <p className="text-sm text-muted-foreground">Creá primero un producto (en la pestaña "Productos").</p>
       ) : (
-        <form className="tarjeta" onSubmit={guardar}>
-          <label>
-            Cliente / equipo
-            <input value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Club Atlético X" />
-          </label>
+        <Tarjeta as="form" onSubmit={guardar} className="flex max-w-2xl flex-col gap-4">
+          <Campo etiqueta="Cliente / equipo">
+            <Input value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Club Atlético X" />
+          </Campo>
 
-          <h4>Prendas del pedido</h4>
-          {lineas.map((linea) => {
-            const roles = rolesDelProducto(linea.productoId);
-            return (
-              <div className="bloque-linea-pedido" key={linea.id}>
-                <div className="fila-linea">
-                  <select
-                    value={linea.productoId}
-                    onChange={(e) => actualizarLinea(linea.id, { productoId: e.target.value, piezasExcluidas: [] })}
-                  >
-                    {productos.map((p) => (
-                      <option key={p.id} value={p.id}>{p.nombre}</option>
-                    ))}
-                  </select>
-                  <select value={linea.talla} onChange={(e) => actualizarLinea(linea.id, { talla: e.target.value })}>
-                    {TALLAS.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <input
-                    placeholder="Nombre"
-                    value={linea.nombre}
-                    onChange={(e) => actualizarLinea(linea.id, { nombre: e.target.value.toUpperCase() })}
-                  />
-                  <input
-                    placeholder="N°"
-                    value={linea.numero}
-                    onChange={(e) => actualizarLinea(linea.id, { numero: e.target.value })}
-                  />
-                  <button type="button" onClick={() => quitarLinea(linea.id)}>Quitar</button>
-                </div>
+          <div>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground">
+              Prendas del pedido
+            </h3>
+            <div className="flex flex-col gap-2">
+              {lineas.map((linea) => {
+                const roles = rolesDelProducto(linea.productoId);
+                return (
+                  <div key={linea.id} className="rounded-lg border border-border bg-surface-muted p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Select
+                        className="max-w-[160px]"
+                        value={linea.productoId}
+                        onChange={(e) => actualizarLinea(linea.id, { productoId: e.target.value, piezasExcluidas: [] })}
+                      >
+                        {productos.map((p) => (
+                          <option key={p.id} value={p.id}>{p.nombre}</option>
+                        ))}
+                      </Select>
+                      <Select
+                        className="max-w-[80px]"
+                        value={linea.talla}
+                        onChange={(e) => actualizarLinea(linea.id, { talla: e.target.value })}
+                      >
+                        {TALLAS.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </Select>
+                      <Input
+                        className="max-w-[140px]"
+                        placeholder="Nombre"
+                        value={linea.nombre}
+                        onChange={(e) => actualizarLinea(linea.id, { nombre: e.target.value.toUpperCase() })}
+                      />
+                      <Input
+                        className="max-w-[70px]"
+                        placeholder="N°"
+                        value={linea.numero}
+                        onChange={(e) => actualizarLinea(linea.id, { numero: e.target.value })}
+                      />
+                      <Boton variante="fantasma" tamano="sm" type="button" onClick={() => quitarLinea(linea.id)}>
+                        Quitar
+                      </Boton>
+                    </div>
 
-                {roles.length > 0 && (
-                  <div className="fila-excluir-piezas">
-                    <span className="etiqueta-excluir">Excluir piezas de esta prenda puntual:</span>
-                    {roles.map((rol) => (
-                      <label key={rol} className="chip-excluir">
-                        <input
-                          type="checkbox"
-                          checked={linea.piezasExcluidas.includes(rol)}
-                          onChange={() => alternarPiezaExcluida(linea.id, rol)}
-                        />
-                        {rol}
-                      </label>
-                    ))}
+                    {roles.length > 0 && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border pt-2">
+                        <span className="text-xs text-faint-foreground">Excluir piezas de esta prenda puntual:</span>
+                        {roles.map((rol) => {
+                          const activo = linea.piezasExcluidas.includes(rol);
+                          return (
+                            <label key={rol} className="cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="peer sr-only"
+                                checked={activo}
+                                onChange={() => alternarPiezaExcluida(linea.id, rol)}
+                              />
+                              <Chip tono={activo ? 'peligro' : 'neutro'}>{rol}</Chip>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            );
-          })}
-
-          <div className="acciones">
-            <button type="button" onClick={agregarLinea}>+ Agregar prenda</button>
-            <button type="submit" className="primario">Guardar pedido</button>
+                );
+              })}
+            </div>
           </div>
-          {error && <p className="error">{error}</p>}
-        </form>
+
+          <div className="flex gap-2">
+            <Boton type="button" onClick={agregarLinea}>+ Agregar prenda</Boton>
+            <Boton variante="primario" type="submit">Guardar pedido</Boton>
+          </div>
+          {error && <Aviso tono="error">{error}</Aviso>}
+        </Tarjeta>
       )}
 
-      <h3>Pedidos cargados</h3>
-      {pedidos.length === 0 ? (
-        <p>Todavía no hay ninguno.</p>
-      ) : (
-        <ul className="lista-molderias">
-          {pedidos.map((p) => (
-            <li key={p.id}>
-              <strong>{p.cliente}</strong> — {p.lineas.length} prenda(s):{' '}
-              {p.lineas.map((l) =>
-                l.talla + ' ' + l.nombre + '/' + l.numero + (l.piezasExcluidas?.length ? ' (sin ' + l.piezasExcluidas.join(', ') + ')' : '')
-              ).join(', ')}
-              <button type="button" onClick={() => { setPedidoParaGenerar(p.id); setResultado(null); }}>
-                Generar
-              </button>
-              <button type="button" onClick={() => borrar(p.id)}>Eliminar</button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground">
+          Pedidos cargados
+        </h3>
+        {pedidos.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Todavía no hay ninguno.</p>
+        ) : (
+          <div className="flex max-w-2xl flex-col gap-2">
+            {pedidos.map((p) => (
+              <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
+                <div className="flex-1">
+                  <span className="font-medium">{p.cliente}</span>{' '}
+                  <span className="text-muted-foreground">
+                    — {p.lineas.length} prenda(s):{' '}
+                    {p.lineas.map((l) =>
+                      l.talla + ' ' + l.nombre + '/' + l.numero + (l.piezasExcluidas?.length ? ' (sin ' + l.piezasExcluidas.join(', ') + ')' : '')
+                    ).join(', ')}
+                  </span>
+                </div>
+                <Boton variante="secundario" tamano="sm" onClick={() => { setPedidoParaGenerar(p.id); setResultado(null); }}>
+                  Generar
+                </Boton>
+                <Boton variante="fantasma" tamano="sm" onClick={() => borrar(p.id)}>Eliminar</Boton>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {pedidoParaGenerar && (
-        <div className="tarjeta">
-          <h4>Generar: {pedidos.find((p) => p.id === pedidoParaGenerar)?.cliente}</h4>
-          <label>
-            Ancho del lienzo/rollo (cm)
-            <input type="number" value={anchoLienzoCm} onChange={(e) => setAnchoLienzoCm(e.target.value)} />
-          </label>
-          <div className="acciones">
-            <button type="button" className="primario" onClick={anidar} disabled={cargando}>
+        <Tarjeta className="flex max-w-2xl flex-col gap-3">
+          <h4 className="text-sm font-semibold">
+            Generar: {pedidos.find((p) => p.id === pedidoParaGenerar)?.cliente}
+          </h4>
+          <Campo etiqueta="Ancho del lienzo/rollo (cm)" className="max-w-[160px]">
+            <Input type="number" value={anchoLienzoCm} onChange={(e) => setAnchoLienzoCm(e.target.value)} />
+          </Campo>
+          <div className="flex gap-2">
+            <Boton variante="primario" onClick={anidar} disabled={cargando}>
               {cargando ? 'Anidando…' : 'Anidar'}
-            </button>
-            <button type="button" onClick={descargarPdf} disabled={!resultado}>Generar PDF</button>
+            </Boton>
+            <Boton onClick={descargarPdf} disabled={!resultado}>Generar PDF</Boton>
           </div>
-          {errorGenerar && <p className="error">{errorGenerar}</p>}
+          {errorGenerar && <Aviso tono="error">{errorGenerar}</Aviso>}
           {resultado && (
-            <p className="metricas">
+            <p className="text-sm text-muted-foreground">
               Lienzo {resultado.anchoLienzoCm}×{resultado.altoLienzoCm} cm · utilización {resultado.utilizacion}%
             </p>
           )}
-        </div>
+        </Tarjeta>
       )}
 
       {resultado && <VistaPreviaNesting resultado={resultado} />}

@@ -24,7 +24,7 @@ export function VistaPreviaNesting({ resultado }) {
   const alto = resultado.altoLienzoCm * PX_POR_CM;
 
   return (
-    <Stage width={ancho} height={alto} className="lienzo-nesting">
+    <Stage width={ancho} height={alto} className="rounded-lg border border-border">
       <Layer>
         <Rect x={0} y={0} width={ancho} height={alto} fill="#f5f5f0" stroke="#999" />
         {resultado.piezas.map((pieza) => (

@@ -10,11 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "konva": "^10.5.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-dropzone": "^20.1.1",
-    "react-konva": "^19.2.7"
+    "react-konva": "^19.2.7",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",

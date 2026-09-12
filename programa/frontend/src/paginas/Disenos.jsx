@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { listarGrupos, listarDisenos, crearDiseno, eliminarDiseno } from '../api.js';
+import { Boton, Campo, Input, Select, Tarjeta, Aviso } from '../componentes/ui.jsx';
 
 function archivoADataUrl(archivo) {
   return new Promise((resolve, reject) => {
@@ -26,14 +27,19 @@ function SlotImagenPieza({ rol, dataUrl, onElegir }) {
   });
 
   return (
-    <label>
-      Imagen para "{rol}"
-      <div {...getRootProps()} className={'zona-dropzone' + (isDragActive ? ' activa' : '')}>
+    <Campo etiqueta={'Imagen para "' + rol + '"'}>
+      <div
+        {...getRootProps()}
+        className={
+          'cursor-pointer rounded-lg border-2 border-dashed px-4 py-4 text-center text-sm ' +
+          (isDragActive ? 'border-primary bg-primary-soft text-primary' : 'border-border text-faint-foreground')
+        }
+      >
         <input {...getInputProps()} />
-        <span>Arrastrar o elegir archivo</span>
+        Arrastrar o elegir archivo
       </div>
-      {dataUrl && <img className="miniatura" src={dataUrl} alt={rol} />}
-    </label>
+      {dataUrl && <img className="mt-2 max-h-24 max-w-24 rounded-md border border-border" src={dataUrl} alt={rol} />}
+    </Campo>
   );
 }
 
@@ -88,30 +94,32 @@ export function Disenos({ recargarSenal, onCambio }) {
   }
 
   return (
-    <div className="pagina">
-      <h2>Diseños</h2>
-      <p className="ayuda">
-        El arte real de cada pieza — sin esto, el nesting solo puede mostrar un rectángulo con el
-        nombre de la pieza, no la prenda de verdad.
-      </p>
+    <div className="pagina flex flex-col gap-6">
+      <div>
+        <h2 className="text-lg font-semibold">Diseños</h2>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+          El arte real de cada pieza — sin esto, el nesting solo puede mostrar un rectángulo con el
+          nombre de la pieza, no la prenda de verdad.
+        </p>
+      </div>
 
       {grupos.length === 0 ? (
-        <p>Creá primero un grupo (pestaña "Grupos") para poder subirle un diseño.</p>
+        <p className="text-sm text-muted-foreground">
+          Creá primero un grupo (pestaña "Grupos") para poder subirle un diseño.
+        </p>
       ) : (
-        <form className="tarjeta" onSubmit={guardar}>
-          <label>
-            Nombre del diseño
-            <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Kit titular 2026" />
-          </label>
+        <Tarjeta as="form" onSubmit={guardar} className="flex max-w-2xl flex-col gap-4">
+          <Campo etiqueta="Nombre del diseño">
+            <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Kit titular 2026" />
+          </Campo>
 
-          <label>
-            Grupo
-            <select value={grupoId} onChange={(e) => { setGrupoId(e.target.value); setImagenesPorPieza({}); }}>
+          <Campo etiqueta="Grupo">
+            <Select value={grupoId} onChange={(e) => { setGrupoId(e.target.value); setImagenesPorPieza({}); }}>
               {grupos.map((g) => (
                 <option key={g.id} value={g.id}>{g.nombre}</option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Campo>
 
           {grupoSeleccionado?.piezas.map((gp) => (
             <SlotImagenPieza
@@ -122,27 +130,35 @@ export function Disenos({ recargarSenal, onCambio }) {
             />
           ))}
 
-          <div className="acciones">
-            <button type="submit" className="primario">Guardar diseño</button>
+          <div>
+            <Boton variante="primario" type="submit">Guardar diseño</Boton>
           </div>
-          {error && <p className="error">{error}</p>}
-        </form>
+          {error && <Aviso tono="error">{error}</Aviso>}
+        </Tarjeta>
       )}
 
-      <h3>Diseños cargados</h3>
-      {disenos.length === 0 ? (
-        <p>Todavía no hay ninguno.</p>
-      ) : (
-        <ul className="lista-molderias">
-          {disenos.map((d) => (
-            <li key={d.id}>
-              <strong>{d.nombre}</strong> —{' '}
-              {grupos.find((g) => g.id === d.grupoId)?.nombre || 'grupo eliminado'}
-              <button type="button" onClick={() => borrar(d.id)}>Eliminar</button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground">
+          Diseños cargados
+        </h3>
+        {disenos.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Todavía no hay ninguno.</p>
+        ) : (
+          <div className="flex max-w-2xl flex-col gap-2">
+            {disenos.map((d) => (
+              <div key={d.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
+                <div className="flex-1">
+                  <span className="font-medium">{d.nombre}</span>{' '}
+                  <span className="text-muted-foreground">
+                    — {grupos.find((g) => g.id === d.grupoId)?.nombre || 'grupo eliminado'}
+                  </span>
+                </div>
+                <Boton variante="fantasma" tamano="sm" onClick={() => borrar(d.id)}>Eliminar</Boton>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

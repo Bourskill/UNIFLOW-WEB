@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listarGrupos, listarDisenos, listarProductos, crearProducto, eliminarProducto } from '../api.js';
 import { TALLAS } from '../constantes.js';
+import { Boton, Campo, Input, Select, Tarjeta, Aviso } from '../componentes/ui.jsx';
 
 function elementoVacio(piezaNombre) {
   return {
@@ -80,136 +81,158 @@ export function Productos({ recargarSenal, onCambio }) {
   }
 
   return (
-    <div className="pagina">
-      <h2>Productos</h2>
-      <p className="ayuda">
-        Une un grupo (piezas reales) con un diseño y define dónde va cada nombre/número — el
-        equivalente a "Elementos" en la referencia que usamos.
-      </p>
+    <div className="pagina flex flex-col gap-6">
+      <div>
+        <h2 className="text-lg font-semibold">Productos</h2>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+          Une un grupo (piezas reales) con un diseño y define dónde va cada nombre/número — el
+          equivalente a "Elementos" en la referencia que usamos.
+        </p>
+      </div>
 
       {grupos.length === 0 ? (
-        <p>Creá primero un grupo (pestaña "Grupos").</p>
+        <p className="text-sm text-muted-foreground">Creá primero un grupo (pestaña "Grupos").</p>
       ) : (
-        <form className="tarjeta" onSubmit={guardar}>
-          <label>
-            Nombre del producto
-            <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Camiseta titular" />
-          </label>
+        <Tarjeta as="form" onSubmit={guardar} className="flex max-w-2xl flex-col gap-4">
+          <Campo etiqueta="Nombre del producto">
+            <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Camiseta titular" />
+          </Campo>
 
-          <label>
-            Grupo
-            <select value={grupoId} onChange={(e) => { setGrupoId(e.target.value); setElementos([]); setDisenoId(''); }}>
+          <Campo etiqueta="Grupo">
+            <Select value={grupoId} onChange={(e) => { setGrupoId(e.target.value); setElementos([]); setDisenoId(''); }}>
               {grupos.map((g) => (
                 <option key={g.id} value={g.id}>{g.nombre}</option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Campo>
 
-          <label>
-            Diseño (opcional — sin diseño, la pieza sale en blanco)
-            <select value={disenoId} onChange={(e) => setDisenoId(e.target.value)}>
+          <Campo etiqueta="Diseño (opcional — sin diseño, la pieza sale en blanco)">
+            <Select value={disenoId} onChange={(e) => setDisenoId(e.target.value)}>
               <option value="">— Sin diseño —</option>
               {disenosDeEsteGrupo.map((d) => (
                 <option key={d.id} value={d.id}>{d.nombre}</option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Campo>
 
-          <h4>Elementos (nombre, número, texto por pieza)</h4>
-          {grupoSeleccionado?.piezas.map((gp) => (
-            <div className="fila-pieza" key={gp.rol}>
-              <div className="fila-pieza-cabecera">
-                <strong>{gp.rol}</strong>
-                <button type="button" onClick={() => agregarElemento(gp.rol)}>
-                  + Agregar elemento en esta pieza
-                </button>
-              </div>
+          <div>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground">
+              Elementos (nombre, número, texto por pieza)
+            </h3>
+            <div className="flex flex-col gap-3">
+              {grupoSeleccionado?.piezas.map((gp) => (
+                <div key={gp.rol} className="rounded-lg border border-border bg-surface-muted p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <strong className="text-sm">{gp.rol}</strong>
+                    <Boton variante="fantasma" tamano="sm" type="button" onClick={() => agregarElemento(gp.rol)}>
+                      + Agregar elemento
+                    </Boton>
+                  </div>
 
-              {elementos.filter((el) => el.piezaNombre === gp.rol).map((elemento) => (
-                <div className="fila-elemento" key={elemento.id}>
-                  <select
-                    value={elemento.tipo}
-                    onChange={(e) => actualizarElemento(elemento.id, { tipo: e.target.value })}
-                  >
-                    <option value="nombre">Nombre del jugador</option>
-                    <option value="numero">Número</option>
-                    <option value="texto">Texto fijo</option>
-                  </select>
+                  <div className="flex flex-col gap-2">
+                    {elementos.filter((el) => el.piezaNombre === gp.rol).map((elemento) => (
+                      <div key={elemento.id} className="flex flex-wrap items-center gap-2 rounded-md bg-surface p-2">
+                        <Select
+                          className="max-w-[160px]"
+                          value={elemento.tipo}
+                          onChange={(e) => actualizarElemento(elemento.id, { tipo: e.target.value })}
+                        >
+                          <option value="nombre">Nombre del jugador</option>
+                          <option value="numero">Número</option>
+                          <option value="texto">Texto fijo</option>
+                        </Select>
 
-                  {elemento.tipo === 'texto' && (
-                    <input
-                      placeholder="Texto fijo"
-                      value={elemento.valorFijo || ''}
-                      onChange={(e) => actualizarElemento(elemento.id, { valorFijo: e.target.value })}
-                    />
-                  )}
+                        {elemento.tipo === 'texto' && (
+                          <Input
+                            className="max-w-[120px]"
+                            placeholder="Texto fijo"
+                            value={elemento.valorFijo || ''}
+                            onChange={(e) => actualizarElemento(elemento.id, { valorFijo: e.target.value })}
+                          />
+                        )}
 
-                  <span>X</span>
-                  <input
-                    type="number"
-                    value={elemento.posicion.xCm}
-                    onChange={(e) =>
-                      actualizarElemento(elemento.id, { posicion: { ...elemento.posicion, xCm: Number(e.target.value) } })
-                    }
-                  />
-                  <span>Y</span>
-                  <input
-                    type="number"
-                    value={elemento.posicion.yCm}
-                    onChange={(e) =>
-                      actualizarElemento(elemento.id, { posicion: { ...elemento.posicion, yCm: Number(e.target.value) } })
-                    }
-                  />
-                  <span>Alto letra (cm) en talla</span>
-                  <input
-                    type="number"
-                    step="0.5"
-                    title="Alto de la letra, medido a la talla de referencia elegida al lado"
-                    value={elemento.referenciaProporcional.altoCm}
-                    onChange={(e) =>
-                      actualizarElemento(elemento.id, {
-                        referenciaProporcional: { altoCm: Number(e.target.value) },
-                      })
-                    }
-                  />
-                  <select
-                    value={elemento.tallaReferencia}
-                    title="A esta talla corresponde el alto de letra de al lado; en otras tallas se escala en la misma proporción que crece la pieza"
-                    onChange={(e) => actualizarElemento(elemento.id, { tallaReferencia: e.target.value })}
-                  >
-                    {TALLAS.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <input
-                    type="color"
-                    value={elemento.colorHex}
-                    onChange={(e) => actualizarElemento(elemento.id, { colorHex: e.target.value })}
-                  />
-                  <button type="button" onClick={() => quitarElemento(elemento.id)}>Quitar</button>
+                        <span className="text-xs text-faint-foreground">X</span>
+                        <Input
+                          className="w-16"
+                          type="number"
+                          value={elemento.posicion.xCm}
+                          onChange={(e) =>
+                            actualizarElemento(elemento.id, { posicion: { ...elemento.posicion, xCm: Number(e.target.value) } })
+                          }
+                        />
+                        <span className="text-xs text-faint-foreground">Y</span>
+                        <Input
+                          className="w-16"
+                          type="number"
+                          value={elemento.posicion.yCm}
+                          onChange={(e) =>
+                            actualizarElemento(elemento.id, { posicion: { ...elemento.posicion, yCm: Number(e.target.value) } })
+                          }
+                        />
+                        <span className="text-xs text-faint-foreground" title="Alto de la letra, medido a la talla de referencia elegida al lado">
+                          Alto letra
+                        </span>
+                        <Input
+                          className="w-16"
+                          type="number"
+                          step="0.5"
+                          value={elemento.referenciaProporcional.altoCm}
+                          onChange={(e) =>
+                            actualizarElemento(elemento.id, { referenciaProporcional: { altoCm: Number(e.target.value) } })
+                          }
+                        />
+                        <Select
+                          className="max-w-[90px]"
+                          value={elemento.tallaReferencia}
+                          title="A esta talla corresponde el alto de letra; en otras tallas escala junto con la pieza"
+                          onChange={(e) => actualizarElemento(elemento.id, { tallaReferencia: e.target.value })}
+                        >
+                          {TALLAS.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </Select>
+                        <input
+                          type="color"
+                          className="h-8 w-8 rounded border border-border"
+                          value={elemento.colorHex}
+                          onChange={(e) => actualizarElemento(elemento.id, { colorHex: e.target.value })}
+                        />
+                        <Boton variante="fantasma" tamano="sm" type="button" onClick={() => quitarElemento(elemento.id)}>
+                          Quitar
+                        </Boton>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
-          ))}
-
-          <div className="acciones">
-            <button type="submit" className="primario">Guardar producto</button>
           </div>
-          {error && <p className="error">{error}</p>}
-        </form>
+
+          <div>
+            <Boton variante="primario" type="submit">Guardar producto</Boton>
+          </div>
+          {error && <Aviso tono="error">{error}</Aviso>}
+        </Tarjeta>
       )}
 
-      <h3>Productos cargados</h3>
-      {productos.length === 0 ? (
-        <p>Todavía no hay ninguno.</p>
-      ) : (
-        <ul className="lista-molderias">
-          {productos.map((p) => (
-            <li key={p.id}>
-              <strong>{p.nombre}</strong> — {p.elementos?.length || 0} elemento(s)
-              <button type="button" onClick={() => borrar(p.id)}>Eliminar</button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground">
+          Productos cargados
+        </h3>
+        {productos.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Todavía no hay ninguno.</p>
+        ) : (
+          <div className="flex max-w-2xl flex-col gap-2">
+            {productos.map((p) => (
+              <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
+                <div className="flex-1">
+                  <span className="font-medium">{p.nombre}</span>{' '}
+                  <span className="text-muted-foreground">— {p.elementos?.length || 0} elemento(s)</span>
+                </div>
+                <Boton variante="fantasma" tamano="sm" onClick={() => borrar(p.id)}>Eliminar</Boton>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

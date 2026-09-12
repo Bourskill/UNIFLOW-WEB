@@ -1,41 +1,29 @@
-/* Tema fijo oscuro, inspirado en el chrome de los paneles CEP de Illustrator
-   (fondo neutro grafito, acento azul de selección de Adobe) — no sigue el
-   tema del sistema a propósito: un panel de producción se ve igual siempre,
-   como se veía UNIFLOW dentro de Illustrator. */
-:root {
-  --c-bg-app: #323232;
-  --c-bg-panel: #262626;
-  --c-bg-surface: #3a3a3a;
-  --c-bg-surface-hover: #444444;
-  --c-bg-field: #1e1e1e;
-  --c-border: #4a4a4a;
-  --c-border-strong: #1a1a1a;
-  --c-text: #e3e3e3;
-  --c-text-muted: #9a9a9a;
-  --c-text-faint: #6e6e6e;
-  --c-accent: #2f9bff;
-  --c-accent-soft: rgba(47, 155, 255, 0.16);
-  --c-danger: #ff6b5e;
+@import "tailwindcss";
 
-  --sans: 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+/* Tema claro, espacioso — reemplaza el CSS a mano anterior. Tokens al estilo
+   shadcn/ui (variables + @theme de Tailwind) para no repetir valores sueltos
+   en cada componente. */
+@theme {
+  --color-background: #f8f9fb;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f1f3f6;
+  --color-border: #e2e6ec;
+  --color-foreground: #1a1f2b;
+  --color-muted-foreground: #647087;
+  --color-faint-foreground: #94a1b8;
+  --color-primary: #2563eb;
+  --color-primary-foreground: #ffffff;
+  --color-primary-soft: #eaf0fe;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fdecec;
 
-  color-scheme: dark;
-  font: 13px/1.5 var(--sans);
-  color: var(--c-text);
-  background: var(--c-bg-app);
-  font-synthesis: none;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 }
 
 body {
-  margin: 0;
-}
-
-h1, h2, h3, h4, p {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
   margin: 0;
 }
