@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { listarMolderias, listarDisenos, crearDiseno, eliminarDiseno } from '../api.js';
+import { useCallback, useEffect, useState } from 'react';
+import { useDropzone } from 'react-dropzone';
+import { listarGrupos, listarDisenos, crearDiseno, eliminarDiseno } from '../api.js';
 
 function archivoADataUrl(archivo) {
   return new Promise((resolve, reject) => {
@@ -10,19 +11,45 @@ function archivoADataUrl(archivo) {
   });
 }
 
+function SlotImagenPieza({ rol, dataUrl, onElegir }) {
+  const onDrop = useCallback(
+    async (archivos) => {
+      const archivo = archivos[0];
+      if (archivo) onElegir(rol, await archivoADataUrl(archivo));
+    },
+    [rol, onElegir]
+  );
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: { 'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg'] },
+    multiple: false,
+  });
+
+  return (
+    <label>
+      Imagen para "{rol}"
+      <div {...getRootProps()} className={'zona-dropzone' + (isDragActive ? ' activa' : '')}>
+        <input {...getInputProps()} />
+        <span>Arrastrar o elegir archivo</span>
+      </div>
+      {dataUrl && <img className="miniatura" src={dataUrl} alt={rol} />}
+    </label>
+  );
+}
+
 export function Disenos({ recargarSenal, onCambio }) {
-  const [molderias, setMolderias] = useState([]);
+  const [grupos, setGrupos] = useState([]);
   const [disenos, setDisenos] = useState([]);
-  const [molderiaId, setMolderiaId] = useState('');
+  const [grupoId, setGrupoId] = useState('');
   const [nombre, setNombre] = useState('');
   const [imagenesPorPieza, setImagenesPorPieza] = useState({});
   const [error, setError] = useState(null);
 
   async function recargar() {
-    const [ms, ds] = await Promise.all([listarMolderias(), listarDisenos()]);
-    setMolderias(ms);
+    const [gs, ds] = await Promise.all([listarGrupos(), listarDisenos()]);
+    setGrupos(gs);
     setDisenos(ds);
-    if (ms.length > 0 && !molderiaId) setMolderiaId(ms[0].id);
+    if (gs.length > 0 && !grupoId) setGrupoId(gs[0].id);
   }
 
   useEffect(() => {
@@ -30,23 +57,21 @@ export function Disenos({ recargarSenal, onCambio }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recargarSenal]);
 
-  const molderiaSeleccionada = molderias.find((m) => m.id === molderiaId);
+  const grupoSeleccionado = grupos.find((g) => g.id === grupoId);
 
-  async function elegirImagen(piezaNombre, archivo) {
-    if (!archivo) return;
-    const dataUrl = await archivoADataUrl(archivo);
-    setImagenesPorPieza((prev) => ({ ...prev, [piezaNombre]: dataUrl }));
+  function elegirImagen(rol, dataUrl) {
+    setImagenesPorPieza((prev) => ({ ...prev, [rol]: dataUrl }));
   }
 
   async function guardar(evento) {
     evento.preventDefault();
     setError(null);
-    if (!nombre.trim() || !molderiaId) {
-      setError('Falta el nombre del diseño o la moldería.');
+    if (!nombre.trim() || !grupoId) {
+      setError('Falta el nombre del diseño o el grupo.');
       return;
     }
     try {
-      await crearDiseno({ nombre, molderiaId, imagenesPorPieza });
+      await crearDiseno({ nombre, grupoId, imagenesPorPieza });
       setNombre('');
       setImagenesPorPieza({});
       await recargar();
@@ -70,8 +95,8 @@ export function Disenos({ recargarSenal, onCambio }) {
         nombre de la pieza, no la prenda de verdad.
       </p>
 
-      {molderias.length === 0 ? (
-        <p>Creá primero una moldería para poder subirle un diseño.</p>
+      {grupos.length === 0 ? (
+        <p>Creá primero un grupo (pestaña "Grupos") para poder subirle un diseño.</p>
       ) : (
         <form className="tarjeta" onSubmit={guardar}>
           <label>
@@ -80,26 +105,21 @@ export function Disenos({ recargarSenal, onCambio }) {
           </label>
 
           <label>
-            Moldería
-            <select value={molderiaId} onChange={(e) => { setMolderiaId(e.target.value); setImagenesPorPieza({}); }}>
-              {molderias.map((m) => (
-                <option key={m.id} value={m.id}>{m.nombre}</option>
+            Grupo
+            <select value={grupoId} onChange={(e) => { setGrupoId(e.target.value); setImagenesPorPieza({}); }}>
+              {grupos.map((g) => (
+                <option key={g.id} value={g.id}>{g.nombre}</option>
               ))}
             </select>
           </label>
 
-          {molderiaSeleccionada?.piezas.map((pieza) => (
-            <label key={pieza.nombre}>
-              Imagen para "{pieza.nombre}"
-              <input
-                type="file"
-                accept="image/png,image/jpeg"
-                onChange={(e) => elegirImagen(pieza.nombre, e.target.files[0])}
-              />
-              {imagenesPorPieza[pieza.nombre] && (
-                <img className="miniatura" src={imagenesPorPieza[pieza.nombre]} alt={pieza.nombre} />
-              )}
-            </label>
+          {grupoSeleccionado?.piezas.map((gp) => (
+            <SlotImagenPieza
+              key={gp.rol}
+              rol={gp.rol}
+              dataUrl={imagenesPorPieza[gp.rol]}
+              onElegir={elegirImagen}
+            />
           ))}
 
           <div className="acciones">
@@ -117,7 +137,7 @@ export function Disenos({ recargarSenal, onCambio }) {
           {disenos.map((d) => (
             <li key={d.id}>
               <strong>{d.nombre}</strong> —{' '}
-              {molderias.find((m) => m.id === d.molderiaId)?.nombre || 'moldería eliminada'}
+              {grupos.find((g) => g.id === d.grupoId)?.nombre || 'grupo eliminado'}
               <button type="button" onClick={() => borrar(d.id)}>Eliminar</button>
             </li>
           ))}

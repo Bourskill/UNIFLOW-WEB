@@ -20,24 +20,60 @@ async function pedirJson(ruta, opciones) {
   return respuesta.status === 204 ? null : respuesta.json();
 }
 
-export function listarMolderias() {
-  return pedirJson('/molderias');
+// --- Piezas (biblioteca) ---------------------------------------------------
+
+export function listarPiezas() {
+  return pedirJson('/piezas');
 }
 
-export function crearMolderia(molderia) {
-  return pedirJson('/molderias', { method: 'POST', body: JSON.stringify(molderia) });
+export function eliminarPieza(id) {
+  return pedirJson('/piezas/' + id, { method: 'DELETE' });
 }
 
-export function eliminarMolderia(id) {
-  return pedirJson('/molderias/' + id, { method: 'DELETE' });
+export function analizarSvg(svgTexto) {
+  return pedirJson('/piezas/analizar-svg', { method: 'POST', body: JSON.stringify({ svgTexto }) });
 }
 
-export function anidarDesdeMolderia(molderiaId, lineas, anchoLienzoCm) {
-  return pedirJson('/nesting/desde-molderia', {
+export function analizarSvgManual(svgTexto, indiceElegido, { mmPorUnidad, anchoConocidoCm } = {}) {
+  return pedirJson('/piezas/analizar-svg/manual', {
     method: 'POST',
-    body: JSON.stringify({ molderiaId, lineas, anchoLienzoCm }),
+    body: JSON.stringify({ svgTexto, indiceElegido, mmPorUnidad, anchoConocidoCm }),
   });
 }
+
+export function crearPieza(pieza) {
+  return pedirJson('/piezas', { method: 'POST', body: JSON.stringify(pieza) });
+}
+
+export function agregarTallaAPieza(piezaId, talla, geometria) {
+  return pedirJson('/piezas/' + piezaId + '/tallas/' + talla, {
+    method: 'PUT',
+    body: JSON.stringify(geometria),
+  });
+}
+
+// --- Grupos (prendas: piezas de biblioteca por rol) ------------------------
+
+export function listarGrupos() {
+  return pedirJson('/grupos');
+}
+
+export function crearGrupo(grupo) {
+  return pedirJson('/grupos', { method: 'POST', body: JSON.stringify(grupo) });
+}
+
+export function eliminarGrupo(id) {
+  return pedirJson('/grupos/' + id, { method: 'DELETE' });
+}
+
+export function anidarDesdeGrupo(grupoId, lineas, anchoLienzoCm) {
+  return pedirJson('/nesting/desde-grupo', {
+    method: 'POST',
+    body: JSON.stringify({ grupoId, lineas, anchoLienzoCm }),
+  });
+}
+
+// --- Diseños ----------------------------------------------------------------
 
 export function listarDisenos() {
   return pedirJson('/disenos');
@@ -51,6 +87,8 @@ export function eliminarDiseno(id) {
   return pedirJson('/disenos/' + id, { method: 'DELETE' });
 }
 
+// --- Productos ---------------------------------------------------------------
+
 export function listarProductos() {
   return pedirJson('/productos');
 }
@@ -62,6 +100,8 @@ export function crearProducto(producto) {
 export function eliminarProducto(id) {
   return pedirJson('/productos/' + id, { method: 'DELETE' });
 }
+
+// --- Pedidos -------------------------------------------------------------------
 
 export function listarPedidos() {
   return pedirJson('/pedidos');

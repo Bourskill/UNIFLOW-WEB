@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   listarProductos,
+  listarGrupos,
   listarPedidos,
   crearPedido,
   eliminarPedido,
@@ -11,11 +12,12 @@ import { TALLAS } from '../constantes.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
 
 function lineaVacia(productoId) {
-  return { id: crypto.randomUUID(), productoId, talla: TALLAS[2], nombre: '', numero: '' };
+  return { id: crypto.randomUUID(), productoId, talla: TALLAS[2], nombre: '', numero: '', piezasExcluidas: [] };
 }
 
 export function Pedidos({ recargarSenal }) {
   const [productos, setProductos] = useState([]);
+  const [grupos, setGrupos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [cliente, setCliente] = useState('');
   const [lineas, setLineas] = useState([]);
@@ -28,8 +30,9 @@ export function Pedidos({ recargarSenal }) {
   const [errorGenerar, setErrorGenerar] = useState(null);
 
   async function recargar() {
-    const [ps, peds] = await Promise.all([listarProductos(), listarPedidos()]);
+    const [ps, gs, peds] = await Promise.all([listarProductos(), listarGrupos(), listarPedidos()]);
     setProductos(ps);
+    setGrupos(gs);
     setPedidos(peds);
     if (ps.length > 0 && lineas.length === 0) setLineas([lineaVacia(ps[0].id)]);
   }
@@ -43,12 +46,30 @@ export function Pedidos({ recargarSenal }) {
     setLineas((prev) => prev.map((l) => (l.id === id ? { ...l, ...cambios } : l)));
   }
 
+  function alternarPiezaExcluida(id, rol) {
+    setLineas((prev) =>
+      prev.map((l) => {
+        if (l.id !== id) return l;
+        const excluidas = l.piezasExcluidas.includes(rol)
+          ? l.piezasExcluidas.filter((r) => r !== rol)
+          : [...l.piezasExcluidas, rol];
+        return { ...l, piezasExcluidas: excluidas };
+      })
+    );
+  }
+
   function agregarLinea() {
     setLineas((prev) => [...prev, lineaVacia(productos[0]?.id)]);
   }
 
   function quitarLinea(id) {
     setLineas((prev) => prev.filter((l) => l.id !== id));
+  }
+
+  function rolesDelProducto(productoId) {
+    const producto = productos.find((p) => p.id === productoId);
+    const grupo = producto && grupos.find((g) => g.id === producto.grupoId);
+    return grupo ? grupo.piezas.map((gp) => gp.rol) : [];
   }
 
   async function guardar(evento) {
@@ -110,32 +131,53 @@ export function Pedidos({ recargarSenal }) {
           </label>
 
           <h4>Prendas del pedido</h4>
-          {lineas.map((linea) => (
-            <div className="fila-linea" key={linea.id}>
-              <select
-                value={linea.productoId}
-                onChange={(e) => actualizarLinea(linea.id, { productoId: e.target.value })}
-              >
-                {productos.map((p) => (
-                  <option key={p.id} value={p.id}>{p.nombre}</option>
-                ))}
-              </select>
-              <select value={linea.talla} onChange={(e) => actualizarLinea(linea.id, { talla: e.target.value })}>
-                {TALLAS.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-              <input
-                placeholder="Nombre"
-                value={linea.nombre}
-                onChange={(e) => actualizarLinea(linea.id, { nombre: e.target.value.toUpperCase() })}
-              />
-              <input
-                placeholder="N°"
-                value={linea.numero}
-                onChange={(e) => actualizarLinea(linea.id, { numero: e.target.value })}
-              />
-              <button type="button" onClick={() => quitarLinea(linea.id)}>Quitar</button>
-            </div>
-          ))}
+          {lineas.map((linea) => {
+            const roles = rolesDelProducto(linea.productoId);
+            return (
+              <div className="bloque-linea-pedido" key={linea.id}>
+                <div className="fila-linea">
+                  <select
+                    value={linea.productoId}
+                    onChange={(e) => actualizarLinea(linea.id, { productoId: e.target.value, piezasExcluidas: [] })}
+                  >
+                    {productos.map((p) => (
+                      <option key={p.id} value={p.id}>{p.nombre}</option>
+                    ))}
+                  </select>
+                  <select value={linea.talla} onChange={(e) => actualizarLinea(linea.id, { talla: e.target.value })}>
+                    {TALLAS.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <input
+                    placeholder="Nombre"
+                    value={linea.nombre}
+                    onChange={(e) => actualizarLinea(linea.id, { nombre: e.target.value.toUpperCase() })}
+                  />
+                  <input
+                    placeholder="N°"
+                    value={linea.numero}
+                    onChange={(e) => actualizarLinea(linea.id, { numero: e.target.value })}
+                  />
+                  <button type="button" onClick={() => quitarLinea(linea.id)}>Quitar</button>
+                </div>
+
+                {roles.length > 0 && (
+                  <div className="fila-excluir-piezas">
+                    <span className="etiqueta-excluir">Excluir piezas de esta prenda puntual:</span>
+                    {roles.map((rol) => (
+                      <label key={rol} className="chip-excluir">
+                        <input
+                          type="checkbox"
+                          checked={linea.piezasExcluidas.includes(rol)}
+                          onChange={() => alternarPiezaExcluida(linea.id, rol)}
+                        />
+                        {rol}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
           <div className="acciones">
             <button type="button" onClick={agregarLinea}>+ Agregar prenda</button>
@@ -153,7 +195,9 @@ export function Pedidos({ recargarSenal }) {
           {pedidos.map((p) => (
             <li key={p.id}>
               <strong>{p.cliente}</strong> — {p.lineas.length} prenda(s):{' '}
-              {p.lineas.map((l) => l.talla + ' ' + l.nombre + '/' + l.numero).join(', ')}
+              {p.lineas.map((l) =>
+                l.talla + ' ' + l.nombre + '/' + l.numero + (l.piezasExcluidas?.length ? ' (sin ' + l.piezasExcluidas.join(', ') + ')' : '')
+              ).join(', ')}
               <button type="button" onClick={() => { setPedidoParaGenerar(p.id); setResultado(null); }}>
                 Generar
               </button>

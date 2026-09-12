@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Molderias } from './paginas/Molderias.jsx';
+import { Piezas } from './paginas/Piezas.jsx';
+import { Grupos } from './paginas/Grupos.jsx';
 import { Disenos } from './paginas/Disenos.jsx';
 import { Productos } from './paginas/Productos.jsx';
 import { Pedidos } from './paginas/Pedidos.jsx';
@@ -7,14 +8,15 @@ import { Icono } from './componentes/Icono.jsx';
 import './App.css';
 
 const PESTANAS = [
-  { id: 'molderias', etiqueta: 'Molderías', icono: 'molderia' },
+  { id: 'piezas', etiqueta: 'Piezas', icono: 'pieza' },
+  { id: 'grupos', etiqueta: 'Grupos', icono: 'grupo' },
   { id: 'disenos', etiqueta: 'Diseños', icono: 'diseno' },
   { id: 'productos', etiqueta: 'Productos', icono: 'producto' },
   { id: 'pedidos', etiqueta: 'Pedidos', icono: 'pedido' },
 ];
 
 function App() {
-  const [pestana, setPestana] = useState('molderias');
+  const [pestana, setPestana] = useState('piezas');
   const [recargarSenal, setRecargarSenal] = useState(0);
   const marcarCambio = () => setRecargarSenal((n) => n + 1);
   const pestanaActual = PESTANAS.find((p) => p.id === pestana);
@@ -44,7 +46,8 @@ function App() {
         </nav>
 
         <main className="contenido">
-          {pestana === 'molderias' && <Molderias onCambio={marcarCambio} />}
+          {pestana === 'piezas' && <Piezas recargarSenal={recargarSenal} onCambio={marcarCambio} />}
+          {pestana === 'grupos' && <Grupos recargarSenal={recargarSenal} onCambio={marcarCambio} />}
           {pestana === 'disenos' && <Disenos recargarSenal={recargarSenal} onCambio={marcarCambio} />}
           {pestana === 'productos' && <Productos recargarSenal={recargarSenal} onCambio={marcarCambio} />}
           {pestana === 'pedidos' && <Pedidos recargarSenal={recargarSenal} />}

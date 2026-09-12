@@ -10,7 +10,8 @@ const dirActual = path.dirname(fileURLToPath(import.meta.url));
 const carpetaDatos = path.join(dirActual, '..', '..', 'data');
 
 const coleccionesIniciales = {
-  molderias: [],
+  piezas: [],
+  grupos: [],
   disenos: [],
   productos: [],
   pedidos: [],

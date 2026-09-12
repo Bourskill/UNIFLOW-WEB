@@ -2,16 +2,46 @@
 // Cada forma documenta el invariante que protege, no solo los campos.
 
 /**
- * Moldería: un patrón con sus piezas y, para cada pieza, su dimensión POR TALLA.
- * No existe una "talla del molde" única — cada pieza tiene su propia tabla de
- * tallas, porque una remera y su manga no necesariamente escalan igual.
+ * Pieza: vive en una BIBLIOTECA, no dentro de un grupo — un Grupo la
+ * REFERENCIA (GrupoPieza.piezaId), nunca la copia. Si se resube la geometría
+ * de una pieza, todo grupo que la usa ve el cambio al instante (reciclaje
+ * real de piezas entre prendas, ej. "misma remera, otro cuello").
+ *
+ * La geometría real (poligonoMm) es la forma verdadera de la pieza, extraída
+ * de un SVG — nunca se deriva ancho×alto sin ella. dimensionesPorTalla se
+ * calcula A PARTIR del bounding box de esa geometría, no al revés; se guarda
+ * aparte solo porque calibracion.js y nesting.js ya trabajan con cm planos.
  *
  * @typedef {Object} Pieza
  * @property {string} id
- * @property {string} nombre               ej. "Espalda", "Manga izquierda"
- * @property {boolean} rotable              si se puede voltear 180° al anidar
- * @property {string} tela                  tela por defecto de esta pieza
- * @property {Record<string, {anchoCm: number, altoCm: number}>} dimensionesPorTalla
+ * @property {string} nombre                          ej. "Espalda", "Manga izquierda"
+ * @property {number[]} angulosPermitidos              ej. [0, 180] — nunca se asume, lo elige el usuario
+ * @property {boolean} permiteEspejo                   si esta pieza se puede usar reflejada (ver GrupoPieza.espejoActivo)
+ * @property {string} [tela]                           tela por defecto de esta pieza
+ * @property {Record<string, {
+ *   poligonoMm: [number, number][],
+ *   boundingBoxMm: { anchoMm: number, altoMm: number },
+ *   svgOriginal: string,
+ *   validadoPorUsuario: boolean
+ * }>} geometriaPorTalla
+ * @property {Record<string, {anchoCm: number, altoCm: number}>} dimensionesPorTalla  derivado de geometriaPorTalla, en cm
+ */
+
+/**
+ * Grupo: una prenda completa — la unión de piezas (por referencia) que la
+ * componen. Equivalente a lo que antes era "Moldería.piezas", pero ahora cada
+ * entrada apunta a una Pieza de biblioteca en vez de contenerla.
+ *
+ * @typedef {Object} GrupoPieza
+ * @property {string} piezaId
+ * @property {string} rol                    nombre de esta pieza DENTRO del grupo (ej. "Manga izquierda")
+ * @property {boolean} [espejoActivo]         usar la geometría reflejada de la Pieza en este rol
+ * @property {number[]} [angulosPermitidosOverride]   si esta prenda necesita otra restricción que la de biblioteca
+ *
+ * @typedef {Object} Grupo
+ * @property {string} id
+ * @property {string} nombre
+ * @property {GrupoPieza[]} piezas
  */
 
 /**
@@ -25,23 +55,26 @@
  * @property {string} ancla                 referencia de piquete/posición en el diseño
  * @property {'proporcional'|'porRangos'} modoEscalado
  * @property {{ altoCm: number }} [referenciaProporcional]   base para escalado continuo
+ * @property {string} [tallaReferencia]     a qué talla corresponde ese alto de referencia
  * @property {Array<{ desdeTalla: string, hastaTalla: string, anchoCm: number, altoCm: number }>} [rangos]
  */
 
 /**
- * Producto: unión de una moldería, un diseño y overrides de personalización
- * (equivalente a "Elementos" en la referencia externa).
+ * Producto: unión de un grupo (piezas reales), un diseño y overrides de
+ * personalización (equivalente a "Elementos" en la referencia externa).
  *
  * @typedef {Object} Producto
  * @property {string} id
  * @property {string} nombre
- * @property {string} molderiaId
+ * @property {string} grupoId
  * @property {string} disenoId
  */
 
 /**
  * Pedido: líneas individuales por talla + nombre + número. Cada línea es una
  * prenda física real — es la unidad que después se rastrea en generaciones.
+ * piezasExcluidas cubre el caso real "esta prenda puntual va sin tal pieza"
+ * (ej. sin mangas) sin duplicar el diseño para todo el equipo.
  *
  * @typedef {Object} LineaPedido
  * @property {string} id
@@ -49,6 +82,7 @@
  * @property {string} talla
  * @property {string} [nombre]
  * @property {string} [numero]
+ * @property {string[]} [piezasExcluidas]    roles de GrupoPieza a omitir para esta unidad puntual
  */
 
 /**

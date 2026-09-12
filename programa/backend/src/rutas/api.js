@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import { leerColeccion, escribirColeccion } from '../dominio/almacen.js';
+import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
 import { resolverPiezasDePedido } from '../motor/resolverPedido.js';
+import { importarGeometriaSvg, resolverGeometriaSvgManual } from '../motor/importarSvg.js';
 
 export const router = Router();
 
@@ -37,10 +39,112 @@ function crudSimple(nombreColeccion) {
   });
 }
 
-crudSimple('molderias');
+crudSimple('grupos');
 crudSimple('disenos');
 crudSimple('productos');
 crudSimple('pedidos');
+
+// --- Piezas (biblioteca reutilizable) -------------------------------------
+// A diferencia de grupos/disenos/productos/pedidos, Piezas no es un CRUD
+// genérico: crearla implica procesar geometría SVG real, y esa lógica no
+// tiene sentido meterla en crudSimple().
+
+router.get('/piezas', async (req, res) => {
+  res.json(await leerColeccion('piezas'));
+});
+
+router.delete('/piezas/:id', async (req, res) => {
+  const piezas = await leerColeccion('piezas');
+  await escribirColeccion('piezas', piezas.filter((p) => p.id !== req.params.id));
+  res.status(204).end();
+});
+
+// Analiza UN archivo SVG (antes de guardar nada) y devuelve si se pudo
+// resolver solo, o si hace falta que el usuario elija el contorno y/o
+// confirme la escala física — nunca se adivina en silencio (ver
+// claude/README.md, "nunca dar una talla por buena").
+router.post('/piezas/analizar-svg', async (req, res) => {
+  const { svgTexto } = req.body;
+  if (!svgTexto) return res.status(400).json({ error: 'Falta svgTexto' });
+  try {
+    const resultado = await importarGeometriaSvg(svgTexto);
+    res.json(resultado);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Segundo paso del análisis cuando el primero no se pudo resolver solo: el
+// usuario ya eligió cuál candidato es el contorno y/o confirmó cuántos cm
+// mide, y acá se recalcula la geometría con esos datos confirmados.
+router.post('/piezas/analizar-svg/manual', async (req, res) => {
+  const { svgTexto, indiceElegido, mmPorUnidad, anchoConocidoCm } = req.body;
+  if (!svgTexto || indiceElegido == null || (!mmPorUnidad && !anchoConocidoCm)) {
+    return res.status(400).json({ error: 'Faltan svgTexto, indiceElegido, y mmPorUnidad o anchoConocidoCm' });
+  }
+  try {
+    const resultado = await resolverGeometriaSvgManual(svgTexto, indiceElegido, { mmPorUnidad, anchoConocidoCm });
+    res.json(resultado);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Crea (o completa) una Pieza a partir de geometrías YA resueltas por talla
+// (el frontend hizo el análisis + confirmación de cada archivo antes de
+// llegar acá). dimensionesPorTalla se deriva del bounding box real, nunca al
+// revés.
+router.post('/piezas', async (req, res) => {
+  const { nombre, angulosPermitidos, permiteEspejo, tela, geometriaPorTalla } = req.body;
+  if (!nombre || !geometriaPorTalla || Object.keys(geometriaPorTalla).length === 0) {
+    return res.status(400).json({ error: 'Falta nombre o geometriaPorTalla' });
+  }
+  const dimensionesPorTalla = Object.fromEntries(
+    Object.entries(geometriaPorTalla).map(([talla, geo]) => [
+      talla,
+      { anchoCm: round2(geo.boundingBoxMm.anchoMm / 10), altoCm: round2(geo.boundingBoxMm.altoMm / 10) },
+    ])
+  );
+
+  const piezas = await leerColeccion('piezas');
+  const registro = {
+    id: nanoid(),
+    nombre,
+    angulosPermitidos: angulosPermitidos?.length ? angulosPermitidos : [0, 180],
+    permiteEspejo: !!permiteEspejo,
+    tela: tela || null,
+    geometriaPorTalla,
+    dimensionesPorTalla,
+  };
+  piezas.push(registro);
+  await escribirColeccion('piezas', piezas);
+  res.status(201).json(registro);
+});
+
+// Agrega/reemplaza la geometría de UNA talla puntual de una pieza ya
+// existente — resubir para completar una talla faltante, o corregir una.
+// v0: reemplaza directo, sin historial de versiones (simplificación
+// documentada en ESTADO-ACTUAL.md).
+router.put('/piezas/:id/tallas/:talla', async (req, res) => {
+  const { boundingBoxMm } = req.body;
+  if (!boundingBoxMm) return res.status(400).json({ error: 'Falta la geometría resuelta' });
+
+  const piezas = await leerColeccion('piezas');
+  const pieza = piezas.find((p) => p.id === req.params.id);
+  if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
+
+  pieza.geometriaPorTalla[req.params.talla] = req.body;
+  pieza.dimensionesPorTalla[req.params.talla] = {
+    anchoCm: round2(boundingBoxMm.anchoMm / 10),
+    altoCm: round2(boundingBoxMm.altoMm / 10),
+  };
+  await escribirColeccion('piezas', piezas);
+  res.json(pieza);
+});
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
 
 // Anida un conjunto de líneas de pedido y devuelve el layout (sin generar PDF
 // todavía) — es la vista previa antes de imprimir. Recibe las piezas ya
@@ -56,22 +160,29 @@ router.post('/nesting/vista-previa', async (req, res) => {
   res.json(resultado);
 });
 
-// Resuelve piezas reales de una moldería (multiplicadas por talla y cantidad)
-// y las anida. Reemplaza tener que armar a mano el array de piezas en el
-// frontend — ahora el ancho/alto sale de la moldería, no de un ejemplo fijo.
-// Si falta la dimensión de una talla, falla explícito: no se asume nada
-// (ver claude/README.md — nunca dar una talla por buena).
-router.post('/nesting/desde-molderia', async (req, res) => {
-  const { molderiaId, lineas, anchoLienzoCm, separacionCm } = req.body;
-  if (!molderiaId || !Array.isArray(lineas) || lineas.length === 0 || !anchoLienzoCm) {
-    return res.status(400).json({ error: 'Faltan molderiaId, lineas o anchoLienzoCm' });
+// Resuelve piezas reales de un grupo (multiplicadas por talla y cantidad) y
+// las anida, SIN personalización — el camino corto para corte láser o para
+// probar el nesting sin armar todavía un Producto/Pedido completo. Si falta
+// la dimensión de una talla, falla explícito: no se asume nada (ver
+// claude/README.md — nunca dar una talla por buena).
+router.post('/nesting/desde-grupo', async (req, res) => {
+  const { grupoId, lineas, anchoLienzoCm, separacionCm } = req.body;
+  if (!grupoId || !Array.isArray(lineas) || lineas.length === 0 || !anchoLienzoCm) {
+    return res.status(400).json({ error: 'Faltan grupoId, lineas o anchoLienzoCm' });
   }
 
-  const molderias = await leerColeccion('molderias');
-  const molderia = molderias.find((m) => m.id === molderiaId);
-  if (!molderia) return res.status(404).json({ error: 'Moldería no encontrada' });
-  if (!Array.isArray(molderia.piezas) || molderia.piezas.length === 0) {
-    return res.status(400).json({ error: 'Esa moldería todavía no tiene piezas cargadas' });
+  const [grupos, piezas] = await Promise.all([leerColeccion('grupos'), leerColeccion('piezas')]);
+  const grupo = grupos.find((g) => g.id === grupoId);
+  if (!grupo) return res.status(404).json({ error: 'Grupo no encontrado' });
+  if (!Array.isArray(grupo.piezas) || grupo.piezas.length === 0) {
+    return res.status(400).json({ error: 'Ese grupo todavía no tiene piezas cargadas' });
+  }
+
+  let piezasDelGrupo;
+  try {
+    piezasDelGrupo = resolverPiezasDeGrupo(grupo, piezas);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
   }
 
   const piezasParaAnidar = [];
@@ -79,7 +190,7 @@ router.post('/nesting/desde-molderia', async (req, res) => {
   for (const linea of lineas) {
     const cantidad = Number(linea.cantidad) || 0;
     for (let copia = 0; copia < cantidad; copia++) {
-      for (const pieza of molderia.piezas) {
+      for (const pieza of piezasDelGrupo) {
         const dimension = pieza.dimensionesPorTalla?.[linea.talla];
         if (!dimension) {
           return res.status(400).json({
@@ -115,10 +226,11 @@ router.post('/nesting/desde-pedido', async (req, res) => {
     return res.status(400).json({ error: 'Faltan pedidoId o anchoLienzoCm' });
   }
 
-  const [pedidos, productos, molderias, disenos] = await Promise.all([
+  const [pedidos, productos, grupos, piezas, disenos] = await Promise.all([
     leerColeccion('pedidos'),
     leerColeccion('productos'),
-    leerColeccion('molderias'),
+    leerColeccion('grupos'),
+    leerColeccion('piezas'),
     leerColeccion('disenos'),
   ]);
 
@@ -130,7 +242,7 @@ router.post('/nesting/desde-pedido', async (req, res) => {
 
   let piezasParaAnidar;
   try {
-    piezasParaAnidar = resolverPiezasDePedido({ pedido, productos, molderias, disenos });
+    piezasParaAnidar = resolverPiezasDePedido({ pedido, productos, grupos, piezas, disenos });
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }

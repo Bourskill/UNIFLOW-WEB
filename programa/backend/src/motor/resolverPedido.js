@@ -3,13 +3,17 @@
 // fondo (del Diseño) y los textos personalizados (del Producto → Elementos)
 // ya calibrados al tamaño que corresponde a la talla de esa línea.
 //
-// Es el punto donde se juntan las tres entidades que antes vivían separadas
-// sin conectarse: Moldería (dimensión por talla), Diseño (arte por pieza) y
-// Producto (dónde va cada nombre/número y con qué tamaño de referencia).
+// Es el punto donde se juntan las entidades que antes vivían separadas sin
+// conectarse: Grupo (piezas reales, por referencia a la biblioteca), Diseño
+// (arte por pieza) y Producto (dónde va cada nombre/número y con qué tamaño
+// de referencia). piezasExcluidas resuelve el caso real "esta prenda puntual
+// va sin tal pieza" (ej. sin mangas) sin duplicar el diseño para todo el
+// equipo — se salta esa pieza solo para esta línea, ninguna otra se entera.
 
 import { calibrarZona } from './calibracion.js';
+import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 
-export function resolverPiezasDePedido({ pedido, productos, molderias, disenos }) {
+export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, disenos }) {
   const piezasParaAnidar = [];
   let contador = 0;
 
@@ -18,17 +22,21 @@ export function resolverPiezasDePedido({ pedido, productos, molderias, disenos }
     if (!producto) {
       throw new Error('Una línea del pedido no tiene un producto válido.');
     }
-    const molderia = molderias.find((m) => m.id === producto.molderiaId);
-    if (!molderia) {
-      throw new Error('El producto "' + producto.nombre + '" no tiene moldería asociada.');
+    const grupo = grupos.find((g) => g.id === producto.grupoId);
+    if (!grupo) {
+      throw new Error('El producto "' + producto.nombre + '" no tiene grupo (moldería) asociado.');
     }
     const diseno = disenos.find((d) => d.id === producto.disenoId);
+    const piezasDelGrupo = resolverPiezasDeGrupo(grupo, piezas);
+    const excluidas = new Set(linea.piezasExcluidas || []);
 
-    for (const pieza of molderia.piezas) {
+    for (const pieza of piezasDelGrupo) {
+      if (excluidas.has(pieza.nombre)) continue;
+
       const dimension = pieza.dimensionesPorTalla?.[linea.talla];
       if (!dimension) {
         throw new Error(
-          'La pieza "' + pieza.nombre + '" de "' + molderia.nombre +
+          'La pieza "' + pieza.nombre + '" de "' + grupo.nombre +
             '" no tiene dimensión cargada para la talla ' + linea.talla + '.'
         );
       }

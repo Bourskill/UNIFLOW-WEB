@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { listarMolderias, listarDisenos, listarProductos, crearProducto, eliminarProducto } from '../api.js';
+import { listarGrupos, listarDisenos, listarProductos, crearProducto, eliminarProducto } from '../api.js';
 import { TALLAS } from '../constantes.js';
 
 function elementoVacio(piezaNombre) {
@@ -18,21 +18,21 @@ function elementoVacio(piezaNombre) {
 }
 
 export function Productos({ recargarSenal, onCambio }) {
-  const [molderias, setMolderias] = useState([]);
+  const [grupos, setGrupos] = useState([]);
   const [disenos, setDisenos] = useState([]);
   const [productos, setProductos] = useState([]);
   const [nombre, setNombre] = useState('');
-  const [molderiaId, setMolderiaId] = useState('');
+  const [grupoId, setGrupoId] = useState('');
   const [disenoId, setDisenoId] = useState('');
   const [elementos, setElementos] = useState([]);
   const [error, setError] = useState(null);
 
   async function recargar() {
-    const [ms, ds, ps] = await Promise.all([listarMolderias(), listarDisenos(), listarProductos()]);
-    setMolderias(ms);
+    const [gs, ds, ps] = await Promise.all([listarGrupos(), listarDisenos(), listarProductos()]);
+    setGrupos(gs);
     setDisenos(ds);
     setProductos(ps);
-    if (ms.length > 0 && !molderiaId) setMolderiaId(ms[0].id);
+    if (gs.length > 0 && !grupoId) setGrupoId(gs[0].id);
   }
 
   useEffect(() => {
@@ -40,8 +40,8 @@ export function Productos({ recargarSenal, onCambio }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recargarSenal]);
 
-  const molderiaSeleccionada = molderias.find((m) => m.id === molderiaId);
-  const disenosDeEstaMolderia = disenos.filter((d) => d.molderiaId === molderiaId);
+  const grupoSeleccionado = grupos.find((g) => g.id === grupoId);
+  const disenosDeEsteGrupo = disenos.filter((d) => d.grupoId === grupoId);
 
   function agregarElemento(piezaNombre) {
     setElementos((prev) => [...prev, elementoVacio(piezaNombre)]);
@@ -58,12 +58,12 @@ export function Productos({ recargarSenal, onCambio }) {
   async function guardar(evento) {
     evento.preventDefault();
     setError(null);
-    if (!nombre.trim() || !molderiaId) {
-      setError('Falta el nombre del producto o la moldería.');
+    if (!nombre.trim() || !grupoId) {
+      setError('Falta el nombre del producto o el grupo.');
       return;
     }
     try {
-      await crearProducto({ nombre, molderiaId, disenoId: disenoId || null, elementos });
+      await crearProducto({ nombre, grupoId, disenoId: disenoId || null, elementos });
       setNombre('');
       setElementos([]);
       await recargar();
@@ -83,12 +83,12 @@ export function Productos({ recargarSenal, onCambio }) {
     <div className="pagina">
       <h2>Productos</h2>
       <p className="ayuda">
-        Une una moldería con un diseño y define dónde va cada nombre/número — el equivalente a
-        "Elementos" en la referencia que usamos.
+        Une un grupo (piezas reales) con un diseño y define dónde va cada nombre/número — el
+        equivalente a "Elementos" en la referencia que usamos.
       </p>
 
-      {molderias.length === 0 ? (
-        <p>Creá primero una moldería.</p>
+      {grupos.length === 0 ? (
+        <p>Creá primero un grupo (pestaña "Grupos").</p>
       ) : (
         <form className="tarjeta" onSubmit={guardar}>
           <label>
@@ -97,10 +97,10 @@ export function Productos({ recargarSenal, onCambio }) {
           </label>
 
           <label>
-            Moldería
-            <select value={molderiaId} onChange={(e) => { setMolderiaId(e.target.value); setElementos([]); setDisenoId(''); }}>
-              {molderias.map((m) => (
-                <option key={m.id} value={m.id}>{m.nombre}</option>
+            Grupo
+            <select value={grupoId} onChange={(e) => { setGrupoId(e.target.value); setElementos([]); setDisenoId(''); }}>
+              {grupos.map((g) => (
+                <option key={g.id} value={g.id}>{g.nombre}</option>
               ))}
             </select>
           </label>
@@ -109,23 +109,23 @@ export function Productos({ recargarSenal, onCambio }) {
             Diseño (opcional — sin diseño, la pieza sale en blanco)
             <select value={disenoId} onChange={(e) => setDisenoId(e.target.value)}>
               <option value="">— Sin diseño —</option>
-              {disenosDeEstaMolderia.map((d) => (
+              {disenosDeEsteGrupo.map((d) => (
                 <option key={d.id} value={d.id}>{d.nombre}</option>
               ))}
             </select>
           </label>
 
           <h4>Elementos (nombre, número, texto por pieza)</h4>
-          {molderiaSeleccionada?.piezas.map((pieza) => (
-            <div className="fila-pieza" key={pieza.nombre}>
+          {grupoSeleccionado?.piezas.map((gp) => (
+            <div className="fila-pieza" key={gp.rol}>
               <div className="fila-pieza-cabecera">
-                <strong>{pieza.nombre}</strong>
-                <button type="button" onClick={() => agregarElemento(pieza.nombre)}>
+                <strong>{gp.rol}</strong>
+                <button type="button" onClick={() => agregarElemento(gp.rol)}>
                   + Agregar elemento en esta pieza
                 </button>
               </div>
 
-              {elementos.filter((el) => el.piezaNombre === pieza.nombre).map((elemento) => (
+              {elementos.filter((el) => el.piezaNombre === gp.rol).map((elemento) => (
                 <div className="fila-elemento" key={elemento.id}>
                   <select
                     value={elemento.tipo}
