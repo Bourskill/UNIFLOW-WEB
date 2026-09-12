@@ -5,7 +5,7 @@ import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
 import { resolverPiezasDePedido } from '../motor/resolverPedido.js';
-import { importarGeometriaSvg, resolverGeometriaSvgManual } from '../motor/importarSvg.js';
+import { analizarPiezaMultiTalla, resolverGeometriasPorTalla } from '../motor/importarSvg.js';
 
 const router = Router();
 
@@ -57,37 +57,46 @@ crudSimple('productos');
 crudSimple('pedidos');
 
 // --- Piezas (biblioteca) ---------------------------------------------------
-// Acá se sube la moldería real: por PIEZA, todas sus tallas juntas (subís
-// las 4 variantes de "Manga" de una — no el archivo de la prenda completa,
-// eso era el enfoque de Illustrator). Cada pieza vive en una biblioteca y se
-// referencia (no se copia) desde uno o más Grupos — resubir una talla acá
+// Acá se sube la moldería real: por PIEZA, UN solo archivo con todas sus
+// tallas adentro (nombradas "S", "M", "L"...) — así se manejan de verdad los
+// patrones graduados, no un archivo por talla ni el de la prenda completa
+// (eso era el enfoque de Illustrator). Cada pieza vive en una biblioteca y se
+// referencia (no se copia) desde uno o más Grupos — resubir la pieza acá
 // actualiza automáticamente a todos los grupos que la usan.
 
 router.get('/piezas', async (req, res) => {
   res.json(await leerColeccion('piezas'));
 });
 
-// Analiza UN archivo SVG (una talla de la pieza) antes de guardar nada.
-router.post('/piezas/analizar-svg', async (req, res) => {
+// Analiza el archivo (con todas las tallas nombradas adentro) y trata de
+// matchear cada forma contra una talla conocida (S/M/L/...). Lo que no
+// matchea queda para que el usuario lo asigne a mano.
+router.post('/piezas/analizar-multitalla', async (req, res) => {
   const { svgTexto } = req.body;
   if (!svgTexto) return res.status(400).json({ error: 'Falta svgTexto' });
   try {
-    const resultado = await importarGeometriaSvg(svgTexto);
+    const resultado = await analizarPiezaMultiTalla(svgTexto);
     res.json(resultado);
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
 });
 
-// Segundo paso cuando el análisis automático no alcanzó: el usuario ya
-// eligió el contorno y/o confirmó cuántos cm mide.
-router.post('/piezas/analizar-svg/manual', async (req, res) => {
-  const { svgTexto, indiceElegido, mmPorUnidad, anchoConocidoCm } = req.body;
-  if (!svgTexto || indiceElegido == null || (!mmPorUnidad && !anchoConocidoCm)) {
-    return res.status(400).json({ error: 'Faltan svgTexto, indiceElegido, y mmPorUnidad o anchoConocidoCm' });
+// Con el mapeo talla -> índice de candidato ya confirmado (automático +
+// correcciones a mano), calcula la geometría real de cada talla detectada.
+// No guarda nada todavía — el frontend arma la Pieza final con esto y llama
+// a POST /piezas.
+router.post('/piezas/resolver-multitalla', async (req, res) => {
+  const { svgTexto, asignaciones, mmPorUnidad, anchoConocidoCm, indiceReferencia } = req.body;
+  if (!svgTexto || !asignaciones || Object.keys(asignaciones).length === 0) {
+    return res.status(400).json({ error: 'Faltan svgTexto o asignaciones' });
   }
   try {
-    const resultado = await resolverGeometriaSvgManual(svgTexto, indiceElegido, { mmPorUnidad, anchoConocidoCm });
+    const resultado = await resolverGeometriasPorTalla(svgTexto, asignaciones, {
+      mmPorUnidad,
+      anchoConocidoCm,
+      indiceReferencia,
+    });
     res.json(resultado);
   } catch (error) {
     res.status(400).json({ error: error.message });

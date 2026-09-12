@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { listarPiezas, crearPieza, editarPieza, eliminarPieza, analizarSvg, analizarSvgManual } from '../api.js';
+import { listarPiezas, crearPieza, editarPieza, eliminarPieza, analizarPieza, resolverPieza } from '../api.js';
 import { TALLAS, PRESETS_ANGULOS } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso } from '../componentes/ui.jsx';
 
@@ -13,54 +13,41 @@ function leerArchivoComoTexto(archivo) {
   });
 }
 
-function rangoDeTallas(desde, hasta) {
-  const i0 = TALLAS.indexOf(desde);
-  const i1 = TALLAS.indexOf(hasta);
-  if (i0 === -1 || i1 === -1 || i0 > i1) return [];
-  return TALLAS.slice(i0, i1 + 1);
-}
-
-// Un slot por talla: arrastrás el SVG de esa talla, se analiza, y si el
-// backend no pudo resolver solo el contorno y/o la escala física, se
-// resuelve acá mismo — nunca se guarda una geometría adivinada.
-function SlotTalla({ talla, onResuelto }) {
-  const [estado, setEstado] = useState('vacio');
+// Un solo archivo con todas las tallas de la pieza adentro (cada una
+// nombrada: "S", "M", "L"...) — se analiza, se matchea cada forma contra una
+// talla conocida, y lo que no matchea se asigna a mano. Nunca se adivina.
+function ZonaSubidaPieza({ onGeometriaLista }) {
+  const [estado, setEstado] = useState('vacio'); // vacio | analizando | revisando | resuelto | error
   const [svgTexto, setSvgTexto] = useState(null);
-  const [resultado, setResultado] = useState(null);
-  const [indiceElegido, setIndiceElegido] = useState('');
+  const [analisis, setAnalisis] = useState(null);
+  const [asignacionesManual, setAsignacionesManual] = useState({});
+  const [tallaNueva, setTallaNueva] = useState('');
+  const [indiceNuevo, setIndiceNuevo] = useState('');
+  const [indiceReferencia, setIndiceReferencia] = useState('');
   const [anchoConocidoCm, setAnchoConocidoCm] = useState('');
-  const [geometria, setGeometria] = useState(null);
-  const [errorMsg, setErrorMsg] = useState(null);
+  const [geometrias, setGeometrias] = useState(null);
+  const [error, setError] = useState(null);
 
-  const onDrop = useCallback(
-    async (archivos) => {
-      const archivo = archivos[0];
-      if (!archivo) return;
-      setEstado('analizando');
-      setErrorMsg(null);
-      try {
-        const texto = await leerArchivoComoTexto(archivo);
-        setSvgTexto(texto);
-        const r = await analizarSvg(texto);
-        setResultado(r);
-        if (r.resuelto) {
-          const geo = { poligonoMm: r.poligonoMm, boundingBoxMm: r.boundingBoxMm, svgOriginal: texto, validadoPorUsuario: true };
-          setGeometria(geo);
-          setEstado('resuelto');
-          onResuelto(talla, geo);
-        } else if (r.contornoIndice != null && !r.escalaConfirmada) {
-          setIndiceElegido(String(r.contornoIndice));
-          setEstado('necesitaEscala');
-        } else {
-          setEstado('necesitaEleccion');
-        }
-      } catch (e) {
-        setErrorMsg(e.message);
-        setEstado('error');
-      }
-    },
-    [talla, onResuelto]
-  );
+  const onDrop = useCallback(async (archivos) => {
+    const archivo = archivos[0];
+    if (!archivo) return;
+    setEstado('analizando');
+    setError(null);
+    setGeometrias(null);
+    setAsignacionesManual({});
+    onGeometriaLista(null);
+    try {
+      const texto = await leerArchivoComoTexto(archivo);
+      setSvgTexto(texto);
+      const r = await analizarPieza(texto);
+      setAnalisis(r);
+      setEstado('revisando');
+    } catch (e) {
+      setError(e.message);
+      setEstado('error');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -68,84 +55,150 @@ function SlotTalla({ talla, onResuelto }) {
     multiple: false,
   });
 
-  async function confirmarManual() {
-    setErrorMsg(null);
+  const mapaFinal = useMemo(() => {
+    if (!analisis) return {};
+    const mapa = {};
+    for (const a of analisis.asignaciones) if (a.tallaAsignada) mapa[a.tallaAsignada] = a.indice;
+    for (const [talla, indice] of Object.entries(asignacionesManual)) {
+      if (indice !== '') mapa[talla] = Number(indice);
+    }
+    return mapa;
+  }, [analisis, asignacionesManual]);
+
+  const candidatosSinTalla = useMemo(() => {
+    if (!analisis) return [];
+    const indicesUsados = new Set(Object.values(mapaFinal));
+    return analisis.candidatos.filter((c) => !indicesUsados.has(c.indice));
+  }, [analisis, mapaFinal]);
+
+  const necesitaEscala = analisis && !analisis.escalaConfirmada;
+  const puedeResolver =
+    analisis && Object.keys(mapaFinal).length > 0 && (!necesitaEscala || (indiceReferencia !== '' && anchoConocidoCm));
+
+  function agregarAsignacionManual() {
+    if (!tallaNueva || indiceNuevo === '') return;
+    setAsignacionesManual((prev) => ({ ...prev, [tallaNueva]: indiceNuevo }));
+    setTallaNueva('');
+    setIndiceNuevo('');
+  }
+
+  async function resolver() {
+    setError(null);
     try {
-      const opciones = resultado.escalaConfirmada
-        ? { mmPorUnidad: resultado.mmPorUnidad }
-        : { anchoConocidoCm: Number(anchoConocidoCm) };
-      const r = await analizarSvgManual(svgTexto, Number(indiceElegido), opciones);
-      const geo = { poligonoMm: r.poligonoMm, boundingBoxMm: r.boundingBoxMm, svgOriginal: svgTexto, validadoPorUsuario: true };
-      setGeometria(geo);
+      const opciones = necesitaEscala
+        ? { anchoConocidoCm: Number(anchoConocidoCm), indiceReferencia: Number(indiceReferencia) }
+        : { mmPorUnidad: analisis.mmPorUnidad };
+      const r = await resolverPieza(svgTexto, mapaFinal, opciones);
+      const geometriaPorTalla = Object.fromEntries(
+        Object.entries(r.geometriasPorTalla).map(([talla, geo]) => [
+          talla,
+          { ...geo, svgOriginal: svgTexto, validadoPorUsuario: true },
+        ])
+      );
+      setGeometrias(geometriaPorTalla);
       setEstado('resuelto');
-      onResuelto(talla, geo);
+      onGeometriaLista(geometriaPorTalla);
     } catch (e) {
-      setErrorMsg(e.message);
+      setError(e.message);
     }
   }
 
   return (
-    <div
-      className={
-        'flex flex-col gap-1.5 rounded-lg border p-2 ' +
-        (estado === 'resuelto' ? 'border-primary/40 bg-primary-soft' : estado === 'error' ? 'border-danger/40' : 'border-border bg-surface-muted')
-      }
-    >
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-faint-foreground">{talla}</div>
-
+    <div className="flex flex-col gap-3">
       {estado === 'vacio' && (
         <div
           {...getRootProps()}
           className={
-            'cursor-pointer rounded-md border-2 border-dashed px-2 py-3 text-center text-xs ' +
+            'cursor-pointer rounded-lg border-2 border-dashed px-4 py-6 text-center text-sm ' +
             (isDragActive ? 'border-primary bg-primary-soft text-primary' : 'border-border text-faint-foreground')
           }
         >
           <input {...getInputProps()} />
-          Soltar .svg
+          Arrastrá acá el archivo .svg con <strong>todas las tallas de esta pieza juntas</strong>,
+          cada una nombrada (ej. "S", "M", "L", "XL").
         </div>
       )}
 
-      {estado === 'analizando' && <p className="text-xs text-muted-foreground">Analizando…</p>}
+      {estado === 'analizando' && <p className="text-sm text-muted-foreground">Analizando…</p>}
+      {estado === 'error' && <Aviso tono="error">{error}</Aviso>}
 
-      {estado === 'resuelto' && geometria && (
-        <p className="text-xs font-medium text-primary">
-          ✓ {(geometria.boundingBoxMm.anchoMm / 10).toFixed(1)}×{(geometria.boundingBoxMm.altoMm / 10).toFixed(1)} cm
-        </p>
-      )}
+      {(estado === 'revisando' || estado === 'resuelto') && analisis && (
+        <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-muted p-3">
+          <div className="flex flex-wrap gap-1">
+            {Object.keys(mapaFinal).length === 0 ? (
+              <span className="text-xs text-faint-foreground">Ninguna talla detectada todavía.</span>
+            ) : (
+              Object.entries(mapaFinal).map(([talla, indice]) => (
+                <Chip key={talla} tono="activo">
+                  {talla} ({analisis.candidatos[indice]?.nombre || '#' + indice})
+                </Chip>
+              ))
+            )}
+          </div>
 
-      {(estado === 'necesitaEleccion' || estado === 'necesitaEscala') && resultado && (
-        <div className="flex flex-col gap-1.5">
-          <p className="text-[11px] text-faint-foreground">{resultado.motivo}</p>
-          {estado === 'necesitaEleccion' && (
-            <Select value={indiceElegido} onChange={(e) => setIndiceElegido(e.target.value)} className="text-xs">
-              <option value="">Elegí el contorno…</option>
-              {resultado.candidatos.map((c) => (
-                <option key={c.indice} value={c.indice}>{c.nombre || 'forma #' + c.indice}</option>
+          {candidatosSinTalla.length > 0 && (
+            <div className="text-xs text-faint-foreground">
+              <p className="mb-1">
+                Formas sin talla asignada: {candidatosSinTalla.map((c) => c.nombre || 'forma #' + c.indice).join(', ')}
+                {' '}— si alguna es en realidad una talla, asignala:
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Select value={tallaNueva} onChange={(e) => setTallaNueva(e.target.value)} className="max-w-[100px]">
+                  <option value="">Talla…</option>
+                  {TALLAS.map((t) => <option key={t} value={t}>{t}</option>)}
+                </Select>
+                <Select value={indiceNuevo} onChange={(e) => setIndiceNuevo(e.target.value)} className="max-w-[180px]">
+                  <option value="">Forma…</option>
+                  {candidatosSinTalla.map((c) => (
+                    <option key={c.indice} value={c.indice}>{c.nombre || 'forma #' + c.indice}</option>
+                  ))}
+                </Select>
+                <Boton tamano="sm" type="button" onClick={agregarAsignacionManual}>Asignar</Boton>
+              </div>
+            </div>
+          )}
+
+          {necesitaEscala && (
+            <Aviso tono="info">
+              Este SVG no declara una unidad física (mm/cm/in) — elegí una forma de referencia y
+              decime cuánto mide de ancho en cm.
+              <div className="mt-2 flex gap-2">
+                <Select value={indiceReferencia} onChange={(e) => setIndiceReferencia(e.target.value)} className="max-w-[180px]">
+                  <option value="">Forma de referencia…</option>
+                  {analisis.candidatos.map((c) => (
+                    <option key={c.indice} value={c.indice}>{c.nombre || 'forma #' + c.indice}</option>
+                  ))}
+                </Select>
+                <Input
+                  type="number"
+                  placeholder="Ancho real (cm)"
+                  value={anchoConocidoCm}
+                  onChange={(e) => setAnchoConocidoCm(e.target.value)}
+                  className="max-w-[140px]"
+                />
+              </div>
+            </Aviso>
+          )}
+
+          {error && <Aviso tono="error">{error}</Aviso>}
+
+          <div>
+            <Boton variante="primario" tamano="sm" type="button" onClick={resolver} disabled={!puedeResolver}>
+              Calcular geometría
+            </Boton>
+          </div>
+
+          {estado === 'resuelto' && geometrias && (
+            <div className="flex flex-wrap gap-1 border-t border-border pt-2">
+              {Object.entries(geometrias).map(([talla, g]) => (
+                <Chip key={talla}>
+                  {talla}: {(g.boundingBoxMm.anchoMm / 10).toFixed(1)}×{(g.boundingBoxMm.altoMm / 10).toFixed(1)}cm
+                </Chip>
               ))}
-            </Select>
+            </div>
           )}
-          {!resultado.escalaConfirmada && (
-            <Input
-              type="number"
-              placeholder="Ancho real (cm)"
-              value={anchoConocidoCm}
-              onChange={(e) => setAnchoConocidoCm(e.target.value)}
-              className="text-xs"
-            />
-          )}
-          <Boton
-            tamano="sm"
-            variante="primario"
-            onClick={confirmarManual}
-            disabled={!indiceElegido || (!resultado.escalaConfirmada && !anchoConocidoCm)}
-          >
-            Confirmar
-          </Boton>
         </div>
       )}
-
-      {estado === 'error' && <p className="text-xs text-danger">{errorMsg}</p>}
     </div>
   );
 }
@@ -217,13 +270,9 @@ export function Piezas({ recargarSenal, onCambio }) {
   const [nombre, setNombre] = useState('');
   const [tela, setTela] = useState('');
   const [presetAngulos, setPresetAngulos] = useState(PRESETS_ANGULOS[0].id);
-  const [tallaDesde, setTallaDesde] = useState(TALLAS[1]);
-  const [tallaHasta, setTallaHasta] = useState(TALLAS[4]);
-  const [geometrias, setGeometrias] = useState({});
-  const [generacionSlots, setGeneracionSlots] = useState(0);
+  const [geometriaPorTalla, setGeometriaPorTalla] = useState(null);
+  const [claveSubida, setClaveSubida] = useState(0);
   const [error, setError] = useState(null);
-
-  const rango = useMemo(() => rangoDeTallas(tallaDesde, tallaHasta), [tallaDesde, tallaHasta]);
 
   async function recargar() {
     setPiezas(await listarPiezas());
@@ -234,10 +283,6 @@ export function Piezas({ recargarSenal, onCambio }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recargarSenal]);
 
-  function marcarResuelto(talla, geometria) {
-    setGeometrias((prev) => ({ ...prev, [talla]: geometria }));
-  }
-
   async function guardar(evento) {
     evento.preventDefault();
     setError(null);
@@ -245,9 +290,8 @@ export function Piezas({ recargarSenal, onCambio }) {
       setError('Falta el nombre de la pieza.');
       return;
     }
-    const tallasCompletas = rango.filter((t) => geometrias[t]);
-    if (tallasCompletas.length === 0) {
-      setError('Subí la forma de al menos una talla.');
+    if (!geometriaPorTalla || Object.keys(geometriaPorTalla).length === 0) {
+      setError('Subí el archivo con las tallas y calculá la geometría antes de guardar.');
       return;
     }
     const preset = PRESETS_ANGULOS.find((p) => p.id === presetAngulos);
@@ -256,12 +300,12 @@ export function Piezas({ recargarSenal, onCambio }) {
         nombre,
         tela: tela || null,
         angulosPermitidos: preset.valores,
-        geometriaPorTalla: Object.fromEntries(tallasCompletas.map((t) => [t, geometrias[t]])),
+        geometriaPorTalla,
       });
       setNombre('');
       setTela('');
-      setGeometrias({});
-      setGeneracionSlots((n) => n + 1);
+      setGeometriaPorTalla(null);
+      setClaveSubida((n) => n + 1); // fuerza a la zona de subida a reiniciarse
       await recargar();
       onCambio?.();
     } catch (e) {
@@ -280,9 +324,9 @@ export function Piezas({ recargarSenal, onCambio }) {
       <div>
         <h2 className="text-lg font-semibold">Piezas</h2>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Acá se sube la moldería real: elegís una pieza (ej. "Manga") y subís de una vez todas sus
-          tallas, con su forma real (no un rectángulo). Después se arma la prenda completa en{' '}
-          <strong>Grupos</strong>, eligiendo piezas de acá.
+          Acá se sube la moldería real: un archivo por pieza (ej. "Manga") con{' '}
+          <strong>todas sus tallas adentro</strong>, cada una nombrada. Después se arma la prenda
+          completa en <strong>Grupos</strong>, eligiendo piezas de acá.
         </p>
       </div>
 
@@ -299,24 +343,7 @@ export function Piezas({ recargarSenal, onCambio }) {
           </Select>
         </Campo>
 
-        <div className="flex gap-3">
-          <Campo etiqueta="Desde" className="max-w-[110px]">
-            <Select value={tallaDesde} onChange={(e) => setTallaDesde(e.target.value)}>
-              {TALLAS.map((t) => <option key={t} value={t}>{t}</option>)}
-            </Select>
-          </Campo>
-          <Campo etiqueta="Hasta" className="max-w-[110px]">
-            <Select value={tallaHasta} onChange={(e) => setTallaHasta(e.target.value)}>
-              {TALLAS.map((t) => <option key={t} value={t}>{t}</option>)}
-            </Select>
-          </Campo>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-          {rango.map((t) => (
-            <SlotTalla key={t + '-' + generacionSlots} talla={t} onResuelto={marcarResuelto} />
-          ))}
-        </div>
+        <ZonaSubidaPieza key={claveSubida} onGeometriaLista={setGeometriaPorTalla} />
 
         <div>
           <Boton variante="primario" type="submit">Guardar pieza</Boton>

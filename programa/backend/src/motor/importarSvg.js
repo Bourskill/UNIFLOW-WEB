@@ -9,6 +9,7 @@
 import { parse as parseSvg } from 'svgson';
 import svgpath from 'svgpath';
 import { pointsOnPath } from 'points-on-path';
+import { TALLAS_ORDEN } from '../dominio/modelos.js';
 
 const NOMBRE_CONTORNO = /^(corte|contorno|cut|outline)$/i;
 const MAGENTA_RESERVADO = ['#ff00ff', '#f0f', 'magenta', 'rgb(255,0,255)'];
@@ -217,4 +218,100 @@ export async function resolverGeometriaSvgManual(
 
   const { poligonoMm, boundingBoxMm } = poligonoYBoundingBox(elegido.pathAbsoluto, mmPorUnidadFinal, tolerancia);
   return { poligonoMm, boundingBoxMm, mmPorUnidad: mmPorUnidadFinal };
+}
+
+// --- Un solo archivo con TODAS las tallas de una pieza adentro -------------
+// Así se manejan de verdad los patrones graduados (nesting de tallas): un
+// archivo con una forma por talla, cada una nombrada ("S", "M", "L"...) —
+// subir un archivo separado por talla era el enfoque tedioso que se quería
+// evitar. Esto detecta automáticamente qué forma es cada talla por nombre, y
+// deja lo que no matchea para asignar a mano — nunca se adivina.
+
+const TALLAS_NORMALIZADAS = new Set(TALLAS_ORDEN.map((t) => t.toUpperCase()));
+
+function normalizarTalla(nombre) {
+  const limpio = (nombre || '').trim().toUpperCase();
+  return TALLAS_NORMALIZADAS.has(limpio) ? limpio : null;
+}
+
+/**
+ * @param {string} svgTexto  un archivo con una forma por talla, cada una nombrada
+ */
+export async function analizarPiezaMultiTalla(svgTexto) {
+  const raiz = await parseSvg(svgTexto);
+  const candidatos = [];
+  recolectarCandidatos(raiz, [], candidatos);
+
+  if (candidatos.length === 0) {
+    throw new Error('No se encontró ninguna forma (path/rect/circle/polygon/...) en el SVG.');
+  }
+
+  const escala = extraerEscalaFisica(raiz);
+
+  const asignacionesCrudas = candidatos.map((c, indice) => ({
+    indice,
+    nombreDetectado: c.nombre,
+    tallaAsignada: normalizarTalla(c.nombre),
+  }));
+
+  // Si dos formas matchean la misma talla, ninguna se asigna sola — queda
+  // ambiguo y el usuario elige a mano cuál es la correcta.
+  const conteoPorTalla = {};
+  for (const a of asignacionesCrudas) {
+    if (a.tallaAsignada) conteoPorTalla[a.tallaAsignada] = (conteoPorTalla[a.tallaAsignada] || 0) + 1;
+  }
+  const asignaciones = asignacionesCrudas.map((a) =>
+    a.tallaAsignada && conteoPorTalla[a.tallaAsignada] > 1 ? { ...a, tallaAsignada: null } : a
+  );
+
+  return {
+    candidatos: candidatos.map((c, i) => ({ indice: i, nombre: c.nombre })),
+    asignaciones,
+    tallasDetectadas: [...new Set(asignaciones.map((a) => a.tallaAsignada).filter(Boolean))],
+    escalaConfirmada: escala.confirmada,
+    mmPorUnidad: escala.confirmada ? escala.mmPorUnidad : null,
+  };
+}
+
+/**
+ * Segundo paso: con el mapeo talla -> índice de candidato ya confirmado
+ * (automático + correcciones a mano), calcula la geometría real de cada
+ * talla. La escala es UNA sola para todo el archivo — si no viene declarada,
+ * se deriva del ancho conocido de UNA forma de referencia que el usuario
+ * elige.
+ *
+ * @param {string} svgTexto
+ * @param {Record<string, number>} mapaTallaAIndice
+ */
+export async function resolverGeometriasPorTalla(
+  svgTexto,
+  mapaTallaAIndice,
+  { mmPorUnidad, anchoConocidoCm, indiceReferencia, toleranciaUnidadesUsuario } = {}
+) {
+  const raiz = await parseSvg(svgTexto);
+  const candidatos = [];
+  recolectarCandidatos(raiz, [], candidatos);
+  const tolerancia = toleranciaUnidadesUsuario ?? 0.5;
+
+  let mmPorUnidadFinal = mmPorUnidad;
+  if (!mmPorUnidadFinal) {
+    if (!anchoConocidoCm || indiceReferencia == null) {
+      throw new Error('Hace falta mmPorUnidad, o anchoConocidoCm + indiceReferencia, para fijar la escala.');
+    }
+    const referencia = candidatos[indiceReferencia];
+    if (!referencia) throw new Error('El índice de referencia ya no existe en este SVG.');
+    const subtrazados = pointsOnPath(referencia.pathAbsoluto, tolerancia);
+    const xs = subtrazados.flat().map((p) => p[0]);
+    const anchoUnidades = Math.max(...xs) - Math.min(...xs);
+    mmPorUnidadFinal = (anchoConocidoCm * 10) / anchoUnidades;
+  }
+
+  const geometriasPorTalla = {};
+  for (const [talla, indice] of Object.entries(mapaTallaAIndice)) {
+    const candidato = candidatos[indice];
+    if (!candidato) throw new Error('El candidato asignado a la talla "' + talla + '" ya no existe en este SVG.');
+    geometriasPorTalla[talla] = poligonoYBoundingBox(candidato.pathAbsoluto, mmPorUnidadFinal, tolerancia);
+  }
+
+  return { geometriasPorTalla, mmPorUnidad: mmPorUnidadFinal };
 }
