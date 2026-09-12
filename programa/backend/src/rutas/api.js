@@ -5,7 +5,7 @@ import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
 import { resolverPiezasDePedido } from '../motor/resolverPedido.js';
-import { analizarSvgMultiple, resolverGeometriasMultiples } from '../motor/importarSvg.js';
+import { importarGeometriaSvg, resolverGeometriaSvgManual } from '../motor/importarSvg.js';
 
 const router = Router();
 
@@ -57,24 +57,79 @@ crudSimple('productos');
 crudSimple('pedidos');
 
 // --- Piezas (biblioteca) ---------------------------------------------------
-// Ya no se sube geometría pieza por pieza acá — eso se mudó a Grupos (un
-// archivo por TALLA, con todas las piezas juntas, como exporta de verdad un
-// programa de diseño). Piezas es la biblioteca: ver qué hay, reciclarlas
-// entre grupos, y ajustar su metadata (ángulos permitidos, espejo, tela).
+// Acá se sube la moldería real: por PIEZA, todas sus tallas juntas (subís
+// las 4 variantes de "Manga" de una — no el archivo de la prenda completa,
+// eso era el enfoque de Illustrator). Cada pieza vive en una biblioteca y se
+// referencia (no se copia) desde uno o más Grupos — resubir una talla acá
+// actualiza automáticamente a todos los grupos que la usan.
 
 router.get('/piezas', async (req, res) => {
   res.json(await leerColeccion('piezas'));
 });
 
+// Analiza UN archivo SVG (una talla de la pieza) antes de guardar nada.
+router.post('/piezas/analizar-svg', async (req, res) => {
+  const { svgTexto } = req.body;
+  if (!svgTexto) return res.status(400).json({ error: 'Falta svgTexto' });
+  try {
+    const resultado = await importarGeometriaSvg(svgTexto);
+    res.json(resultado);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Segundo paso cuando el análisis automático no alcanzó: el usuario ya
+// eligió el contorno y/o confirmó cuántos cm mide.
+router.post('/piezas/analizar-svg/manual', async (req, res) => {
+  const { svgTexto, indiceElegido, mmPorUnidad, anchoConocidoCm } = req.body;
+  if (!svgTexto || indiceElegido == null || (!mmPorUnidad && !anchoConocidoCm)) {
+    return res.status(400).json({ error: 'Faltan svgTexto, indiceElegido, y mmPorUnidad o anchoConocidoCm' });
+  }
+  try {
+    const resultado = await resolverGeometriaSvgManual(svgTexto, indiceElegido, { mmPorUnidad, anchoConocidoCm });
+    res.json(resultado);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Crea la Pieza con las geometrías YA resueltas por talla (el frontend
+// analizó y confirmó cada archivo del rango de tallas antes de llegar acá).
+router.post('/piezas', async (req, res) => {
+  const { nombre, angulosPermitidos, tela, geometriaPorTalla } = req.body;
+  if (!nombre || !geometriaPorTalla || Object.keys(geometriaPorTalla).length === 0) {
+    return res.status(400).json({ error: 'Falta nombre o geometriaPorTalla' });
+  }
+  const dimensionesPorTalla = Object.fromEntries(
+    Object.entries(geometriaPorTalla).map(([talla, geo]) => [
+      talla,
+      { anchoCm: round2(geo.boundingBoxMm.anchoMm / 10), altoCm: round2(geo.boundingBoxMm.altoMm / 10) },
+    ])
+  );
+
+  const piezas = await leerColeccion('piezas');
+  const registro = {
+    id: nanoid(),
+    nombre,
+    angulosPermitidos: angulosPermitidos?.length ? angulosPermitidos : [0, 180],
+    tela: tela || null,
+    geometriaPorTalla,
+    dimensionesPorTalla,
+  };
+  piezas.push(registro);
+  await escribirColeccion('piezas', piezas);
+  res.status(201).json(registro);
+});
+
 router.put('/piezas/:id', async (req, res) => {
-  const { nombre, angulosPermitidos, permiteEspejo, tela } = req.body;
+  const { nombre, angulosPermitidos, tela } = req.body;
   const piezas = await leerColeccion('piezas');
   const pieza = piezas.find((p) => p.id === req.params.id);
   if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
 
   if (nombre !== undefined) pieza.nombre = nombre;
   if (angulosPermitidos !== undefined) pieza.angulosPermitidos = angulosPermitidos;
-  if (permiteEspejo !== undefined) pieza.permiteEspejo = !!permiteEspejo;
   if (tela !== undefined) pieza.tela = tela;
   await escribirColeccion('piezas', piezas);
   res.json(pieza);
@@ -87,9 +142,9 @@ router.delete('/piezas/:id', async (req, res) => {
 });
 
 // Agrega/reemplaza la geometría de UNA talla puntual de una pieza ya
-// existente — para corregir una talla puntual sin re-subir el archivo
-// completo del grupo. v0: reemplaza directo, sin historial de versiones
-// (simplificación documentada en ESTADO-ACTUAL.md).
+// existente — para completar una talla que faltaba o corregir una, sin
+// resubir todo el rango de nuevo. v0: reemplaza directo, sin historial de
+// versiones (simplificación documentada en ESTADO-ACTUAL.md).
 router.put('/piezas/:id/tallas/:talla', async (req, res) => {
   const { boundingBoxMm } = req.body;
   if (!boundingBoxMm) return res.status(400).json({ error: 'Falta la geometría resuelta' });
@@ -107,49 +162,28 @@ router.put('/piezas/:id/tallas/:talla', async (req, res) => {
   res.json(pieza);
 });
 
-// --- Grupos (prendas: roles cumplidos por piezas de biblioteca) -----------
+// --- Grupos (catálogo: una prenda = piezas de biblioteca por rol) ---------
+// No se sube nada acá — Grupos solo arma una prenda eligiendo piezas que ya
+// existen en la biblioteca. Reciclar una pieza en otro grupo es elegirla de
+// nuevo; si se resube en "Piezas", todos los grupos que la usan lo ven.
 
 router.get('/grupos', async (req, res) => {
   res.json(await leerColeccion('grupos'));
 });
 
-// Crea un grupo a partir de una lista de roles. Cada rol es 'nueva' (crea una
-// Pieza vacía en la biblioteca, todavía sin geometría — se completa después
-// con analizar-talla/confirmar-talla) o 'reciclada' (referencia una Pieza que
-// ya existe, para reusar su geometría tal cual).
 router.post('/grupos', async (req, res) => {
-  const { nombre, roles } = req.body;
-  if (!nombre || !Array.isArray(roles) || roles.length === 0) {
-    return res.status(400).json({ error: 'Falta nombre o roles' });
+  const { nombre, piezas } = req.body;
+  if (!nombre || !Array.isArray(piezas) || piezas.length === 0) {
+    return res.status(400).json({ error: 'Falta nombre o piezas' });
   }
-
-  const piezas = await leerColeccion('piezas');
-  const piezasDelGrupo = [];
-  for (const rol of roles) {
-    if (!rol.nombre) return res.status(400).json({ error: 'Un rol no tiene nombre' });
-    if (rol.modo === 'reciclada') {
-      if (!rol.piezaId) {
-        return res.status(400).json({ error: 'El rol "' + rol.nombre + '" está marcado como reciclado sin elegir una pieza' });
-      }
-      piezasDelGrupo.push({ piezaId: rol.piezaId, rol: rol.nombre, espejoActivo: !!rol.espejoActivo });
-    } else {
-      const nuevaPieza = {
-        id: nanoid(),
-        nombre: rol.nombre,
-        angulosPermitidos: [0, 180],
-        permiteEspejo: false,
-        tela: null,
-        geometriaPorTalla: {},
-        dimensionesPorTalla: {},
-      };
-      piezas.push(nuevaPieza);
-      piezasDelGrupo.push({ piezaId: nuevaPieza.id, rol: rol.nombre, espejoActivo: false });
+  for (const gp of piezas) {
+    if (!gp.piezaId || !gp.rol) {
+      return res.status(400).json({ error: 'Cada pieza del grupo necesita piezaId y rol' });
     }
   }
-  await escribirColeccion('piezas', piezas);
 
   const grupos = await leerColeccion('grupos');
-  const grupo = { id: nanoid(), nombre, piezas: piezasDelGrupo };
+  const grupo = { id: nanoid(), nombre, piezas };
   grupos.push(grupo);
   await escribirColeccion('grupos', grupos);
   res.status(201).json(grupo);
@@ -159,68 +193,6 @@ router.delete('/grupos/:id', async (req, res) => {
   const grupos = await leerColeccion('grupos');
   await escribirColeccion('grupos', grupos.filter((g) => g.id !== req.params.id));
   res.status(204).end();
-});
-
-// Paso 1 de cargar una talla: analiza el archivo (que trae TODAS las piezas
-// del grupo juntas, como exporta de verdad un programa de diseño) y trata de
-// matchear cada forma nombrada contra los roles del grupo. Lo que no
-// matchea queda para que el usuario lo asigne a mano.
-router.post('/grupos/:id/analizar-talla', async (req, res) => {
-  const { svgTexto } = req.body;
-  if (!svgTexto) return res.status(400).json({ error: 'Falta svgTexto' });
-
-  const grupos = await leerColeccion('grupos');
-  const grupo = grupos.find((g) => g.id === req.params.id);
-  if (!grupo) return res.status(404).json({ error: 'Grupo no encontrado' });
-
-  try {
-    const resultado = await analizarSvgMultiple(svgTexto, grupo.piezas.map((gp) => gp.rol));
-    res.json(resultado);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Paso 2: con el mapeo rol -> índice de candidato ya confirmado (automático
-// + correcciones a mano), calcula la geometría real de cada rol y la guarda
-// en la Pieza correspondiente de ese rol para la talla indicada. Si el rol
-// es una pieza reciclada, esto actualiza la biblioteca — y por lo tanto
-// todos los demás grupos que la usan también ven el cambio.
-router.post('/grupos/:id/confirmar-talla', async (req, res) => {
-  const { svgTexto, talla, asignaciones, mmPorUnidad, anchoConocidoCm, indiceReferencia } = req.body;
-  if (!svgTexto || !talla || !asignaciones || Object.keys(asignaciones).length === 0) {
-    return res.status(400).json({ error: 'Faltan svgTexto, talla o asignaciones' });
-  }
-
-  const grupos = await leerColeccion('grupos');
-  const grupo = grupos.find((g) => g.id === req.params.id);
-  if (!grupo) return res.status(404).json({ error: 'Grupo no encontrado' });
-
-  let resultado;
-  try {
-    resultado = await resolverGeometriasMultiples(svgTexto, asignaciones, {
-      mmPorUnidad,
-      anchoConocidoCm,
-      indiceReferencia,
-    });
-  } catch (error) {
-    return res.status(400).json({ error: error.message });
-  }
-
-  const piezas = await leerColeccion('piezas');
-  for (const [rol, geometria] of Object.entries(resultado.geometriasPorRol)) {
-    const grupoPieza = grupo.piezas.find((gp) => gp.rol === rol);
-    const pieza = piezas.find((p) => p.id === grupoPieza?.piezaId);
-    if (!pieza) continue;
-    pieza.geometriaPorTalla[talla] = { ...geometria, svgOriginal: svgTexto, validadoPorUsuario: true };
-    pieza.dimensionesPorTalla[talla] = {
-      anchoCm: round2(geometria.boundingBoxMm.anchoMm / 10),
-      altoCm: round2(geometria.boundingBoxMm.altoMm / 10),
-    };
-  }
-  await escribirColeccion('piezas', piezas);
-
-  res.json({ ok: true, mmPorUnidad: resultado.mmPorUnidad, roles: Object.keys(resultado.geometriasPorRol) });
 });
 
 function round2(n) {

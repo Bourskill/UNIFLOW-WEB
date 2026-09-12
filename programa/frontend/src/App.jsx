@@ -7,6 +7,8 @@ import { Pedidos } from './paginas/Pedidos.jsx';
 import { Icono } from './componentes/Icono.jsx';
 import { EstadoServidor } from './componentes/EstadoServidor.jsx';
 
+// Piezas va primero: es donde se sube la moldería real. Grupos es el
+// catálogo que arma prendas a partir de lo que ya está en Piezas.
 const PESTANAS = [
   { id: 'piezas', etiqueta: 'Piezas', icono: 'pieza' },
   { id: 'grupos', etiqueta: 'Grupos', icono: 'grupo' },

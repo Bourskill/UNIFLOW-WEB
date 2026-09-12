@@ -16,7 +16,6 @@
  * @property {string} id
  * @property {string} nombre                          ej. "Espalda", "Manga izquierda"
  * @property {number[]} angulosPermitidos              ej. [0, 180] — nunca se asume, lo elige el usuario
- * @property {boolean} permiteEspejo                   si esta pieza se puede usar reflejada (ver GrupoPieza.espejoActivo)
  * @property {string} [tela]                           tela por defecto de esta pieza
  * @property {Record<string, {
  *   poligonoMm: [number, number][],
@@ -28,15 +27,15 @@
  */
 
 /**
- * Grupo: una prenda completa — la unión de piezas (por referencia) que la
- * componen. Equivalente a lo que antes era "Moldería.piezas", pero ahora cada
- * entrada apunta a una Pieza de biblioteca en vez de contenerla.
+ * Grupo: un catálogo — una prenda completa armada eligiendo piezas que ya
+ * existen en la biblioteca, por rol. No se sube nada acá; cada entrada
+ * REFERENCIA una Pieza (nunca la copia), así que reciclar una pieza en otra
+ * prenda es elegirla de nuevo, y resubirla en Piezas actualiza todo lo que
+ * la usa.
  *
  * @typedef {Object} GrupoPieza
  * @property {string} piezaId
  * @property {string} rol                    nombre de esta pieza DENTRO del grupo (ej. "Manga izquierda")
- * @property {boolean} [espejoActivo]         usar la geometría reflejada de la Pieza en este rol
- * @property {number[]} [angulosPermitidosOverride]   si esta prenda necesita otra restricción que la de biblioteca
  *
  * @typedef {Object} Grupo
  * @property {string} id

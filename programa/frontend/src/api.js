@@ -38,6 +38,21 @@ export function listarPiezas() {
   return pedirJson('/piezas');
 }
 
+export function analizarSvg(svgTexto) {
+  return pedirJson('/piezas/analizar-svg', { method: 'POST', body: JSON.stringify({ svgTexto }) });
+}
+
+export function analizarSvgManual(svgTexto, indiceElegido, { mmPorUnidad, anchoConocidoCm } = {}) {
+  return pedirJson('/piezas/analizar-svg/manual', {
+    method: 'POST',
+    body: JSON.stringify({ svgTexto, indiceElegido, mmPorUnidad, anchoConocidoCm }),
+  });
+}
+
+export function crearPieza(pieza) {
+  return pedirJson('/piezas', { method: 'POST', body: JSON.stringify(pieza) });
+}
+
 export function editarPieza(id, cambios) {
   return pedirJson('/piezas/' + id, { method: 'PUT', body: JSON.stringify(cambios) });
 }
@@ -46,7 +61,7 @@ export function eliminarPieza(id) {
   return pedirJson('/piezas/' + id, { method: 'DELETE' });
 }
 
-// --- Grupos (prendas: roles cumplidos por piezas de biblioteca) -----------
+// --- Grupos (catálogo: una prenda = piezas de biblioteca por rol) ---------
 
 export function listarGrupos() {
   return pedirJson('/grupos');
@@ -58,24 +73,6 @@ export function crearGrupo(grupo) {
 
 export function eliminarGrupo(id) {
   return pedirJson('/grupos/' + id, { method: 'DELETE' });
-}
-
-// Un archivo por talla, con TODAS las piezas del grupo juntas (como exporta
-// de verdad un programa de diseño) — analizarTallaGrupo intenta matchear
-// cada forma nombrada contra los roles del grupo; confirmarTallaGrupo graba
-// la geometría ya resuelta (automática + correcciones a mano) en cada Pieza.
-export function analizarTallaGrupo(grupoId, svgTexto) {
-  return pedirJson('/grupos/' + grupoId + '/analizar-talla', {
-    method: 'POST',
-    body: JSON.stringify({ svgTexto }),
-  });
-}
-
-export function confirmarTallaGrupo(grupoId, datos) {
-  return pedirJson('/grupos/' + grupoId + '/confirmar-talla', {
-    method: 'POST',
-    body: JSON.stringify(datos),
-  });
 }
 
 export function anidarDesdeGrupo(grupoId, lineas, anchoLienzoCm) {
