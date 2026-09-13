@@ -125,7 +125,7 @@ export function Pedidos({ recargarSenal }) {
       </div>
 
       {productos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Creá primero un producto (en la pestaña "Productos").</p>
+        <p className="text-sm text-muted-foreground">Creá primero un producto (Diseño → Productos).</p>
       ) : (
         <Tarjeta as="form" onSubmit={guardar} className="flex max-w-2xl flex-col gap-4">
           <Campo etiqueta="Cliente / equipo">

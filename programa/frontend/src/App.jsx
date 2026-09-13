@@ -5,25 +5,23 @@ import { Piezas } from './paginas/Piezas.jsx';
 import { Disenos } from './paginas/Disenos.jsx';
 import { Productos } from './paginas/Productos.jsx';
 import { Pedidos } from './paginas/Pedidos.jsx';
+import { Historial } from './paginas/Historial.jsx';
 import { Icono } from './componentes/Icono.jsx';
 import { EstadoServidor } from './componentes/EstadoServidor.jsx';
+import { SubTabs } from './componentes/SubTabs.jsx';
 
-// Tres pestañas separadas a propósito (reemplaza la fusión anterior de
-// "Piezas y Grupos"): subir es una acción puntual, mientras que Prendas y
-// Piezas son vistas de catálogo/biblioteca que se consultan todo el tiempo
-// -- mezclarlas hacía que el formulario de subida siempre estuviera a la
-// vista aunque no se estuviera usando.
+// Tres apartados en el nav (no seis): pantallas relacionadas viven como
+// sub-pestañas DENTRO de un mismo apartado (estilo Google Drive), no como
+// entradas nuevas del nav -- corrección explícita del usuario sobre la
+// pasada anterior, que había creado un apartado nuevo por cada pantalla.
 const PESTANAS = [
-  { id: 'formulario', etiqueta: 'Subir piezas', icono: 'subir' },
-  { id: 'prendas', etiqueta: 'Prendas', icono: 'prenda' },
   { id: 'piezas', etiqueta: 'Piezas', icono: 'pieza' },
-  { id: 'disenos', etiqueta: 'Diseños', icono: 'diseno' },
-  { id: 'productos', etiqueta: 'Productos', icono: 'producto' },
-  { id: 'pedidos', etiqueta: 'Pedidos', icono: 'pedido' },
+  { id: 'diseno', etiqueta: 'Diseño', icono: 'diseno' },
+  { id: 'produccion', etiqueta: 'Producción', icono: 'pedido' },
 ];
 
 function App() {
-  const [pestana, setPestana] = useState('formulario');
+  const [pestana, setPestana] = useState('piezas');
   const [recargarSenal, setRecargarSenal] = useState(0);
   const marcarCambio = () => setRecargarSenal((n) => n + 1);
   const pestanaActual = PESTANAS.find((p) => p.id === pestana);
@@ -60,13 +58,32 @@ function App() {
           ))}
         </nav>
 
-        <main className="flex-1 overflow-y-auto p-8">
-          {pestana === 'formulario' && <Formulario onCambio={marcarCambio} />}
-          {pestana === 'prendas' && <Prendas recargarSenal={recargarSenal} />}
-          {pestana === 'piezas' && <Piezas recargarSenal={recargarSenal} onCambio={marcarCambio} />}
-          {pestana === 'disenos' && <Disenos recargarSenal={recargarSenal} onCambio={marcarCambio} />}
-          {pestana === 'productos' && <Productos recargarSenal={recargarSenal} onCambio={marcarCambio} />}
-          {pestana === 'pedidos' && <Pedidos recargarSenal={recargarSenal} />}
+        <main className="min-h-0 flex-1">
+          {pestana === 'piezas' && (
+            <SubTabs
+              tabs={[
+                { id: 'subir', etiqueta: 'Subir piezas', contenido: <Formulario onCambio={marcarCambio} /> },
+                { id: 'prendas', etiqueta: 'Prendas', contenido: <Prendas recargarSenal={recargarSenal} /> },
+                { id: 'biblioteca', etiqueta: 'Biblioteca', contenido: <Piezas recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
+              ]}
+            />
+          )}
+          {pestana === 'diseno' && (
+            <SubTabs
+              tabs={[
+                { id: 'disenos', etiqueta: 'Diseños', contenido: <Disenos recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
+                { id: 'productos', etiqueta: 'Productos', contenido: <Productos recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
+              ]}
+            />
+          )}
+          {pestana === 'produccion' && (
+            <SubTabs
+              tabs={[
+                { id: 'nuevo', etiqueta: 'Nuevo pedido', contenido: <Pedidos recargarSenal={recargarSenal} /> },
+                { id: 'historial', etiqueta: 'Historial', contenido: <Historial recargarSenal={recargarSenal} /> },
+              ]}
+            />
+          )}
         </main>
       </div>
     </div>

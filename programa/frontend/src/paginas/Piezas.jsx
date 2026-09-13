@@ -85,6 +85,7 @@ export function Piezas({ recargarSenal, onCambio }) {
   const [piezas, setPiezas] = useState([]);
   const [grupos, setGrupos] = useState([]);
   const [filtroCategoria, setFiltroCategoria] = useState('');
+  const [busqueda, setBusqueda] = useState('');
 
   async function recargar() {
     const [ps, gs] = await Promise.all([listarPiezas(), listarGrupos()]);
@@ -113,7 +114,9 @@ export function Piezas({ recargarSenal, onCambio }) {
     return mapa;
   }, [grupos]);
 
-  const piezasFiltradas = filtroCategoria ? piezas.filter((p) => p.categoria === filtroCategoria) : piezas;
+  const piezasFiltradas = piezas
+    .filter((p) => !filtroCategoria || p.categoria === filtroCategoria)
+    .filter((p) => !busqueda.trim() || p.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()));
 
   async function borrar(id) {
     await eliminarPieza(id);
@@ -131,19 +134,32 @@ export function Piezas({ recargarSenal, onCambio }) {
         </p>
       </div>
 
-      {categorias.length > 0 && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-faint-foreground">Categoría:</span>
-          <Select value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)} className="max-w-[200px]">
-            <option value="">Todas</option>
-            {categorias.map((c) => <option key={c} value={c}>{c}</option>)}
-          </Select>
+      {piezas.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar por nombre…"
+            className="max-w-[220px]"
+          />
+          {categorias.length > 0 && (
+            <>
+              <span className="text-xs font-medium text-faint-foreground">Categoría:</span>
+              <Select value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)} className="max-w-[200px]">
+                <option value="">Todas</option>
+                {categorias.map((c) => <option key={c} value={c}>{c}</option>)}
+              </Select>
+            </>
+          )}
+          <span className="text-xs text-faint-foreground">
+            {piezasFiltradas.length} de {piezas.length}
+          </span>
         </div>
       )}
 
       {piezasFiltradas.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {piezas.length === 0 ? 'Todavía no hay ninguna — subí una en "Subir piezas".' : 'Ninguna en esta categoría.'}
+          {piezas.length === 0 ? 'Todavía no hay ninguna — subí una en "Subir piezas".' : 'Ninguna coincide con el filtro.'}
         </p>
       ) : (
         <div className="flex max-w-3xl flex-col gap-3">

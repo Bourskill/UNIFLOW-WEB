@@ -91,7 +91,7 @@ export function Productos({ recargarSenal, onCambio }) {
       </div>
 
       {grupos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Creá primero un grupo (pestaña "Grupos").</p>
+        <p className="text-sm text-muted-foreground">Creá primero una prenda (Piezas → Prendas).</p>
       ) : (
         <Tarjeta as="form" onSubmit={guardar} className="flex max-w-2xl flex-col gap-4">
           <Campo etiqueta="Nombre del producto">

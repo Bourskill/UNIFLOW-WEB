@@ -383,6 +383,13 @@ router.post('/nesting/generar', async (req, res) => {
   res.send(Buffer.from(pdfBytes));
 });
 
+// Historial de producción: cada corrida de nesting ya generada, más nueva
+// primero -- la pestaña "Historial" de Producción vive de esto.
+router.get('/generaciones', async (req, res) => {
+  const generaciones = await leerColeccion('generaciones');
+  res.json(generaciones.slice().reverse());
+});
+
 // Reposición: reimprime una sola pieza de una generación ya existente, sin
 // tocar el resto del lote. Es el hallazgo más accionable de la investigación
 // de referencia (ver claude/README.md).

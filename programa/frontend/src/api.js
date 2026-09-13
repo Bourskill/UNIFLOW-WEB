@@ -161,3 +161,21 @@ export async function generarPdf(resultadoNesting) {
   enlace.click();
   URL.revokeObjectURL(url);
 }
+
+// --- Historial de producción -------------------------------------------------
+
+export function listarGeneraciones() {
+  return pedirJson('/generaciones');
+}
+
+export async function reponerPieza(generacionId, piezaId) {
+  const respuesta = await fetch(BASE_URL + '/nesting/' + generacionId + '/reposicion/' + piezaId, { method: 'POST' });
+  if (!respuesta.ok) throw new Error('Falló la reposición');
+  const blob = await respuesta.blob();
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement('a');
+  enlace.href = url;
+  enlace.download = 'reposicion.pdf';
+  enlace.click();
+  URL.revokeObjectURL(url);
+}

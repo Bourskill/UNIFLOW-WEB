@@ -125,7 +125,7 @@ export function Disenos({ recargarSenal, onCambio }) {
 
       {grupos.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Creá primero un grupo (pestaña "Grupos") para poder subirle un diseño.
+          Creá primero una prenda (Piezas → Prendas) para poder subirle un diseño.
         </p>
       ) : (
         <Tarjeta as="form" onSubmit={guardar} className="flex max-w-2xl flex-col gap-4">
