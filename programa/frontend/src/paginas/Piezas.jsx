@@ -13,24 +13,18 @@ function leerArchivoComoTexto(archivo) {
   });
 }
 
-function formatoDeArchivo(archivo) {
-  const nombre = (archivo.name || '').toLowerCase();
-  if (nombre.endsWith('.dxf')) return 'dxf';
-  if (nombre.endsWith('.svg')) return 'svg';
-  return null;
-}
-
-// Un solo archivo (.svg o .dxf) con todas las tallas de la pieza adentro:
-// el nombre de cada forma/capa ES su talla, tal cual esté escrito en el
-// archivo — "S", "2", "34", lo que sea, nunca contra una lista cerrada.
-// Formas sin nombre quedan afuera solas (no hay de dónde sacarles una
-// talla); dos formas con el mismo nombre quedan ambiguas para resolver a
-// mano. El editor manual está siempre disponible pero arranca cerrado —
-// se abre solo cuando hay algo real para revisar (una ambigüedad).
+// Un solo archivo DXF con todas las tallas de la pieza adentro: una CAPA
+// por talla, nombrada tal cual la talla ("S", "2", "34", lo que sea, nunca
+// contra una lista cerrada). Una capa puede traer más de un trazo —
+// contorno + piquetes sueltos de esa misma talla — sin confundirse con los
+// de otra talla, porque están en otra capa. Capas sin nombre real (o la
+// capa "0", la que un CAD asigna por defecto) quedan afuera solas; dos
+// capas con el mismo nombre quedan ambiguas para resolver a mano. El editor
+// manual está siempre disponible pero arranca cerrado — se abre solo
+// cuando hay algo real para revisar (una ambigüedad).
 function ZonaSubidaPieza({ onGeometriaLista }) {
   const [estado, setEstado] = useState('vacio'); // vacio | analizando | revisando | resuelto | error
   const [archivoTexto, setArchivoTexto] = useState(null);
-  const [formato, setFormato] = useState(null);
   const [analisis, setAnalisis] = useState(null);
   const [overrides, setOverrides] = useState({}); // indice -> talla escrita a mano ('' = excluida)
   const [editando, setEditando] = useState(false);
@@ -42,9 +36,8 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
   const onDrop = useCallback(async (archivos) => {
     const archivo = archivos[0];
     if (!archivo) return;
-    const formatoDetectado = formatoDeArchivo(archivo);
-    if (!formatoDetectado) {
-      setError('Solo se acepta .svg o .dxf.');
+    if (!(archivo.name || '').toLowerCase().endsWith('.dxf')) {
+      setError('Solo se acepta .dxf.');
       setEstado('error');
       return;
     }
@@ -56,11 +49,10 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
     try {
       const texto = await leerArchivoComoTexto(archivo);
       setArchivoTexto(texto);
-      setFormato(formatoDetectado);
-      const r = await analizarPieza(texto, formatoDetectado);
+      const r = await analizarPieza(texto);
       setAnalisis(r);
       // Se abre el editor solo si quedó algo genuinamente ambiguo (dos
-      // formas con el mismo nombre) — una forma sin nombre no es una
+      // capas con el mismo nombre) — una capa sin nombre no es una
       // ambigüedad, es simplemente "no es una talla", y no necesita review.
       setEditando(r.asignaciones.some((a) => a.nombreDetectado && !a.tallaAsignada));
       setEstado('revisando');
@@ -73,7 +65,7 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'image/svg+xml': ['.svg'], 'application/dxf': ['.dxf'], 'image/vnd.dxf': ['.dxf'] },
+    accept: { 'application/dxf': ['.dxf'], 'image/vnd.dxf': ['.dxf'] },
     multiple: false,
   });
 
@@ -109,11 +101,11 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
       const opciones = necesitaEscala
         ? { anchoConocidoCm: Number(anchoConocidoCm), indiceReferencia: Number(indiceReferencia) }
         : { mmPorUnidad: analisis.mmPorUnidad };
-      const r = await resolverPieza(archivoTexto, formato, mapaFinal, opciones);
+      const r = await resolverPieza(archivoTexto, mapaFinal, opciones);
       const geometriaPorTalla = Object.fromEntries(
         Object.entries(r.geometriasPorTalla).map(([talla, geo]) => [
           talla,
-          { ...geo, archivoOriginal: archivoTexto, formatoOriginal: formato, validadoPorUsuario: true },
+          { ...geo, archivoOriginal: archivoTexto, validadoPorUsuario: true },
         ])
       );
       setGeometrias(geometriaPorTalla);
@@ -135,8 +127,8 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
           }
         >
           <input {...getInputProps()} />
-          Arrastrá acá el archivo <strong>.svg o .dxf</strong> con todas las tallas de esta pieza
-          juntas, cada una nombrada.
+          Arrastrá acá el archivo <strong>.dxf</strong> con todas las tallas de esta pieza juntas,
+          una capa por talla nombrada así (los piquetes sueltos de cada talla van en su misma capa).
         </div>
       )}
 
@@ -161,7 +153,7 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
               {analisis.candidatos.map((c) => (
                 <div key={c.indice} className="flex items-center gap-2">
                   <span className="w-32 shrink-0 truncate text-xs text-faint-foreground" title={c.nombre || ''}>
-                    {c.nombre || '(forma sin nombre)'}
+                    {c.nombre || '(capa sin nombre)'}
                   </span>
                   <Input
                     value={tallaPorIndice[c.indice]}
@@ -178,9 +170,9 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/20 bg-primary-soft px-3 py-2 text-sm text-primary">
               <span>Sin unidad física — ancho real de</span>
               <Select value={indiceReferencia} onChange={(e) => setIndiceReferencia(e.target.value)} className="max-w-[150px]">
-                <option value="">una forma…</option>
+                <option value="">una capa…</option>
                 {analisis.candidatos.map((c) => (
-                  <option key={c.indice} value={c.indice}>{c.nombre || 'forma #' + c.indice}</option>
+                  <option key={c.indice} value={c.indice}>{c.nombre || 'capa #' + c.indice}</option>
                 ))}
               </Select>
               <Input
@@ -191,9 +183,9 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
                 className="max-w-[70px]"
               />
               <Ayuda>
-                Pasa sobre todo con SVG: el archivo no declara cuánto mide de verdad (mm/cm/in), así
-                que hace falta confirmarlo a mano una vez para poder calcular el resto a escala. Un
-                DXF casi siempre trae esto solo.
+                Este DXF no trae la variable de unidad física (INSUNITS) o vino en "sin unidades" —
+                pasa con algunos exports. Confirmá una vez cuánto mide de verdad una capa para poder
+                calcular el resto a escala.
               </Ayuda>
             </div>
           )}

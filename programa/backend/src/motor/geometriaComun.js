@@ -1,7 +1,6 @@
-// Lo que comparten los importadores de SVG y DXF: una vez que cada formato
-// entrega sus puntos ya en "unidades del archivo" (sin importar de dónde
-// salieron), matchear el nombre de una forma/capa contra "es una talla" y
-// calcular bounding box en mm es exactamente el mismo cálculo.
+// Utilidades de geometría usadas por importarDxf.js: una vez que se tienen
+// los puntos en "unidades del archivo", matchear el nombre de una capa
+// contra "es una talla" y calcular bounding box en mm.
 //
 // La talla NO se valida contra una lista fija (XS/S/M/.../XL) -- eso
 // forzaba una sola escala (ropa de adulto unisex) y dejaba afuera tallas de

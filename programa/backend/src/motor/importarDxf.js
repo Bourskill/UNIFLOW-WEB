@@ -1,20 +1,36 @@
 // Extrae geometría real de un DXF exportado desde cualquier programa CAD/de
-// patronaje. A diferencia del SVG (que identifica cada talla por el nombre
-// de una forma), en DXF la convención estándar es una CAPA (layer) por
-// talla — así exportan Rhino, Lectra, Gerber, etc. Cada entidad se agrupa
-// por su capa; el nombre de la capa se matchea contra una talla conocida
-// igual que en importarSvg.js (mismo criterio: nunca se adivina lo ambiguo).
+// patronaje. DXF es el ÚNICO formato soportado (se descartó SVG: exports
+// reales llegaban sin nombre por forma y sin unidad física declarada, dos
+// problemas que DXF no tiene).
+//
+// REQUISITO del archivo: una CAPA (layer) por talla, nombrada con esa
+// talla — así exportan Rhino, Lectra, Gerber, etc. Una capa puede traer más
+// de una entidad (el contorno de corte + piquetes/marcas sueltas de esa
+// misma talla): todo lo que esté en la capa "S" es parte de la talla S, sin
+// importar cuántos trazos separados sean. Esto es lo que hace posible
+// distinguir piquetes de tallas sin necesidad de detectarlos por forma o
+// color -- contar trazos no serviría (un piquete es un trazo suelto más).
+//
+// La capa "0" es la que usa AutoCAD/Illustrator por defecto para todo lo que
+// no se asignó a mano a otra capa -- si un archivo llega así (típico de un
+// export de Illustrator que no preservó capas), NO se toma "0" como si
+// fuera el nombre real de una talla: se trata como "sin capa", igual que
+// una forma sin nombre.
 //
 // La escala física sale de la variable de cabecera $INSUNITS del propio
-// archivo (mm/cm/in/pie/m) — más confiable que el SVG, que no siempre
-// declara una unidad real. Si el DXF no la declara (o es "sin unidades"),
-// se cae al mismo mecanismo manual que el SVG: pedir el ancho real en cm de
-// una forma de referencia.
+// archivo (mm/cm/in/pie/m). Si el archivo no la declara (o es "sin
+// unidades"), se pide a mano: el ancho real en cm de una forma de
+// referencia.
 
 import DxfParser from 'dxf-parser';
 import { anchoDePuntos, asignarTallasPorNombre, poligonoYBoundingBoxDePuntos } from './geometriaComun.js';
 
 const UNIDAD_INSUNITS_A_MM = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000 };
+
+// Capas reservadas que un CAD asigna por defecto, nunca a propósito para
+// decir "esta es la talla llamada 0" -- si algo quedó ahí es porque no se
+// le asignó capa, no porque de verdad se llame así.
+const CAPAS_RESERVADAS = new Set(['0', 'DEFPOINTS']);
 
 // Tessela el arco de una LWPOLYLINE/POLYLINE entre dos vértices con bulge.
 // bulge = tan(theta/4), theta > 0 significa arco antihorario de p1 a p2
@@ -58,9 +74,14 @@ function tessellarArco(centro, radio, anguloInicio, anguloFin, segmentosPorCuart
   return puntos;
 }
 
-// Devuelve los puntos (en unidades crudas del DXF) de una entidad, o null si
-// el tipo no está soportado -- una entidad no soportada (ej. SPLINE, TEXT)
-// simplemente no aporta puntos, no bloquea el resto de la capa.
+// Devuelve { puntos, cerrado } de una entidad (en unidades crudas del DXF),
+// o null si el tipo no está soportado -- una entidad no soportada (ej.
+// SPLINE, TEXT) simplemente no aporta puntos, no bloquea el resto de la
+// capa. `cerrado` es lo que separa el contorno real de corte de un piquete
+// suelto: un piquete se dibuja casi siempre como una LINE recta (abierta),
+// mientras que el contorno de una pieza es una forma cerrada. Es una señal
+// objetiva del propio DXF (cerrado o no), no una adivinanza sobre qué es
+// cada trazo.
 function puntosDeEntidad(entidad) {
   switch (entidad.type) {
     case 'LWPOLYLINE':
@@ -80,26 +101,30 @@ function puntosDeEntidad(entidad) {
         if (ultimo.bulge) puntos.push(...tessellarBulge([ultimo.x, ultimo.y], [primero.x, primero.y], ultimo.bulge));
         else puntos.push([primero.x, primero.y]);
       }
-      return puntos;
+      return { puntos, cerrado: !!entidad.shape };
     }
     case 'LINE':
-      return (entidad.vertices || []).map((v) => [v.x, v.y]);
+      return { puntos: (entidad.vertices || []).map((v) => [v.x, v.y]), cerrado: false };
     case 'CIRCLE':
-      return tessellarArco(entidad.center, entidad.radius, 0, 2 * Math.PI);
+      return { puntos: tessellarArco(entidad.center, entidad.radius, 0, 2 * Math.PI), cerrado: true };
     case 'ARC': {
       let fin = entidad.endAngle;
       if (fin <= entidad.startAngle) fin += 2 * Math.PI;
-      return tessellarArco(entidad.center, entidad.radius, entidad.startAngle, fin);
+      return { puntos: tessellarArco(entidad.center, entidad.radius, entidad.startAngle, fin), cerrado: false };
     }
     default:
       return null;
   }
 }
 
-// Agrupa todas las entidades por capa -- cada capa es un "candidato" (el
-// equivalente DXF de una forma nombrada en el SVG). Varias entidades en la
-// misma capa (ej. un contorno + una pinza suelta) se juntan en un solo
-// candidato; el bounding box se calcula sobre todos sus puntos juntos.
+// Agrupa todas las entidades por capa -- cada capa es un "candidato" (una
+// talla en potencia). Varias entidades en la misma capa (ej. un contorno +
+// piquetes sueltos) se juntan en un solo candidato. La geometría/bounding box que se guarda sale de las entidades
+// CERRADAS de la capa (el contorno real) cuando hay alguna -- así un
+// piquete que sobresale del molde no infla el ancho/alto guardado. Si la
+// capa no tiene ninguna entidad cerrada (ej. un contorno armado con LINE/ARC
+// sueltos en vez de una sola polilínea), se usa todo -- no hay nada cerrado
+// que preferir, así que no hay riesgo de descartar el contorno real.
 function extraerCandidatosDxf(dxfTexto) {
   const parser = new DxfParser();
   const dxf = parser.parseSync(dxfTexto);
@@ -109,11 +134,13 @@ function extraerCandidatosDxf(dxfTexto) {
 
   const porCapa = new Map();
   for (const entidad of dxf.entities) {
-    const puntos = puntosDeEntidad(entidad);
-    if (!puntos || puntos.length === 0) continue;
+    const resultado = puntosDeEntidad(entidad);
+    if (!resultado || resultado.puntos.length === 0) continue;
     const capa = entidad.layer || '0';
-    if (!porCapa.has(capa)) porCapa.set(capa, []);
-    porCapa.get(capa).push(...puntos);
+    if (!porCapa.has(capa)) porCapa.set(capa, { todos: [], cerrados: [] });
+    const grupo = porCapa.get(capa);
+    grupo.todos.push(...resultado.puntos);
+    if (resultado.cerrado) grupo.cerrados.push(...resultado.puntos);
   }
 
   const nombres = [...porCapa.keys()];
@@ -123,7 +150,14 @@ function extraerCandidatosDxf(dxfTexto) {
     );
   }
 
-  const candidatos = nombres.map((nombre, indice) => ({ indice, nombre, puntosUnidades: porCapa.get(nombre) }));
+  const candidatos = nombres.map((capa, indice) => {
+    const grupo = porCapa.get(capa);
+    return {
+      indice,
+      nombre: CAPAS_RESERVADAS.has(capa.toUpperCase()) ? null : capa,
+      puntosUnidades: grupo.cerrados.length > 0 ? grupo.cerrados : grupo.todos,
+    };
+  });
   const insunits = dxf.header && dxf.header.$INSUNITS;
   const mmPorUnidad = UNIDAD_INSUNITS_A_MM[insunits] || null;
 
@@ -133,7 +167,7 @@ function extraerCandidatosDxf(dxfTexto) {
 /**
  * @param {string} dxfTexto  un archivo con una capa por talla, cada capa nombrada
  */
-export async function analizarPiezaMultiTallaDxf(dxfTexto) {
+export async function analizarPiezaMultiTalla(dxfTexto) {
   const { candidatos, mmPorUnidad } = extraerCandidatosDxf(dxfTexto);
   const asignaciones = asignarTallasPorNombre(candidatos);
 
@@ -150,7 +184,7 @@ export async function analizarPiezaMultiTallaDxf(dxfTexto) {
  * @param {string} dxfTexto
  * @param {Record<string, number>} mapaTallaAIndice
  */
-export async function resolverGeometriasPorTallaDxf(
+export async function resolverGeometriasPorTalla(
   dxfTexto,
   mapaTallaAIndice,
   { mmPorUnidad, anchoConocidoCm, indiceReferencia } = {}
