@@ -5,7 +5,8 @@ import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
 import { resolverPiezasDePedido } from '../motor/resolverPedido.js';
-import { analizarPiezaMultiTalla, resolverGeometriasPorTalla } from '../motor/importarDxf.js';
+import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
+import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf } from '../motor/importarPdf.js';
 
 const router = Router();
 
@@ -57,7 +58,7 @@ crudSimple('productos');
 crudSimple('pedidos');
 
 // --- Piezas (biblioteca) ---------------------------------------------------
-// Acá se sube la moldería real: por PIEZA, UN solo archivo DXF con todas sus
+// Acá se sube la moldería real: por PIEZA, UN solo archivo con todas sus
 // tallas adentro, una CAPA por talla (nombrada "S", "M", "L"...; puede traer
 // más de un trazo por capa -- contorno + piquetes sueltos de esa talla, todo
 // cuenta como parte de esa talla) — así se manejan de verdad los patrones
@@ -66,23 +67,38 @@ crudSimple('pedidos');
 // referencia (no se copia) desde uno o más Grupos — resubir la pieza acá
 // actualiza automáticamente a todos los grupos que la usan.
 //
+// Dos formatos soportados, los dos con capas reales:
+// - DXF: para quien arma la moldería en software de patronaje dedicado
+//   (Rhino, Lectra, Gerber, Optitex...), que exporta capas limpias.
+// - PDF: para quien arma la moldería en Illustrator (exportando con "Crear
+//   capas de Acrobat" activado) -- el export nativo de Illustrator a DXF no
+//   preserva bien las capas, PDF sí. Bonus: PDF siempre mide en puntos, así
+//   que nunca hace falta confirmar la escala a mano como puede pasar en DXF.
 // Se descartó SVG (probado y desechado): en la práctica llegaba sin nombre
-// por forma y sin unidad física declarada -- los dos datos que este flujo
-// necesita confiar del archivo. DXF trae los dos de forma confiable.
+// por forma y sin unidad física declarada.
 
 router.get('/piezas', async (req, res) => {
   res.json(await leerColeccion('piezas'));
 });
 
-// Analiza el DXF (una capa por talla) y trata de matchear cada capa contra
-// una talla conocida. Lo que no matchea (o quedó en una capa reservada tipo
-// "0", que un CAD asigna por defecto) queda para que el usuario lo asigne
-// a mano.
+function motorPorFormato(formato) {
+  if (formato === 'dxf') return { analizar: analizarDxf, resolver: resolverDxf, decodificar: (texto) => texto };
+  if (formato === 'pdf') return { analizar: analizarPdf, resolver: resolverPdf, decodificar: (texto) => Buffer.from(texto, 'base64') };
+  return null;
+}
+
+// Analiza el archivo (una capa por talla) y trata de matchear cada capa
+// contra una talla conocida. Lo que no matchea (o en DXF, quedó en una capa
+// reservada tipo "0", que un CAD asigna por defecto) queda para que el
+// usuario lo asigne a mano. `formato` decide qué motor usa el backend --
+// nunca se adivina por el contenido del archivo. El DXF viaja como texto
+// plano; el PDF (binario) viaja en base64 dentro del mismo campo `texto`.
 router.post('/piezas/analizar-multitalla', async (req, res) => {
-  const { texto } = req.body;
-  if (!texto) return res.status(400).json({ error: 'Falta texto' });
+  const { texto, formato } = req.body;
+  const motor = motorPorFormato(formato);
+  if (!texto || !motor) return res.status(400).json({ error: 'Falta texto, o formato inválido (dxf o pdf)' });
   try {
-    const resultado = await analizarPiezaMultiTalla(texto);
+    const resultado = await motor.analizar(motor.decodificar(texto));
     res.json(resultado);
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -94,12 +110,13 @@ router.post('/piezas/analizar-multitalla', async (req, res) => {
 // No guarda nada todavía — el frontend arma la Pieza final con esto y llama
 // a POST /piezas.
 router.post('/piezas/resolver-multitalla', async (req, res) => {
-  const { texto, asignaciones, mmPorUnidad, anchoConocidoCm, indiceReferencia } = req.body;
-  if (!texto || !asignaciones || Object.keys(asignaciones).length === 0) {
-    return res.status(400).json({ error: 'Faltan texto o asignaciones' });
+  const { texto, formato, asignaciones, mmPorUnidad, anchoConocidoCm, indiceReferencia } = req.body;
+  const motor = motorPorFormato(formato);
+  if (!texto || !motor || !asignaciones || Object.keys(asignaciones).length === 0) {
+    return res.status(400).json({ error: 'Faltan texto, formato válido (dxf o pdf), o asignaciones' });
   }
   try {
-    const resultado = await resolverGeometriasPorTalla(texto, asignaciones, { mmPorUnidad, anchoConocidoCm, indiceReferencia });
+    const resultado = await motor.resolver(motor.decodificar(texto), asignaciones, { mmPorUnidad, anchoConocidoCm, indiceReferencia });
     res.json(resultado);
   } catch (error) {
     res.status(400).json({ error: error.message });

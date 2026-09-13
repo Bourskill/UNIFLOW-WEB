@@ -1,7 +1,9 @@
-// Extrae geometría real de un DXF exportado desde cualquier programa CAD/de
-// patronaje. DXF es el ÚNICO formato soportado (se descartó SVG: exports
-// reales llegaban sin nombre por forma y sin unidad física declarada, dos
-// problemas que DXF no tiene).
+// Extrae geometría real de un DXF exportado desde software de patronaje
+// dedicado (Rhino, Lectra, Gerber, Optitex...) — para quien arma la
+// moldería en Illustrator, ver en cambio importarPdf.js: el export nativo
+// de Illustrator a DXF no preserva bien las capas. Se descartó SVG (probado
+// y desechado): exports reales llegaban sin nombre por forma y sin unidad
+// física declarada.
 //
 // REQUISITO del archivo: una CAPA (layer) por talla, nombrada con esa
 // talla — así exportan Rhino, Lectra, Gerber, etc. Una capa puede traer más

@@ -38,18 +38,19 @@ export function listarPiezas() {
   return pedirJson('/piezas');
 }
 
-// Un solo archivo DXF con todas las tallas de la pieza adentro (una capa
-// por talla, nombrada "S", "M", "L"...) — analizarPieza intenta matchear
-// cada capa contra una talla conocida; resolverPieza calcula la geometría
-// real ya con el mapeo confirmado (automático + correcciones a mano).
-export function analizarPieza(texto) {
-  return pedirJson('/piezas/analizar-multitalla', { method: 'POST', body: JSON.stringify({ texto }) });
+// Un solo archivo (.dxf o .pdf) con todas las tallas de la pieza adentro
+// (una capa por talla, nombrada "S", "M", "L"...) — analizarPieza intenta
+// matchear cada capa contra una talla conocida; resolverPieza calcula la
+// geometría real ya con el mapeo confirmado (automático + correcciones a
+// mano). El DXF viaja como texto plano; el PDF (binario) en base64.
+export function analizarPieza(texto, formato) {
+  return pedirJson('/piezas/analizar-multitalla', { method: 'POST', body: JSON.stringify({ texto, formato }) });
 }
 
-export function resolverPieza(texto, asignaciones, { mmPorUnidad, anchoConocidoCm, indiceReferencia } = {}) {
+export function resolverPieza(texto, formato, asignaciones, { mmPorUnidad, anchoConocidoCm, indiceReferencia } = {}) {
   return pedirJson('/piezas/resolver-multitalla', {
     method: 'POST',
-    body: JSON.stringify({ texto, asignaciones, mmPorUnidad, anchoConocidoCm, indiceReferencia }),
+    body: JSON.stringify({ texto, formato, asignaciones, mmPorUnidad, anchoConocidoCm, indiceReferencia }),
   });
 }
 

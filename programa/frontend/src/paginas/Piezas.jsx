@@ -13,18 +13,38 @@ function leerArchivoComoTexto(archivo) {
   });
 }
 
-// Un solo archivo DXF con todas las tallas de la pieza adentro: una CAPA
-// por talla, nombrada tal cual la talla ("S", "2", "34", lo que sea, nunca
-// contra una lista cerrada). Una capa puede traer más de un trazo —
-// contorno + piquetes sueltos de esa misma talla — sin confundirse con los
-// de otra talla, porque están en otra capa. Capas sin nombre real (o la
-// capa "0", la que un CAD asigna por defecto) quedan afuera solas; dos
-// capas con el mismo nombre quedan ambiguas para resolver a mano. El editor
-// manual está siempre disponible pero arranca cerrado — se abre solo
-// cuando hay algo real para revisar (una ambigüedad).
+// El PDF es binario: viaja como base64 dentro del mismo campo de texto que
+// usa el DXF, así la API no necesita dos caminos distintos de subida.
+function leerArchivoComoBase64(archivo) {
+  return new Promise((resolve, reject) => {
+    const lector = new FileReader();
+    lector.onload = () => resolve(lector.result.split(',')[1]);
+    lector.onerror = reject;
+    lector.readAsDataURL(archivo);
+  });
+}
+
+function formatoDeArchivo(archivo) {
+  const nombre = (archivo.name || '').toLowerCase();
+  if (nombre.endsWith('.dxf')) return 'dxf';
+  if (nombre.endsWith('.pdf')) return 'pdf';
+  return null;
+}
+
+// Un solo archivo (.dxf o .pdf, exportado con capas de Illustrator) con
+// todas las tallas de la pieza adentro: una CAPA por talla, nombrada tal
+// cual la talla ("S", "2", "34", lo que sea, nunca contra una lista
+// cerrada). Una capa puede traer más de un trazo — contorno + piquetes
+// sueltos de esa misma talla — sin confundirse con los de otra talla,
+// porque están en otra capa. Capas sin nombre real (o la capa "0" de DXF,
+// la que un CAD asigna por defecto) quedan afuera solas; dos capas con el
+// mismo nombre quedan ambiguas para resolver a mano. El editor manual está
+// siempre disponible pero arranca cerrado — se abre solo cuando hay algo
+// real para revisar (una ambigüedad).
 function ZonaSubidaPieza({ onGeometriaLista }) {
   const [estado, setEstado] = useState('vacio'); // vacio | analizando | revisando | resuelto | error
   const [archivoTexto, setArchivoTexto] = useState(null);
+  const [formato, setFormato] = useState(null);
   const [analisis, setAnalisis] = useState(null);
   const [overrides, setOverrides] = useState({}); // indice -> talla escrita a mano ('' = excluida)
   const [editando, setEditando] = useState(false);
@@ -36,8 +56,9 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
   const onDrop = useCallback(async (archivos) => {
     const archivo = archivos[0];
     if (!archivo) return;
-    if (!(archivo.name || '').toLowerCase().endsWith('.dxf')) {
-      setError('Solo se acepta .dxf.');
+    const formatoDetectado = formatoDeArchivo(archivo);
+    if (!formatoDetectado) {
+      setError('Solo se acepta .dxf o .pdf.');
       setEstado('error');
       return;
     }
@@ -47,9 +68,11 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
     setOverrides({});
     onGeometriaLista(null);
     try {
-      const texto = await leerArchivoComoTexto(archivo);
+      const texto =
+        formatoDetectado === 'pdf' ? await leerArchivoComoBase64(archivo) : await leerArchivoComoTexto(archivo);
       setArchivoTexto(texto);
-      const r = await analizarPieza(texto);
+      setFormato(formatoDetectado);
+      const r = await analizarPieza(texto, formatoDetectado);
       setAnalisis(r);
       // Se abre el editor solo si quedó algo genuinamente ambiguo (dos
       // capas con el mismo nombre) — una capa sin nombre no es una
@@ -65,7 +88,7 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'application/dxf': ['.dxf'], 'image/vnd.dxf': ['.dxf'] },
+    accept: { 'application/dxf': ['.dxf'], 'image/vnd.dxf': ['.dxf'], 'application/pdf': ['.pdf'] },
     multiple: false,
   });
 
@@ -101,11 +124,11 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
       const opciones = necesitaEscala
         ? { anchoConocidoCm: Number(anchoConocidoCm), indiceReferencia: Number(indiceReferencia) }
         : { mmPorUnidad: analisis.mmPorUnidad };
-      const r = await resolverPieza(archivoTexto, mapaFinal, opciones);
+      const r = await resolverPieza(archivoTexto, formato, mapaFinal, opciones);
       const geometriaPorTalla = Object.fromEntries(
         Object.entries(r.geometriasPorTalla).map(([talla, geo]) => [
           talla,
-          { ...geo, archivoOriginal: archivoTexto, validadoPorUsuario: true },
+          { ...geo, archivoOriginal: archivoTexto, formatoOriginal: formato, validadoPorUsuario: true },
         ])
       );
       setGeometrias(geometriaPorTalla);
@@ -127,8 +150,9 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
           }
         >
           <input {...getInputProps()} />
-          Arrastrá acá el archivo <strong>.dxf</strong> con todas las tallas de esta pieza juntas,
-          una capa por talla nombrada así (los piquetes sueltos de cada talla van en su misma capa).
+          Arrastrá acá el archivo <strong>.dxf o .pdf</strong> con todas las tallas de esta pieza
+          juntas, una capa por talla nombrada así (los piquetes sueltos de cada talla van en su
+          misma capa). El PDF se exporta desde Illustrator con "Crear capas de Acrobat" activado.
         </div>
       )}
 

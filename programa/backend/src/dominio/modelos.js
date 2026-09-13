@@ -8,10 +8,10 @@
  * real de piezas entre prendas, ej. "misma remera, otro cuello").
  *
  * La geometría real (poligonoMm) es la forma verdadera de la pieza, extraída
- * de un DXF (una capa por talla) — nunca se deriva ancho×alto sin ella.
- * dimensionesPorTalla se calcula A PARTIR del bounding box de esa geometría,
- * no al revés; se guarda aparte solo porque calibracion.js y nesting.js ya
- * trabajan con cm planos.
+ * de un DXF o un PDF con capas (una capa por talla) — nunca se deriva
+ * ancho×alto sin ella. dimensionesPorTalla se calcula A PARTIR del bounding
+ * box de esa geometría, no al revés; se guarda aparte solo porque
+ * calibracion.js y nesting.js ya trabajan con cm planos.
  *
  * @typedef {Object} Pieza
  * @property {string} id
@@ -22,6 +22,7 @@
  *   poligonoMm: [number, number][],
  *   boundingBoxMm: { anchoMm: number, altoMm: number },
  *   archivoOriginal: string,
+ *   formatoOriginal: 'dxf' | 'pdf',
  *   validadoPorUsuario: boolean
  * }>} geometriaPorTalla
  * @property {Record<string, {anchoCm: number, altoCm: number}>} dimensionesPorTalla  derivado de geometriaPorTalla, en cm
