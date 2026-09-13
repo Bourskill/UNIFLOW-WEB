@@ -7,15 +7,35 @@
 // nueva, solo se movió al backend para que el motor de anclaje (que corre
 // del lado del servidor, para producción real) la use igual que el canvas.
 //
-// `extremos`, `piquetes` y `salientes` NO se completan todavía: el
-// importador DXF/PDF (motor/importarDxf.js, motor/importarPdf.js) hoy solo
-// separa el contorno cerrado del resto para el bounding box (ver Pasada 10
-// de claude/ESTADO-ACTUAL.md), no guarda los piquetes sueltos como datos
-// aparte. referencias.js ya está preparado para esto: una referencia de
-// tipo "piquete"/"extremo"/"saliente" sin datos falla con un mensaje claro
-// ("no tiene piquetes reconocibles"), no revienta -- ver la propia regla 6
-// del motor. Cuando el importador extraiga esos rasgos, esta función solo
-// necesita sumar los campos, sin tocar nada del motor de anclaje.
+// `piquetes` y `salientes` NO se completan todavía: el importador DXF/PDF
+// (motor/importarDxf.js, motor/importarPdf.js) hoy solo separa el contorno
+// cerrado del resto para el bounding box (ver Pasada 10 de
+// claude/ESTADO-ACTUAL.md), no guarda los piquetes sueltos como datos
+// aparte, ni detecta los "giros" del contorno (salientes -- requiere
+// análisis de curvatura real, no un simple min/max). referencias.js ya está
+// preparado para esto: una referencia de tipo "piquete"/"saliente" sin
+// datos falla con un mensaje claro ("no tiene piquetes reconocibles"), no
+// revienta -- ver la propia regla 6 del motor. Cuando el importador
+// extraiga esos rasgos, esta función solo necesita sumar los campos, sin
+// tocar nada del motor de anclaje.
+//
+// `extremos` (los 4 puntos más alto/bajo/izq/der del contorno REAL, no de
+// la caja) SÍ se calcula acá: a diferencia de piquetes/salientes, es un
+// simple min/max sobre los vértices ya medidos -- ningún dato nuevo que
+// extraer del archivo, y a diferencia de vertice/piquete/saliente no
+// necesita huella de conteo (referencias.js no la pide para "extremo": el
+// punto más alto siempre existe, en cualquier talla, sin ambigüedad).
+function calcularExtremos(vertices) {
+  let arriba = vertices[0], abajo = vertices[0], izquierda = vertices[0], derecha = vertices[0];
+  for (const v of vertices) {
+    if (v.y < arriba.y) arriba = v;
+    if (v.y > abajo.y) abajo = v;
+    if (v.x < izquierda.x) izquierda = v;
+    if (v.x > derecha.x) derecha = v;
+  }
+  return { arriba, abajo, izquierda, derecha };
+}
+
 export function geometriaParaAnclaje(pieza, talla) {
   const dim = pieza.dimensionesPorTalla?.[talla];
   const geo = pieza.geometriaPorTalla?.[talla];
@@ -35,6 +55,7 @@ export function geometriaParaAnclaje(pieza, talla) {
     nombre: pieza.nombre,
     pieza: { ancho_cm: dim.anchoCm, alto_cm: dim.altoCm },
     vertices,
+    extremos: calcularExtremos(vertices),
   };
 }
 

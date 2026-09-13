@@ -1,0 +1,264 @@
+import { useId, useRef } from 'react';
+
+// Puerto FIEL del lienzo de Anclajes del panel de Illustrator
+// (programa/panel/js/main.js: dibujarLienzo/candidatosDe/sinMontonera) --
+// SVG con el viewBox EN CENTÍMETROS (no Konva ni un canvas de píxeles: así
+// cualquier coordenada del motor se dibuja sin convertir nada), un punto de
+// ancla es una cruz+círculo, una zona es un rectángulo, y los "candidatos"
+// (piquetes, extremos, bordes, vértices, y los 9 puntos de cada zona ya
+// resuelta) son marcadores clicables que existen SIEMPRE que su clase esté
+// visible en la leyenda -- no solo en un "modo de crear".
+//
+// La única acción de creación es "Zona" (ver Productos.jsx): al estar
+// activa, un clic en cualquier parte de la pieza se engancha al candidato
+// MÁS CERCANO, y un clic directo sobre un candidato lo usa exacto. Fuera de
+// ese modo (o de "recolocar"/"cruzar"), clicar un candidato no hace nada, y
+// clicar el vacío deselecciona -- igual que el original.
+
+const PARTES_CAJA = [
+  ['centro', 0.5, 0.5, 'centro'], ['arriba', 0.5, 0, 'borde superior'],
+  ['abajo', 0.5, 1, 'borde inferior'], ['izquierda', 0, 0.5, 'borde izquierdo'],
+  ['derecha', 1, 0.5, 'borde derecho'], ['supIzq', 0, 0, 'esquina sup. izq.'],
+  ['supDer', 1, 0, 'esquina sup. der.'], ['infIzq', 0, 1, 'esquina inf. izq.'],
+  ['infDer', 1, 1, 'esquina inf. der.'],
+];
+const NOMBRES_EXTREMO = {
+  arriba: 'punto más alto', abajo: 'punto más bajo',
+  izquierda: 'punto más a la izquierda', derecha: 'punto más a la derecha',
+};
+const PARTE_DESDE_ORIGEN = {
+  centroArriba: 'arriba', centroAbajo: 'abajo', centroIzq: 'izquierda', centroDer: 'derecha',
+};
+
+function r1(n) { return Math.round(n * 100) / 100; }
+
+// Los candidatos que de verdad se pueden reencontrar en otra talla: nunca
+// se inventa uno. El orden en que se agregan es la prioridad al deduplicar
+// (sinMontonera): zona > piquete > extremo > borde > vértice -- un punto
+// REAL del contorno gana al tirador gris del rectángulo que caiga encima.
+export function candidatosDe(geo, zonasDeEstaPieza, zonaEditandoId, leyenda) {
+  if (!geo) return [];
+  const W = geo.pieza.ancho_cm, H = geo.pieza.alto_cm;
+  const out = [];
+  const rel = (x, y) => ({ rx: r1(x / W), ry: r1(y / H) });
+
+  for (const z of zonasDeEstaPieza || []) {
+    const caja = { x: z.x, y: z.y, ancho: z.ancho, alto: z.alto };
+    const origenZona = z.origen || 'centro';
+    const parteOrigen = PARTE_DESDE_ORIGEN[origenZona] || origenZona;
+    for (const [parte, fx, fy, etiqueta] of PARTES_CAJA) {
+      out.push({
+        clase: 'zona', prioridad: 0, etiqueta: 'Zona ' + z.id + ' · ' + etiqueta,
+        x: caja.x + caja.ancho * fx, y: caja.y + caja.alto * fy,
+        ref: { tipo: 'zona', zona: z.id, parte },
+        origenActual: z.id === zonaEditandoId && parte === parteOrigen,
+      });
+    }
+  }
+
+  if (leyenda.piquetes) {
+    for (let i = 0; i < (geo.piquetes || []).length; i++) {
+      const p = geo.piquetes[i];
+      const rp = rel(p.x, p.y);
+      out.push({
+        clase: 'piquete', prioridad: 1, etiqueta: 'Piquete ' + (i + 1) + ' de ' + geo.piquetes.length,
+        x: p.x, y: p.y,
+        ref: { tipo: 'piquete', indice: i, total: geo.piquetes.length, parte: 'centro', rx: rp.rx, ry: rp.ry },
+      });
+    }
+  }
+
+  if (leyenda.extremos) {
+    for (const k of ['arriba', 'abajo', 'izquierda', 'derecha']) {
+      const e = geo.extremos ? geo.extremos[k] : null;
+      if (!e) continue;
+      out.push({ clase: 'extremo', prioridad: 2, etiqueta: 'El ' + NOMBRES_EXTREMO[k], x: e.x, y: e.y, ref: { tipo: 'extremo', parte: k } });
+    }
+    for (let i = 0; i < (geo.salientes || []).length; i++) {
+      const s = geo.salientes[i];
+      const rs = rel(s.x, s.y);
+      out.push({
+        clase: 'extremo', prioridad: 3,
+        etiqueta: (s.esquina ? 'Esquina ' : 'Extremo ') + (i + 1) + ' de ' + geo.salientes.length,
+        x: s.x, y: s.y,
+        ref: { tipo: 'saliente', indice: i, total: geo.salientes.length, rx: rs.rx, ry: rs.ry },
+      });
+    }
+  }
+
+  if (leyenda.bordes) {
+    for (const [parte, fx, fy, etiqueta] of PARTES_CAJA) {
+      out.push({ clase: 'caja', prioridad: 4, etiqueta: 'Contorno · ' + etiqueta, x: W * fx, y: H * fy, ref: { tipo: 'contorno', parte } });
+    }
+  }
+
+  if (leyenda.vertices) {
+    for (let i = 0; i < geo.vertices.length; i++) {
+      out.push({ clase: 'vertice', prioridad: 5, etiqueta: 'Vértice ' + (i + 1) + ' de ' + geo.vertices.length, x: geo.vertices[i].x, y: geo.vertices[i].y, ref: { tipo: 'vertice', indice: i, puntos: geo.vertices.length } });
+    }
+  }
+
+  return sinMontonera(out, Math.max(W, H));
+}
+
+// Muchos puntos caen en el mismo sitio (una esquina de la caja suele
+// coincidir con un vértice, el punto más alto con un saliente...). Se
+// quedan por prioridad, no todos superpuestos sin poder clicar el que hace
+// falta.
+function sinMontonera(lista, maxDim) {
+  const MIN = maxDim * 0.02;
+  const ordenada = [...lista].sort((a, b) => a.prioridad - b.prioridad);
+  const salida = [];
+  for (const c of ordenada) {
+    const pisa = salida.some((s) => Math.hypot(c.x - s.x, c.y - s.y) < MIN);
+    if (!pisa) salida.push(c);
+  }
+  return salida;
+}
+
+const COLOR = {
+  piquete: '#f5a623', extremo: '#4ade80', caja: '#6b7389', vertice: '#6b7389',
+  zona: '#4c8dff', zonaOrigen: '#4ade80',
+  ancla: '#4c8dff', zonaRect: '#4c8dff', zonaFuera: '#f87171',
+};
+
+export function LienzoAnclaje({
+  geo, anclasResueltas, zonasResueltas, anclaSeleccionadaId, zonaSeleccionadaId,
+  onSeleccionarAncla, onSeleccionarZona, onDeseleccionar,
+  leyenda, modo, onElegirCandidato,
+  imagenUrl, borde,
+}) {
+  const svgRef = useRef(null);
+  const idRecorte = 'recorte-' + useId().replace(/[^a-zA-Z0-9]/g, '');
+
+  if (!geo) {
+    return (
+      <div className="flex h-52 items-center justify-center rounded-lg border border-dashed border-border text-sm text-faint-foreground">
+        Elegí una pieza para verla.
+      </div>
+    );
+  }
+
+  const W = geo.pieza.ancho_cm, H = geo.pieza.alto_cm;
+  const m = Math.max(W, H) * 0.06;
+  const cands = candidatosDe(geo, zonasResueltas, zonaSeleccionadaId, leyenda);
+  const R = Math.max(W, H) / 90;
+  const F = Math.max(W, H) / 32;
+  const puntos = geo.vertices.map((v) => v.x + ',' + v.y).join(' ');
+
+  function puntoEnCm(ev) {
+    const svg = svgRef.current;
+    try {
+      const pt = svg.createSVGPoint();
+      pt.x = ev.clientX; pt.y = ev.clientY;
+      const m2 = svg.getScreenCTM();
+      if (!m2) return null;
+      const r = pt.matrixTransform(m2.inverse());
+      return { x: r1(r.x), y: r1(r.y) };
+    } catch { return null; }
+  }
+
+  function alClickearSvg(ev) {
+    if (!modo) { onDeseleccionar(); return; }
+    const p = puntoEnCm(ev);
+    if (!p) return;
+    let mejor = null, mejorD = -1;
+    for (const c of cands) {
+      const d = Math.hypot(c.x - p.x, c.y - p.y);
+      if (mejor === null || d < mejorD) { mejor = c; mejorD = d; }
+    }
+    if (mejor) onElegirCandidato(mejor, r1(mejorD));
+  }
+
+  return (
+    <div className={'overflow-hidden rounded-lg border bg-surface-muted ' + (modo ? 'border-primary cursor-crosshair' : 'border-border')}>
+      <svg
+        ref={svgRef}
+        viewBox={(-m) + ' ' + (-m) + ' ' + (W + m * 2) + ' ' + (H + m * 2)}
+        preserveAspectRatio="xMidYMid meet"
+        style={{ width: '100%', height: 380, display: 'block' }}
+        onClick={alClickearSvg}
+      >
+        <rect x={0} y={0} width={W} height={H} fill="none" stroke="#2b303d" strokeWidth={R * 0.4} />
+
+        {imagenUrl ? (
+          <>
+            {/* El diseño se recorta a la forma REAL del molde (máscara SVG),
+                no a un rectángulo -- mismo pedido de la pasada anterior,
+                ahora en el lienzo fiel de Illustrator. */}
+            <clipPath id={idRecorte}><polygon points={puntos} /></clipPath>
+            <image href={imagenUrl} x={0} y={0} width={W} height={H} clipPath={'url(#' + idRecorte + ')'} preserveAspectRatio="xMidYMid slice" />
+            <polygon
+              points={puntos} fill="none"
+              stroke={borde?.activo ? borde.colorHex : '#4c8dff'}
+              strokeWidth={borde?.activo ? Math.max((borde.grosorCm || 0.03), R * 0.25) : R * 0.3}
+              opacity={borde?.activo ? 1 : 0.5}
+              vectorEffect="non-scaling-stroke"
+            />
+          </>
+        ) : (
+          <polygon points={puntos} fill="rgba(76,141,255,0.06)" stroke="#4c8dff" strokeWidth={R * 0.5} vectorEffect="non-scaling-stroke" />
+        )}
+
+        {zonasResueltas.map((z) => {
+          const fuera = z.x < 0 || z.y < 0 || z.x + z.ancho > W + 0.01 || z.y + z.alto > H + 0.01;
+          const elegida = z.id === zonaSeleccionadaId;
+          return (
+            <g key={z.id} onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }} style={{ cursor: 'pointer' }}>
+              <rect
+                x={z.x} y={z.y} width={z.ancho} height={z.alto}
+                fill={fuera ? 'rgba(248,113,113,0.15)' : 'rgba(76,141,255,0.18)'}
+                stroke={fuera ? COLOR.zonaFuera : COLOR.zonaRect}
+                strokeWidth={elegida ? R * 0.5 : R * 0.28}
+                vectorEffect="non-scaling-stroke"
+              />
+              {(elegida || zonasResueltas.length <= 1) && (
+                <text x={z.x + z.ancho / 2} y={z.y + z.alto / 2 + F * 0.35} textAnchor="middle" fontSize={F} fill="#e6e9f0" stroke="#0d0f14" strokeWidth={F / 6} paintOrder="stroke">
+                  {z.etiqueta}
+                </text>
+              )}
+            </g>
+          );
+        })}
+
+        {cands.map((c, i) => (
+          <g key={i} onClick={(e) => { e.stopPropagation(); onElegirCandidato(c); }} style={{ cursor: modo ? 'pointer' : 'default' }}>
+            {c.clase === 'caja' ? (
+              <rect x={c.x - R} y={c.y - R} width={R * 2} height={R * 2} fill={COLOR.caja} stroke="#0d0f14" strokeWidth={R * 0.15} />
+            ) : c.clase === 'extremo' ? (
+              <polygon
+                points={`${c.x},${c.y - R * 1.4} ${c.x + R * 1.4},${c.y} ${c.x},${c.y + R * 1.4} ${c.x - R * 1.4},${c.y}`}
+                fill={COLOR.extremo} stroke="#0d0f14" strokeWidth={R * 0.15}
+              />
+            ) : c.clase === 'vertice' ? (
+              <circle cx={c.x} cy={c.y} r={R * 0.8} fill="none" stroke={COLOR.vertice} strokeWidth={R * 0.25} />
+            ) : c.clase === 'zona' ? (
+              <circle cx={c.x} cy={c.y} r={R * 1.1} fill={c.origenActual ? COLOR.zonaOrigen : COLOR.zona} stroke="#0d0f14" strokeWidth={R * 0.15} />
+            ) : (
+              <circle cx={c.x} cy={c.y} r={R * 1.5} fill={COLOR.piquete} stroke="#0d0f14" strokeWidth={R * 0.15} />
+            )}
+            <title>{c.etiqueta} ({c.x}, {c.y} cm)</title>
+          </g>
+        ))}
+
+        {anclasResueltas.map((a) => {
+          const elegida = a.id === anclaSeleccionadaId;
+          const r2c = R * 2;
+          return (
+            <g
+              key={a.id}
+              onClick={(e) => { e.stopPropagation(); onSeleccionarAncla(a.id); }}
+              style={{ cursor: 'pointer' }}
+            >
+              <circle cx={a.x} cy={a.y} r={r2c * 2.2} fill="transparent" />
+              <circle cx={a.x} cy={a.y} r={r2c} fill="none" stroke={COLOR.ancla} strokeWidth={elegida ? R * 0.5 : R * 0.3} vectorEffect="non-scaling-stroke" />
+              <line x1={a.x - r2c * 2} y1={a.y} x2={a.x + r2c * 2} y2={a.y} stroke={COLOR.ancla} strokeWidth={elegida ? R * 0.5 : R * 0.3} vectorEffect="non-scaling-stroke" />
+              <line x1={a.x} y1={a.y - r2c * 2} x2={a.x} y2={a.y + r2c * 2} stroke={COLOR.ancla} strokeWidth={elegida ? R * 0.5 : R * 0.3} vectorEffect="non-scaling-stroke" />
+              <title>{a.id} — X desde {a.desdeX}, Y desde {a.desdeY}</title>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}

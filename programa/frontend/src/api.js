@@ -101,6 +101,15 @@ export function resolverAnclaje(grupoId, tallaPorRol, anclaje) {
   });
 }
 
+// "Comprobar en otra talla": la misma pieza, dos tallas, para ver si algo
+// se descoloca al gradar antes de producir (paso 3 del apartado real).
+export function compararAnclajeEnTalla(grupoId, pieza, tallaA, tallaB, anclaje) {
+  return pedirJson('/anclaje/comparar', {
+    method: 'POST',
+    body: JSON.stringify({ grupoId, pieza, tallaA, tallaB, anclaje }),
+  });
+}
+
 export function anidarDesdeGrupo(grupoId, lineas, anchoLienzoCm) {
   return pedirJson('/nesting/desde-grupo', {
     method: 'POST',

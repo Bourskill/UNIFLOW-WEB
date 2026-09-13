@@ -5,7 +5,7 @@ import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
 import { resolverPiezasDePedido } from '../motor/resolverPedido.js';
-import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
+import { resolver as resolverAnclaje, comparar as compararAnclaje } from '../motor/anclaje/resolver.js';
 import { geometriaDelGrupo } from '../motor/geometriaAnclaje.js';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
 import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf } from '../motor/importarPdf.js';
@@ -274,6 +274,41 @@ router.post('/anclaje/resolver', async (req, res) => {
 
   const geometria = geometriaDelGrupo(piezasDelGrupo, tallaPorRol);
   const resultado = resolverAnclaje(anclaje, geometria, { talla: null });
+  res.json(resultado);
+});
+
+// "Comprobar en otra talla": resuelve el MISMO anclaje contra dos tallas
+// distintas de una pieza y devuelve las dos listas, para que el editor
+// las pinte lado a lado a la misma escala -- la prueba de que el sistema
+// hace lo que promete (motor/anclaje/resolver.js, comparar()).
+router.post('/anclaje/comparar', async (req, res) => {
+  const { grupoId, pieza, tallaA, tallaB, anclaje } = req.body;
+  if (!grupoId || !pieza || !tallaA || !tallaB || !anclaje) {
+    return res.status(400).json({ error: 'Faltan grupoId, pieza, tallaA, tallaB o anclaje' });
+  }
+  const [grupos, piezas] = await Promise.all([leerColeccion('grupos'), leerColeccion('piezas')]);
+  const grupo = grupos.find((g) => g.id === grupoId);
+  if (!grupo) return res.status(404).json({ error: 'Grupo no encontrado' });
+
+  let piezasDelGrupo;
+  try {
+    piezasDelGrupo = resolverPiezasDeGrupo(grupo, piezas);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  const geometriaA = geometriaDelGrupo(piezasDelGrupo, { [pieza]: tallaA });
+  const geometriaB = geometriaDelGrupo(piezasDelGrupo, { [pieza]: tallaB });
+  // El resto de piezas del grupo también hace falta si alguna ancla/zona
+  // referencia otra pieza (ver referencias.js, ref.pieza) -- se manda la
+  // MISMA talla de trabajo que ya tenía cada una en el editor, salvo la
+  // pieza que se está comparando.
+  const otrasTallas = {};
+  for (const p of piezasDelGrupo) if (p.nombre !== pieza) otrasTallas[p.nombre] = tallaA;
+  const geoCompletaA = { ...geometriaDelGrupo(piezasDelGrupo, otrasTallas), ...geometriaA };
+  const geoCompletaB = { ...geometriaDelGrupo(piezasDelGrupo, otrasTallas), ...geometriaB };
+
+  const resultado = compararAnclaje(anclaje, geoCompletaA, geoCompletaB, tallaA, tallaB);
   res.json(resultado);
 });
 
