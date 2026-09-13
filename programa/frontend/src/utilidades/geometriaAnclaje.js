@@ -33,11 +33,19 @@ export function geometriaParaAnclaje(pieza, talla) {
     y: (maxY - y) / 10,
   }));
 
+  const piquetes = (geo.piquetesMm || []).map((p) => ({
+    x: (p.xMm - minX) / 10,
+    y: (maxY - p.yMm) / 10,
+    ancho_cm: p.anchoMm / 10,
+    alto_cm: p.altoMm / 10,
+  }));
+
   return {
     nombre: pieza.nombre,
     pieza: { ancho_cm: dim.anchoCm, alto_cm: dim.altoCm },
     vertices,
     extremos: calcularExtremos(vertices),
+    piquetes,
   };
 }
 

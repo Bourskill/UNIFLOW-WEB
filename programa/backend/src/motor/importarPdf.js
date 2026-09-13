@@ -20,7 +20,7 @@
 // ausente).
 
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { asignarTallasPorNombre, poligonoYBoundingBoxDePuntos } from './geometriaComun.js';
+import { asignarTallasPorNombre, contornoYPiquetesDeTrazos } from './geometriaComun.js';
 
 const PT_A_MM = 25.4 / 72;
 
@@ -130,13 +130,17 @@ async function extraerCandidatosPdf(bufferPdf) {
   const nombrePorId = new Map();
   for (const [id, grupo] of config) nombrePorId.set(id, grupo.name);
 
-  const porCapa = new Map(); // nombre -> { todos: [...], cerrados: [...] }
+  const porCapa = new Map(); // nombre -> { todos: [...], cerrados: [...], trazos: [...] }
   function agregar(nombre, puntos, cerrado) {
     if (!nombre || puntos.length === 0) return;
-    if (!porCapa.has(nombre)) porCapa.set(nombre, { todos: [], cerrados: [] });
+    if (!porCapa.has(nombre)) porCapa.set(nombre, { todos: [], cerrados: [], trazos: [] });
     const grupo = porCapa.get(nombre);
     grupo.todos.push(...puntos);
     if (cerrado) grupo.cerrados.push(...puntos);
+    // Sin mezclar -- ver el mismo comentario en importarDxf.js: hace falta
+    // cada trazo por separado para distinguir después el contorno real de
+    // los piquetes sueltos (contornoYPiquetesDeTrazos).
+    grupo.trazos.push({ puntos, cerrado });
   }
 
   for (let numeroPagina = 1; numeroPagina <= doc.numPages; numeroPagina++) {
@@ -203,7 +207,11 @@ async function extraerCandidatosPdf(bufferPdf) {
 
   const candidatos = nombres.map((nombre, indice) => {
     const grupo = porCapa.get(nombre);
-    return { indice, nombre, puntosUnidades: grupo.cerrados.length > 0 ? grupo.cerrados : grupo.todos };
+    return {
+      indice, nombre,
+      puntosUnidades: grupo.cerrados.length > 0 ? grupo.cerrados : grupo.todos,
+      trazos: grupo.trazos,
+    };
   });
 
   return candidatos;
@@ -239,7 +247,7 @@ export async function resolverGeometriasPorTalla(bufferPdf, mapaTallaAIndice) {
   for (const [talla, indice] of Object.entries(mapaTallaAIndice)) {
     const candidato = candidatos[indice];
     if (!candidato) throw new Error('El candidato asignado a la talla "' + talla + '" ya no existe en este PDF.');
-    geometriasPorTalla[talla] = poligonoYBoundingBoxDePuntos(candidato.puntosUnidades, PT_A_MM);
+    geometriasPorTalla[talla] = contornoYPiquetesDeTrazos(candidato.trazos, PT_A_MM);
   }
 
   return { geometriasPorTalla, mmPorUnidad: PT_A_MM };

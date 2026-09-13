@@ -7,17 +7,21 @@
 // nueva, solo se movió al backend para que el motor de anclaje (que corre
 // del lado del servidor, para producción real) la use igual que el canvas.
 //
-// `piquetes` y `salientes` NO se completan todavía: el importador DXF/PDF
-// (motor/importarDxf.js, motor/importarPdf.js) hoy solo separa el contorno
-// cerrado del resto para el bounding box (ver Pasada 10 de
-// claude/ESTADO-ACTUAL.md), no guarda los piquetes sueltos como datos
-// aparte, ni detecta los "giros" del contorno (salientes -- requiere
-// análisis de curvatura real, no un simple min/max). referencias.js ya está
-// preparado para esto: una referencia de tipo "piquete"/"saliente" sin
-// datos falla con un mensaje claro ("no tiene piquetes reconocibles"), no
-// revienta -- ver la propia regla 6 del motor. Cuando el importador
-// extraiga esos rasgos, esta función solo necesita sumar los campos, sin
-// tocar nada del motor de anclaje.
+// `piquetes` sale de `geometriaPorTalla[talla].piquetesMm` (Pasada 19: los
+// importadores DXF/PDF ahora separan, por capa/talla, el trazo más largo
+// -- el contorno real -- de cualquier otro trazo de menos de 2.5cm reales,
+// ver geometriaComun.js·contornoYPiquetesDeTrazos) -- mismo tratamiento de
+// coordenadas que los vértices (trasladar, invertir Y, mm->cm), aplicado a
+// su CENTRO.
+//
+// `salientes` (los "giros" del contorno -- esquinas, picos) SIGUE sin
+// calcularse: a diferencia de un piquete (un trazo aparte, con posición
+// propia) o un extremo (un simple min/max), un saliente pide analizar la
+// CURVATURA del contorno para encontrar dónde "da la vuelta" -- un
+// algoritmo real, no una consulta sobre datos que ya se tienen, y por eso
+// se dejó fuera de esta pasada (ver claude/ESTADO-ACTUAL.md). referencias.js
+// ya está preparado para esto: una referencia de tipo "saliente" sin datos
+// falla con un mensaje claro, no revienta -- regla 6 del motor.
 //
 // `extremos` (los 4 puntos más alto/bajo/izq/der del contorno REAL, no de
 // la caja) SÍ se calcula acá: a diferencia de piquetes/salientes, es un
@@ -51,11 +55,19 @@ export function geometriaParaAnclaje(pieza, talla) {
     y: (maxY - y) / 10,
   }));
 
+  const piquetes = (geo.piquetesMm || []).map((p) => ({
+    x: (p.xMm - minX) / 10,
+    y: (maxY - p.yMm) / 10,
+    ancho_cm: p.anchoMm / 10,
+    alto_cm: p.altoMm / 10,
+  }));
+
   return {
     nombre: pieza.nombre,
     pieza: { ancho_cm: dim.anchoCm, alto_cm: dim.altoCm },
     vertices,
     extremos: calcularExtremos(vertices),
+    piquetes,
   };
 }
 

@@ -25,7 +25,7 @@
 // referencia.
 
 import DxfParser from 'dxf-parser';
-import { anchoDePuntos, asignarTallasPorNombre, poligonoYBoundingBoxDePuntos } from './geometriaComun.js';
+import { anchoDePuntos, asignarTallasPorNombre, contornoYPiquetesDeTrazos } from './geometriaComun.js';
 
 const UNIDAD_INSUNITS_A_MM = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000 };
 
@@ -139,10 +139,15 @@ function extraerCandidatosDxf(dxfTexto) {
     const resultado = puntosDeEntidad(entidad);
     if (!resultado || resultado.puntos.length === 0) continue;
     const capa = entidad.layer || '0';
-    if (!porCapa.has(capa)) porCapa.set(capa, { todos: [], cerrados: [] });
+    if (!porCapa.has(capa)) porCapa.set(capa, { todos: [], cerrados: [], trazos: [] });
     const grupo = porCapa.get(capa);
     grupo.todos.push(...resultado.puntos);
     if (resultado.cerrado) grupo.cerrados.push(...resultado.puntos);
+    // Sin mezclar, para poder separar después el contorno real de los
+    // piquetes sueltos (contornoYPiquetesDeTrazos) -- `todos`/`cerrados`
+    // arriba siguen existiendo tal cual para el resto del archivo (el
+    // ancho de referencia para confirmar escala no necesita distinguirlos).
+    grupo.trazos.push({ puntos: resultado.puntos, cerrado: resultado.cerrado });
   }
 
   const nombres = [...porCapa.keys()];
@@ -158,6 +163,7 @@ function extraerCandidatosDxf(dxfTexto) {
       indice,
       nombre: CAPAS_RESERVADAS.has(capa.toUpperCase()) ? null : capa,
       puntosUnidades: grupo.cerrados.length > 0 ? grupo.cerrados : grupo.todos,
+      trazos: grupo.trazos,
     };
   });
   const insunits = dxf.header && dxf.header.$INSUNITS;
@@ -208,7 +214,7 @@ export async function resolverGeometriasPorTalla(
   for (const [talla, indice] of Object.entries(mapaTallaAIndice)) {
     const candidato = candidatos[indice];
     if (!candidato) throw new Error('El candidato asignado a la talla "' + talla + '" ya no existe en este DXF.');
-    geometriasPorTalla[talla] = poligonoYBoundingBoxDePuntos(candidato.puntosUnidades, mmPorUnidadFinal);
+    geometriasPorTalla[talla] = contornoYPiquetesDeTrazos(candidato.trazos, mmPorUnidadFinal);
   }
 
   return { geometriasPorTalla, mmPorUnidad: mmPorUnidadFinal };

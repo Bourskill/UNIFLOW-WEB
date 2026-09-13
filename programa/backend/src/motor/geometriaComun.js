@@ -31,6 +31,81 @@ export function poligonoYBoundingBoxDePuntos(puntosUnidades, mmPorUnidad) {
   };
 }
 
+// ---- piquetes sueltos ----------------------------------------------------
+// Puerto de la regla real de host.jsx (programa/panel/jsx, pareceUnPiquete):
+// "un piquete es CORTO. Y punto." -- no importa si el trazo es abierto o
+// cerrado (una muesca dibujada como raya, o como una V cerrada, cuentan
+// igual), lo único que lo distingue del contorno real es que un contorno
+// mide decenas de cm y un piquete no llega a 2.5. El mismo umbral que usaba
+// el panel de Illustrator (PIQUETE_LARGO_MAX_CM), portado tal cual.
+//
+// Ahí se detectaba sobre pathPoints reales de Illustrator (anchors de una
+// curva Bézier, pocos puntos); acá se aplica sobre los trazos YA
+// TESSELADOS que devuelven dxf-parser/pdfjs-dist (muchos puntos por curva) --
+// la fórmula de longitud (sumar segmento a segmento) da el mismo resultado
+// real en cm de cualquier forma, tesselada o no, así que el umbral sigue
+// siendo válido sin ningún ajuste.
+export const PIQUETE_LARGO_MAX_CM = 2.5;
+
+function largoDeTrazoMm(puntosMm, cerrado) {
+  let largo = 0;
+  for (let i = 0; i < puntosMm.length - 1; i++) {
+    largo += Math.hypot(puntosMm[i + 1][0] - puntosMm[i][0], puntosMm[i + 1][1] - puntosMm[i][1]);
+  }
+  if (cerrado && puntosMm.length > 2) {
+    const primero = puntosMm[0];
+    const ultimo = puntosMm[puntosMm.length - 1];
+    largo += Math.hypot(primero[0] - ultimo[0], primero[1] - ultimo[1]);
+  }
+  return largo;
+}
+
+// `trazos`: los trazos SIN MEZCLAR de una capa/talla ([{puntos, cerrado}],
+// en unidades del archivo) -- a diferencia de poligonoYBoundingBoxDePuntos(),
+// que ya recibe todo mezclado en una sola lista de puntos y no puede
+// distinguir de dónde vino cada uno.
+//
+// El contorno real es el trazo MÁS LARGO de la capa (en cualquier pieza
+// real, el molde mide decenas de cm; nada más en la capa se le acerca).
+// Cualquier otro trazo de menos de PIQUETE_LARGO_MAX_CM reales es un
+// piquete suelto: se guarda por su CENTRO y su caja (ancho/alto), no por
+// sus puntos -- es lo que espera motor/anclaje/referencias.js (el mismo
+// convenio que ya usaban los piquetes de Illustrator: "la geometría da el
+// piquete por su centro, no por su esquina"). Un trazo que no es ni el
+// contorno ni corto (un trazo grande de más en la misma capa) no se adivina
+// como ninguna de las dos cosas: se ignora, mismo criterio que host.jsx
+// (ahí queda como diagnóstico de "trazos de más", no como dato).
+export function contornoYPiquetesDeTrazos(trazos, mmPorUnidad) {
+  const conLongitud = trazos.map((t) => {
+    const puntosMm = t.puntos.map(([x, y]) => [x * mmPorUnidad, y * mmPorUnidad]);
+    return { puntosMm, cerrado: t.cerrado, largoCm: largoDeTrazoMm(puntosMm, t.cerrado) / 10 };
+  });
+
+  let contorno = conLongitud[0];
+  for (const t of conLongitud) if (t.largoCm > contorno.largoCm) contorno = t;
+
+  const piquetesMm = [];
+  for (const t of conLongitud) {
+    if (t === contorno || t.largoCm >= PIQUETE_LARGO_MAX_CM) continue;
+    const xs = t.puntosMm.map((p) => p[0]);
+    const ys = t.puntosMm.map((p) => p[1]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    piquetesMm.push({ xMm: (minX + maxX) / 2, yMm: (minY + maxY) / 2, anchoMm: maxX - minX, altoMm: maxY - minY });
+  }
+
+  const xs = contorno.puntosMm.map((p) => p[0]);
+  const ys = contorno.puntosMm.map((p) => p[1]);
+  return {
+    poligonoMm: contorno.puntosMm,
+    boundingBoxMm: {
+      anchoMm: Math.max(...xs) - Math.min(...xs),
+      altoMm: Math.max(...ys) - Math.min(...ys),
+    },
+    piquetesMm,
+  };
+}
+
 // Dado el conjunto crudo de "candidatos" (una forma/capa por índice, cada uno
 // con nombre y sus puntos en unidades del archivo), arma las asignaciones
 // automáticas talla->índice: el nombre de cada forma ES su talla. Si dos

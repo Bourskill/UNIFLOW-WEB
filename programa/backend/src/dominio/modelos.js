@@ -27,8 +27,11 @@
  * @property {Record<string, {
  *   poligonoMm: [number, number][],
  *   boundingBoxMm: { anchoMm: number, altoMm: number },
+ *   piquetesMm?: { xMm: number, yMm: number, anchoMm: number, altoMm: number }[],
  *   validadoPorUsuario: boolean
- * }>} geometriaPorTalla
+ * }>} geometriaPorTalla  piquetesMm: trazos sueltos de menos de 2.5cm reales
+ *   detectados en la misma capa que el contorno (geometriaComun.js·
+ *   contornoYPiquetesDeTrazos) -- por su CENTRO, no por su esquina
  * @property {Record<string, {anchoCm: number, altoCm: number}>} dimensionesPorTalla  derivado de geometriaPorTalla, en cm
  */
 
