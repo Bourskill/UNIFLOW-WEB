@@ -52,6 +52,7 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
   const [anchoConocidoCm, setAnchoConocidoCm] = useState('');
   const [geometrias, setGeometrias] = useState(null);
   const [error, setError] = useState(null);
+  const [resolviendo, setResolviendo] = useState(false);
 
   const onDrop = useCallback(async (archivos) => {
     const archivo = archivos[0];
@@ -120,6 +121,7 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
 
   async function resolver() {
     setError(null);
+    setResolviendo(true);
     try {
       const opciones = necesitaEscala
         ? { anchoConocidoCm: Number(anchoConocidoCm), indiceReferencia: Number(indiceReferencia) }
@@ -136,8 +138,22 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
       onGeometriaLista(geometriaPorTalla);
     } catch (e) {
       setError(e.message);
+    } finally {
+      setResolviendo(false);
     }
   }
+
+  // No hace falta ningún clic: en cuanto hay algo calculable (tallas
+  // detectadas + escala resuelta, sola o recién confirmada a mano) se
+  // calcula sola. El debounce evita disparar una petición por cada tecla
+  // mientras se escribe el ancho de referencia o se corrige una talla a
+  // mano en el editor.
+  useEffect(() => {
+    if (!puedeResolver || resolviendo) return;
+    const temporizador = setTimeout(() => resolver(), 500);
+    return () => clearTimeout(temporizador);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puedeResolver, mapaFinal, indiceReferencia, anchoConocidoCm]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -214,13 +230,16 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
             </div>
           )}
 
-          {error && <Aviso tono="error">{error}</Aviso>}
+          {error && (
+            <Aviso tono="error">
+              {error}
+              <Boton tamano="sm" variante="fantasma" type="button" className="ml-2" onClick={resolver}>
+                Reintentar
+              </Boton>
+            </Aviso>
+          )}
 
-          <div>
-            <Boton variante="primario" tamano="sm" type="button" onClick={resolver} disabled={!puedeResolver}>
-              Calcular geometría
-            </Boton>
-          </div>
+          {resolviendo && <p className="text-xs text-faint-foreground">Calculando…</p>}
 
           {estado === 'resuelto' && geometrias && (
             <div className="flex flex-wrap gap-1 border-t border-border pt-2">
