@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
-import { leerColeccion, leerRegistro, crearRegistro, actualizarRegistro, borrarRegistro } from '../dominio/almacen.js';
+import { leerColeccion, leerRegistro, crearRegistro, actualizarRegistro, borrarRegistro, subirArchivo } from '../dominio/almacen.js';
 import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
@@ -22,6 +22,34 @@ for (const metodo of ['get', 'post', 'put', 'delete']) {
 }
 
 export { router };
+
+const EXTENSION_POR_TIPO = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'application/pdf': '.pdf',
+  'application/dxf': '.dxf',
+  'image/vnd.dxf': '.dxf',
+};
+
+// Punto único de subida de archivos pesados (imagen de Diseño, PDF/DXF
+// original de Pieza) a Supabase Storage -- ver almacen.js para el porqué:
+// guardarlos como base64 adentro de la fila de la tabla hacía que Postgres
+// cortara la escritura por timeout con un solo archivo de unos pocos MB.
+// El body sigue viajando en base64 (mismo límite de 50mb de server.js), lo
+// que cambia es dónde termina viviendo: Storage, no la columna jsonb.
+router.post('/archivos', async (req, res) => {
+  const { base64, contentType, nombre } = req.body;
+  if (!base64 || !contentType) return res.status(400).json({ error: 'Faltan base64 o contentType' });
+  try {
+    const buffer = Buffer.from(base64, 'base64');
+    const extension = EXTENSION_POR_TIPO[contentType] || '';
+    const ruta = (nombre || 'archivo').replace(/[^a-z0-9_-]/gi, '_') + '-' + nanoid() + extension;
+    const url = await subirArchivo(ruta, buffer, contentType);
+    res.status(201).json({ url });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
 
 function crudSimple(nombreColeccion) {
   router.get('/' + nombreColeccion, async (req, res) => {
@@ -121,7 +149,7 @@ router.post('/piezas/resolver-multitalla', async (req, res) => {
 // Crea la Pieza con las geometrías YA resueltas por talla (el frontend
 // analizó y confirmó cada archivo del rango de tallas antes de llegar acá).
 router.post('/piezas', async (req, res) => {
-  const { nombre, angulosPermitidos, tela, geometriaPorTalla } = req.body;
+  const { nombre, angulosPermitidos, tela, geometriaPorTalla, archivoOriginal, formatoOriginal } = req.body;
   if (!nombre || !geometriaPorTalla || Object.keys(geometriaPorTalla).length === 0) {
     return res.status(400).json({ error: 'Falta nombre o geometriaPorTalla' });
   }
@@ -137,6 +165,10 @@ router.post('/piezas', async (req, res) => {
     nombre,
     angulosPermitidos: angulosPermitidos?.length ? angulosPermitidos : [0, 180],
     tela: tela || null,
+    // Un solo archivo por Pieza (no uno por talla, sería el mismo repetido
+    // N veces) -- URL de Storage, nunca el archivo embebido.
+    archivoOriginal: archivoOriginal || null,
+    formatoOriginal: formatoOriginal || null,
     geometriaPorTalla,
     dimensionesPorTalla,
   };

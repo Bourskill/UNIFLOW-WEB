@@ -32,6 +32,16 @@ export async function verificarSalud() {
   }
 }
 
+// Sube un archivo pesado (imagen de Diseño, PDF/DXF original de Pieza) a
+// Supabase Storage y devuelve su URL pública -- nunca se guarda el archivo
+// en sí adentro de un registro (ver almacen.js: eso es lo que causaba el
+// "statement timeout" al guardar).
+export function subirArchivo(base64, contentType, nombre) {
+  return pedirJson('/archivos', { method: 'POST', body: JSON.stringify({ base64, contentType, nombre }) }).then(
+    (r) => r.url
+  );
+}
+
 // --- Piezas (biblioteca) ---------------------------------------------------
 
 export function listarPiezas() {

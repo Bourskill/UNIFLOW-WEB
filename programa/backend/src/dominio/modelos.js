@@ -18,11 +18,13 @@
  * @property {string} nombre                          ej. "Espalda", "Manga izquierda"
  * @property {number[]} angulosPermitidos              ej. [0, 180] — nunca se asume, lo elige el usuario
  * @property {string} [tela]                           tela por defecto de esta pieza
+ * @property {string} [archivoOriginal]                URL en Supabase Storage del DXF/PDF subido -- UNO
+ *                                                      por Pieza (todas sus tallas salen del mismo archivo),
+ *                                                      nunca el archivo embebido (ver almacen.js)
+ * @property {'dxf'|'pdf'} [formatoOriginal]
  * @property {Record<string, {
  *   poligonoMm: [number, number][],
  *   boundingBoxMm: { anchoMm: number, altoMm: number },
- *   archivoOriginal: string,
- *   formatoOriginal: 'dxf' | 'pdf',
  *   validadoPorUsuario: boolean
  * }>} geometriaPorTalla
  * @property {Record<string, {anchoCm: number, altoCm: number}>} dimensionesPorTalla  derivado de geometriaPorTalla, en cm

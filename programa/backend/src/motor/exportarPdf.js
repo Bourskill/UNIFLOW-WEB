@@ -1,8 +1,10 @@
 // Genera el PDF final de una corrida de nesting. Cuando la pieza trae
-// imagenDataUrl (el arte del Diseño) se dibuja como fondo real; cuando trae
-// textos (nombre/número ya calibrados por resolverPedido.js) se escriben
-// encima. Sin ninguno de los dos, cae al rectángulo con etiqueta de antes
-// (útil para el nesting "rápido" sin personalización, ej. corte láser).
+// imagenDataUrl (el arte del Diseño -- pese al nombre, hoy es casi siempre
+// una URL de Supabase Storage, no un data: URL; ver almacen.js) se dibuja
+// como fondo real; cuando trae textos (nombre/número ya calibrados por
+// resolverPedido.js) se escriben encima. Sin ninguno de los dos, cae al
+// rectángulo con etiqueta de antes (útil para el nesting "rápido" sin
+// personalización, ej. corte láser).
 
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 
@@ -25,7 +27,7 @@ export async function generarPdfNesting(resultadoNesting) {
     const altoRectPt = pieza.altoCm * CM_A_PUNTOS;
 
     if (pieza.imagenDataUrl) {
-      const imagen = await incrustarImagenDesdeDataUrl(pdf, pieza.imagenDataUrl);
+      const imagen = await incrustarImagen(pdf, pieza.imagenDataUrl);
       pagina.drawImage(imagen, { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt });
     }
 
@@ -68,11 +70,23 @@ export async function generarPdfNesting(resultadoNesting) {
   return pdf.save();
 }
 
-async function incrustarImagenDesdeDataUrl(pdf, dataUrl) {
-  const separador = dataUrl.indexOf(',');
-  const encabezado = dataUrl.slice(0, separador);
-  const bytes = Buffer.from(dataUrl.slice(separador + 1), 'base64');
-  return encabezado.includes('png') ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
+// Acepta tanto un data: URL (compatibilidad con lo que se haya guardado
+// antes de mover las imágenes a Storage) como una URL http(s) real -- en
+// ese caso hace falta bajarla, ya no viene embebida en el propio campo.
+async function incrustarImagen(pdf, urlODataUrl) {
+  let contentType;
+  let bytes;
+  if (urlODataUrl.startsWith('data:')) {
+    const separador = urlODataUrl.indexOf(',');
+    contentType = urlODataUrl.slice(5, separador);
+    bytes = Buffer.from(urlODataUrl.slice(separador + 1), 'base64');
+  } else {
+    const respuesta = await fetch(urlODataUrl);
+    if (!respuesta.ok) throw new Error('No se pudo bajar la imagen del diseño (' + respuesta.status + ')');
+    contentType = respuesta.headers.get('content-type') || '';
+    bytes = Buffer.from(await respuesta.arrayBuffer());
+  }
+  return contentType.includes('png') ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
 }
 
 function hexARgb(hex) {

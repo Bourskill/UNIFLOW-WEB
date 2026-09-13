@@ -29,6 +29,18 @@ if (!url || !key) {
 
 const supabase = createClient(url, key);
 
+// Storage necesita su PROPIA clave: la de arriba (anon/publishable) puede
+// leer y escribir las tablas porque se le dieron permisos explícitos por
+// GRANT (ver supabase-schema.sql), pero el bucket de Storage no tiene ese
+// mismo permiso abierto -- crear un bucket o subir un archivo con la clave
+// anon da "new row violates row-level security policy". La service_role
+// (Project Settings > API > "service_role"/"secret" en Supabase) salta esa
+// RLS -- coherente con la decisión ya tomada de no montar RLS real todavía
+// (sin login no hay a quién distinguir); sigue viviendo solo en el backend,
+// nunca llega al navegador.
+const claveStorage = process.env.SUPABASE_SERVICE_KEY;
+const supabaseStorage = claveStorage ? createClient(url, claveStorage) : null;
+
 export async function leerColeccion(nombre) {
   const { data, error } = await supabase.from(nombre).select('datos').order('creado_en');
   if (error) throw new Error('Supabase (leer ' + nombre + '): ' + error.message);
@@ -58,4 +70,46 @@ export async function actualizarRegistro(nombre, id, registro) {
 export async function borrarRegistro(nombre, id) {
   const { error } = await supabase.from(nombre).delete().eq('id', id);
   if (error) throw new Error('Supabase (borrar de ' + nombre + '): ' + error.message);
+}
+
+// --- Archivos pesados (imágenes de Diseño, PDF/DXF original de Pieza) -----
+// Guardar un PDF o una imagen como texto/base64 DENTRO de una columna jsonb
+// tiene el mismo problema que el reemplazo de colección completa (ver
+// arriba), solo que ahora afecta a un ÚNICO registro: Postgres tarda en
+// escribir un valor de varios MB adentro de un jsonb y Supabase corta la
+// consulta por "statement timeout" -- pasó de verdad con una sola imagen de
+// Diseño. Un archivo pesado no es un DATO de la fila, es un ARCHIVO: va a
+// Supabase Storage (pensado justo para esto, sin el límite de una consulta
+// SQL) y la fila en la tabla solo guarda la URL pública, que sí es liviana.
+
+const NOMBRE_BUCKET = 'archivos';
+let bucketAsegurado = false;
+
+async function asegurarBucket() {
+  if (bucketAsegurado) return;
+  if (!supabaseStorage) {
+    throw new Error(
+      'Falta SUPABASE_SERVICE_KEY en las variables de entorno -- hace falta la clave service_role de ' +
+      'Supabase (Project Settings > API) para poder crear el bucket de archivos y subir a él.'
+    );
+  }
+  const { data: buckets, error } = await supabaseStorage.storage.listBuckets();
+  if (error) throw new Error('Supabase (listar buckets): ' + error.message);
+  if (!buckets.some((b) => b.name === NOMBRE_BUCKET)) {
+    const { error: errorCrear } = await supabaseStorage.storage.createBucket(NOMBRE_BUCKET, { public: true });
+    // "already exists" puede llegar por una carrera entre dos requests casi
+    // simultáneos creando el bucket a la vez -- no es un error real.
+    if (errorCrear && !/already exists/i.test(errorCrear.message)) {
+      throw new Error('Supabase (crear bucket): ' + errorCrear.message);
+    }
+  }
+  bucketAsegurado = true;
+}
+
+export async function subirArchivo(ruta, buffer, contentType) {
+  await asegurarBucket();
+  const { error } = await supabaseStorage.storage.from(NOMBRE_BUCKET).upload(ruta, buffer, { contentType, upsert: true });
+  if (error) throw new Error('Supabase (subir archivo): ' + error.message);
+  const { data } = supabaseStorage.storage.from(NOMBRE_BUCKET).getPublicUrl(ruta);
+  return data.publicUrl;
 }

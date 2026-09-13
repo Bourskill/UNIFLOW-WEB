@@ -13,6 +13,7 @@ function useImagenCargada(dataUrl) {
       return;
     }
     const elemento = new window.Image();
+    elemento.crossOrigin = 'anonymous'; // la imagen ahora suele venir de Supabase Storage, no embebida
     elemento.onload = () => setImagen(elemento);
     elemento.src = dataUrl;
   }, [dataUrl]);

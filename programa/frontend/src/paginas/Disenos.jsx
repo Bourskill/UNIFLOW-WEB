@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { listarGrupos, listarDisenos, crearDiseno, eliminarDiseno } from '../api.js';
+import { listarGrupos, listarDisenos, crearDiseno, eliminarDiseno, subirArchivo } from '../api.js';
 import { Boton, Campo, Input, Select, Tarjeta, Aviso } from '../componentes/ui.jsx';
 
 function archivoADataUrl(archivo) {
@@ -12,11 +12,30 @@ function archivoADataUrl(archivo) {
   });
 }
 
-function SlotImagenPieza({ rol, dataUrl, onElegir }) {
+// Sube la imagen a Storage apenas se suelta (no al guardar el diseño): así
+// lo que termina en el registro del Diseño es una URL liviana, nunca la
+// imagen en sí — ver almacen.js sobre por qué eso tronaba con "statement
+// timeout".
+function SlotImagenPieza({ rol, url, onElegir }) {
+  const [subiendo, setSubiendo] = useState(false);
+  const [error, setError] = useState(null);
+
   const onDrop = useCallback(
     async (archivos) => {
       const archivo = archivos[0];
-      if (archivo) onElegir(rol, await archivoADataUrl(archivo));
+      if (!archivo) return;
+      setSubiendo(true);
+      setError(null);
+      try {
+        const dataUrl = await archivoADataUrl(archivo);
+        const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+        const urlSubida = await subirArchivo(base64, archivo.type, rol);
+        onElegir(rol, urlSubida);
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        setSubiendo(false);
+      }
     },
     [rol, onElegir]
   );
@@ -36,9 +55,10 @@ function SlotImagenPieza({ rol, dataUrl, onElegir }) {
         }
       >
         <input {...getInputProps()} />
-        Arrastrar o elegir archivo
+        {subiendo ? 'Subiendo…' : 'Arrastrar o elegir archivo'}
       </div>
-      {dataUrl && <img className="mt-2 max-h-24 max-w-24 rounded-md border border-border" src={dataUrl} alt={rol} />}
+      {error && <Aviso tono="error">{error}</Aviso>}
+      {url && <img className="mt-2 max-h-24 max-w-24 rounded-md border border-border" src={url} alt={rol} />}
     </Campo>
   );
 }
@@ -125,7 +145,7 @@ export function Disenos({ recargarSenal, onCambio }) {
             <SlotImagenPieza
               key={gp.rol}
               rol={gp.rol}
-              dataUrl={imagenesPorPieza[gp.rol]}
+              url={imagenesPorPieza[gp.rol]}
               onElegir={elegirImagen}
             />
           ))}
