@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { Formulario } from './paginas/Formulario.jsx';
+import { Prendas } from './paginas/Prendas.jsx';
 import { Piezas } from './paginas/Piezas.jsx';
 import { Disenos } from './paginas/Disenos.jsx';
 import { Productos } from './paginas/Productos.jsx';
@@ -6,18 +8,22 @@ import { Pedidos } from './paginas/Pedidos.jsx';
 import { Icono } from './componentes/Icono.jsx';
 import { EstadoServidor } from './componentes/EstadoServidor.jsx';
 
-// Piezas y Grupos viven en una sola pestaña: subir una pieza y armar la
-// prenda que la usa es un solo flujo, no "crear un producto" y después,
-// aparte, "ver el catálogo" (feedback explícito del usuario).
+// Tres pestañas separadas a propósito (reemplaza la fusión anterior de
+// "Piezas y Grupos"): subir es una acción puntual, mientras que Prendas y
+// Piezas son vistas de catálogo/biblioteca que se consultan todo el tiempo
+// -- mezclarlas hacía que el formulario de subida siempre estuviera a la
+// vista aunque no se estuviera usando.
 const PESTANAS = [
-  { id: 'piezas', etiqueta: 'Piezas y Grupos', icono: 'pieza' },
+  { id: 'formulario', etiqueta: 'Subir piezas', icono: 'subir' },
+  { id: 'prendas', etiqueta: 'Prendas', icono: 'prenda' },
+  { id: 'piezas', etiqueta: 'Piezas', icono: 'pieza' },
   { id: 'disenos', etiqueta: 'Diseños', icono: 'diseno' },
   { id: 'productos', etiqueta: 'Productos', icono: 'producto' },
   { id: 'pedidos', etiqueta: 'Pedidos', icono: 'pedido' },
 ];
 
 function App() {
-  const [pestana, setPestana] = useState('piezas');
+  const [pestana, setPestana] = useState('formulario');
   const [recargarSenal, setRecargarSenal] = useState(0);
   const marcarCambio = () => setRecargarSenal((n) => n + 1);
   const pestanaActual = PESTANAS.find((p) => p.id === pestana);
@@ -55,6 +61,8 @@ function App() {
         </nav>
 
         <main className="flex-1 overflow-y-auto p-8">
+          {pestana === 'formulario' && <Formulario onCambio={marcarCambio} />}
+          {pestana === 'prendas' && <Prendas recargarSenal={recargarSenal} />}
           {pestana === 'piezas' && <Piezas recargarSenal={recargarSenal} onCambio={marcarCambio} />}
           {pestana === 'disenos' && <Disenos recargarSenal={recargarSenal} onCambio={marcarCambio} />}
           {pestana === 'productos' && <Productos recargarSenal={recargarSenal} onCambio={marcarCambio} />}

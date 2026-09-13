@@ -1,21 +1,22 @@
 @import "tailwindcss";
 
-/* Tema claro, espacioso — reemplaza el CSS a mano anterior. Tokens al estilo
-   shadcn/ui (variables + @theme de Tailwind) para no repetir valores sueltos
-   en cada componente. */
+/* Tema oscuro, espacioso — el claro anterior era demasiado blanco ("quema
+   los ojos", feedback textual del usuario: esta app se usa muchas horas
+   seguidas cargando molderías). Tokens al estilo shadcn/ui (variables +
+   @theme de Tailwind) para no repetir valores sueltos en cada componente. */
 @theme {
-  --color-background: #f8f9fb;
-  --color-surface: #ffffff;
-  --color-surface-muted: #f1f3f6;
-  --color-border: #e2e6ec;
-  --color-foreground: #1a1f2b;
-  --color-muted-foreground: #647087;
-  --color-faint-foreground: #94a1b8;
-  --color-primary: #2563eb;
-  --color-primary-foreground: #ffffff;
-  --color-primary-soft: #eaf0fe;
-  --color-danger: #dc2626;
-  --color-danger-soft: #fdecec;
+  --color-background: #0d0f14;
+  --color-surface: #161922;
+  --color-surface-muted: #1e222d;
+  --color-border: #2b303d;
+  --color-foreground: #e6e9f0;
+  --color-muted-foreground: #9aa3b8;
+  --color-faint-foreground: #6b7389;
+  --color-primary: #4c8dff;
+  --color-primary-foreground: #0d0f14;
+  --color-primary-soft: #1a2740;
+  --color-danger: #f87171;
+  --color-danger-soft: #3a1c1c;
 
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;

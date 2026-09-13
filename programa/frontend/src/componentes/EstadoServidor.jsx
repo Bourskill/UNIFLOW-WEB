@@ -39,7 +39,7 @@ export function EstadoServidor() {
   const CONFIG = {
     verificando: { texto: 'Conectando…', punto: 'bg-faint-foreground', color: 'text-faint-foreground' },
     listo: { texto: 'Servidor listo', punto: 'bg-emerald-500', color: 'text-muted-foreground' },
-    despertando: { texto: 'Despertando el servidor…', punto: 'bg-amber-500 animate-pulse', color: 'text-amber-600' },
+    despertando: { texto: 'Despertando el servidor…', punto: 'bg-amber-500 animate-pulse', color: 'text-amber-400' },
     caido: { texto: 'Sin conexión al servidor', punto: 'bg-danger', color: 'text-danger' },
   }[estado];
 

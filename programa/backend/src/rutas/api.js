@@ -149,7 +149,7 @@ router.post('/piezas/resolver-multitalla', async (req, res) => {
 // Crea la Pieza con las geometrías YA resueltas por talla (el frontend
 // analizó y confirmó cada archivo del rango de tallas antes de llegar acá).
 router.post('/piezas', async (req, res) => {
-  const { nombre, angulosPermitidos, tela, geometriaPorTalla, archivoOriginal, formatoOriginal } = req.body;
+  const { nombre, categoria, angulosPermitidos, tela, geometriaPorTalla, archivoOriginal, formatoOriginal } = req.body;
   if (!nombre || !geometriaPorTalla || Object.keys(geometriaPorTalla).length === 0) {
     return res.status(400).json({ error: 'Falta nombre o geometriaPorTalla' });
   }
@@ -163,6 +163,9 @@ router.post('/piezas', async (req, res) => {
   const registro = {
     id: nanoid(),
     nombre,
+    // Libre, no un enum -- una pieza puede ser "Delantero", "Manga", "Cuello",
+    // lo que use cada taller; solo sirve para filtrar/agrupar en la biblioteca.
+    categoria: categoria || null,
     angulosPermitidos: angulosPermitidos?.length ? angulosPermitidos : [0, 180],
     tela: tela || null,
     // Un solo archivo por Pieza (no uno por talla, sería el mismo repetido
@@ -177,11 +180,12 @@ router.post('/piezas', async (req, res) => {
 });
 
 router.put('/piezas/:id', async (req, res) => {
-  const { nombre, angulosPermitidos, tela } = req.body;
+  const { nombre, categoria, angulosPermitidos, tela } = req.body;
   const pieza = await leerRegistro('piezas', req.params.id);
   if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
 
   if (nombre !== undefined) pieza.nombre = nombre;
+  if (categoria !== undefined) pieza.categoria = categoria;
   if (angulosPermitidos !== undefined) pieza.angulosPermitidos = angulosPermitidos;
   if (tela !== undefined) pieza.tela = tela;
   await actualizarRegistro('piezas', req.params.id, pieza);

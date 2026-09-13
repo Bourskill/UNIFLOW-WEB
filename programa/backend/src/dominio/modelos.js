@@ -16,6 +16,8 @@
  * @typedef {Object} Pieza
  * @property {string} id
  * @property {string} nombre                          ej. "Espalda", "Manga izquierda"
+ * @property {string} [categoria]                     libre (ej. "Delantero", "Manga", "Cuello") -- solo
+ *                                                     para filtrar/agrupar en la biblioteca, no un enum
  * @property {number[]} angulosPermitidos              ej. [0, 180] — nunca se asume, lo elige el usuario
  * @property {string} [tela]                           tela por defecto de esta pieza
  * @property {string} [archivoOriginal]                URL en Supabase Storage del DXF/PDF subido -- UNO

@@ -3,10 +3,10 @@
 // clases sueltas o volver a escribir CSS a mano en cada página).
 
 const ESTILOS_BOTON = {
-  primario: 'bg-primary text-primary-foreground hover:bg-blue-700 border-transparent',
+  primario: 'bg-primary text-primary-foreground hover:brightness-110 border-transparent',
   secundario: 'bg-surface text-foreground hover:bg-surface-muted border-border',
   fantasma: 'bg-transparent text-muted-foreground hover:bg-surface-muted border-transparent',
-  peligro: 'bg-danger text-white hover:bg-red-700 border-transparent',
+  peligro: 'bg-danger text-background hover:brightness-110 border-transparent',
 };
 
 export function Boton({ variante = 'secundario', tamano = 'md', className = '', ...props }) {
