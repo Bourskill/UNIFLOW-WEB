@@ -50,11 +50,11 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
       );
     }
 
-    // campoPedido/valorFijo son propios de UNIFLOW WEB (qué dato del pedido
-    // llena cada zona) -- no existen en el motor de anclaje portado de
-    // Illustrator, que deliberadamente no sabe qué es un pedido (ver
+    // campoPedido/valorFijo/rotacion son propios de UNIFLOW WEB -- no
+    // existen en el motor de anclaje portado de Illustrator, que
+    // deliberadamente no sabe qué es un pedido ni de rotar contenido (ver
     // motor/anclaje/resolver.js). Se leen del anclaje CRUDO (antes de
-        // normalizar), buscando por id, en vez de intentar que el resolutor
+    // normalizar), buscando por id, en vez de intentar que el resolutor
     // los cargue -- así el puerto queda fiel, sin agregarle campos que no
     // son suyos.
     const zonaCruda = {};
@@ -73,6 +73,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
 
       const zonasDeEstaPieza = resuelto.lista.zonas.filter((z) => z.pieza === pieza.nombre);
       const textos = zonasDeEstaPieza
+        .filter((zona) => zona.tipo !== 'logo')
         .map((zona) => {
           const cruda = zonaCruda[zona.id];
           const campo = cruda?.campoPedido || 'fijo';
@@ -86,11 +87,32 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             texto: String(valor),
             xCm: zona.x,
             yCm: zona.y,
+            cxCm: zona.cx,
+            cyCm: zona.cy,
             altoCm: zona.alto,
             colorHex: cruda?.colorHex || '#000000',
+            rotacionGrados: cruda?.rotacion || 0,
           };
         })
         .filter(Boolean);
+
+      // Un logo no lleva texto de pedido -- se coloca tal cual, ajustado
+      // (sin deformar) dentro de su zona. Con cruz activa, zona.ancho ===
+      // zona.alto === "lado" (ver resolverZona, motor/anclaje/resolver.js);
+      // exportarPdf.js hace el mismo cálculo de brazos que
+      // colocarLogoEnZonaCruz() de host.jsx para decidir el tamaño final.
+      const imagenes = zonasDeEstaPieza
+        .filter((zona) => zona.tipo === 'logo' && zona.logoRuta)
+        .map((zona) => ({
+          url: zona.logoRuta,
+          cxCm: zona.cx,
+          cyCm: zona.cy,
+          ladoCm: zona.ancho,
+          anchoCm: zona.ancho,
+          altoCm: zona.alto,
+          cruz: !!zona.cruz,
+          rotacionGrados: zonaCruda[zona.id]?.rotacion || 0,
+        }));
 
       piezasParaAnidar.push({
         id: 'p' + contador++,
@@ -102,6 +124,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         rotable: !!pieza.rotable,
         imagenDataUrl: diseno?.imagenesPorPieza?.[pieza.nombre] || null,
         textos,
+        imagenes,
       });
     }
   }

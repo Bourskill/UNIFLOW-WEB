@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useDropzone } from 'react-dropzone';
 import {
   listarGrupos,
   listarDisenos,
@@ -9,7 +10,7 @@ import {
   crearProducto,
   eliminarProducto,
   resolverAnclaje,
-  compararAnclajeEnTalla,
+  subirArchivo,
 } from '../api.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Aviso, Ayuda } from '../componentes/ui.jsx';
@@ -67,9 +68,14 @@ function tallaDeTrabajoPorDefecto(pieza) {
 }
 
 function etiquetaZona(zona) {
+  if (zona.tipo === 'logo') return zona.logoRuta ? 'Logo · ' + nombreDeArchivo(zona.logoRuta) : 'Logo (sin elegir)';
   if (zona.campoPedido === 'fijo') return zona.valorFijo || zona.id;
   if (zona.campoPedido === 'numero') return zona.valorEjemplo ? 'N° · ' + zona.valorEjemplo : 'Número';
   return zona.valorEjemplo ? 'Nombre · ' + zona.valorEjemplo : 'Nombre';
+}
+
+function nombreDeArchivo(url) {
+  try { return decodeURIComponent(url.split('/').pop()); } catch { return url; }
 }
 
 export function Productos({ recargarSenal, onCambio }) {
@@ -199,8 +205,8 @@ export function Productos({ recargarSenal, onCambio }) {
     const id = idLibre('ZONA_', anclaje.zonas);
     const nueva = { id, nombre: id, pieza: piezaActiva, tipo: 'texto',
       anclaX: anclaId, anclaY: anclaId, origen: 'centro', modoCruce: 'esquina',
-      ancho: medida(24), alto: medida(6), lado: medida(8),
-      offset: { x: medida(0), y: medida(0) },
+      ancho: medida(24), alto: medida(6), lado: medida(8), cruz: true, logoRuta: null,
+      offset: { x: medida(0), y: medida(0) }, rotacion: 0,
       campoPedido: 'nombre', valorFijo: '', valorEjemplo: '', colorHex: '#ffffff', grupo: null };
     setAnclaje((prev) => ({ ...prev, zonas: [...prev.zonas, nueva] }));
     return id;
@@ -358,15 +364,17 @@ export function Productos({ recargarSenal, onCambio }) {
   function actualizarZonaConSincronia(zona, cambios) {
     actualizarZona(zona.id, cambios);
     // PUSH: tipo/contenido/logo de esta zona se copian a sus hermanas del
-    // mismo grupo (posición y tamaño siguen siendo de cada una).
-    if ('tipo' in cambios || 'campoPedido' in cambios || 'valorFijo' in cambios || 'valorEjemplo' in cambios) {
+    // mismo grupo (posición y tamaño -- incluida "cruz" -- siguen siendo de
+    // cada una: el mismo logo puede necesitar otro tamaño en otra pieza).
+    if ('tipo' in cambios || 'campoPedido' in cambios || 'valorFijo' in cambios || 'valorEjemplo' in cambios || 'logoRuta' in cambios) {
       const hermanas = zonasDelMismoGrupo(zona);
       if (hermanas.length) {
         setAnclaje((prev) => ({
           ...prev,
           zonas: prev.zonas.map((z) => (hermanas.some((h) => h.id === z.id)
             ? { ...z, tipo: cambios.tipo ?? zona.tipo, campoPedido: cambios.campoPedido ?? zona.campoPedido,
-                valorFijo: cambios.valorFijo ?? zona.valorFijo, valorEjemplo: cambios.valorEjemplo ?? zona.valorEjemplo }
+                valorFijo: cambios.valorFijo ?? zona.valorFijo, valorEjemplo: cambios.valorEjemplo ?? zona.valorEjemplo,
+                logoRuta: cambios.logoRuta ?? zona.logoRuta }
             : z)),
         }));
       }
@@ -376,7 +384,7 @@ export function Productos({ recargarSenal, onCambio }) {
     const hermanas = grupo ? anclaje.zonas.filter((z) => z.id !== zona.id && z.grupo === grupo) : [];
     if (hermanas.length) {
       const modelo = hermanas[0];
-      actualizarZona(zona.id, { grupo, tipo: modelo.tipo, campoPedido: modelo.campoPedido, valorFijo: modelo.valorFijo, valorEjemplo: modelo.valorEjemplo });
+      actualizarZona(zona.id, { grupo, tipo: modelo.tipo, campoPedido: modelo.campoPedido, valorFijo: modelo.valorFijo, valorEjemplo: modelo.valorEjemplo, logoRuta: modelo.logoRuta });
     } else {
       actualizarZona(zona.id, { grupo });
     }
@@ -417,7 +425,7 @@ export function Productos({ recargarSenal, onCambio }) {
   const anclasResueltasDeEstaPieza = (resuelto?.lista.anclas || []).filter((a) => a.pieza === piezaActiva);
   const zonasDeEstaPiezaConDatos = zonasDeEstaPieza.map((z) => {
     const cruda = anclaje.zonas.find((zz) => zz.id === z.id);
-    return { ...z, etiqueta: cruda ? etiquetaZona(cruda) : z.id, campoPedido: cruda?.campoPedido };
+    return { ...z, etiqueta: cruda ? etiquetaZona(cruda) : z.id, campoPedido: cruda?.campoPedido, rotacion: cruda?.rotacion || 0 };
   });
 
   const seleccionado = seleccion ? nodoDe(seleccion.tipo, seleccion.id) : null;
@@ -539,9 +547,14 @@ export function Productos({ recargarSenal, onCambio }) {
           </div>
 
           {piezaActiva && (
-            <div className="flex flex-col gap-4 lg:flex-row">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
               {/* ============ 2. LIENZO (izquierda) ============ */}
-              <div className="min-w-0 flex-1">
+              {/* Fijo mientras se baja por el panel de propiedades de al
+                  lado (que puede ser bastante más alto, ej. la ficha de un
+                  logo en cruz): sin sticky, el lienzo se perdía de vista de
+                  scroll arriba apenas el panel de la derecha era más largo
+                  que él. */}
+              <div className="min-w-0 flex-1 lg:sticky lg:top-4">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground"><span className="mr-1 text-primary">2</span>Lienzo</h3>
                   {piezaObj && (
@@ -618,12 +631,6 @@ export function Productos({ recargarSenal, onCambio }) {
                     </button>
                   ))}
                 </div>
-
-                <ComprobarOtraTalla
-                  grupoId={grupoId} piezaActiva={piezaActiva} anclaje={anclaje}
-                  tallaActual={tallaTrabajo} tallasDisponibles={tallasDePieza}
-                  piezaObj={piezaObj}
-                />
               </div>
 
               {/* ============ panel de propiedades (derecha) ============ */}
@@ -761,6 +768,47 @@ function LineaMedida({ etiqueta, valor, onCambiar }) {
   );
 }
 
+// Sube el archivo del logo a Storage apenas se suelta (mismo mecanismo que
+// SlotImagenDiseno.jsx) y guarda solo su URL en la zona -- el archivo real
+// nunca viaja dentro del anclaje.
+function SelectorLogo({ url, onElegir }) {
+  const [subiendo, setSubiendo] = useState(false);
+  const [error, setError] = useState(null);
+  const onDrop = useCallback(async (archivos) => {
+    const archivo = archivos[0];
+    if (!archivo) return;
+    setSubiendo(true);
+    setError(null);
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const lector = new FileReader();
+        lector.onload = () => resolve(lector.result);
+        lector.onerror = reject;
+        lector.readAsDataURL(archivo);
+      });
+      const urlSubida = await subirArchivo(dataUrl.slice(dataUrl.indexOf(',') + 1), archivo.type, 'logo');
+      onElegir(urlSubida);
+    } catch (e) { setError(e.message); }
+    finally { setSubiendo(false); }
+  }, [onElegir]);
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop, accept: { 'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg'] }, multiple: false,
+  });
+
+  return (
+    <div>
+      <div {...getRootProps()}
+        className={'cursor-pointer rounded-lg border-2 border-dashed px-3 py-2 text-center text-xs ' +
+          (isDragActive ? 'border-primary bg-primary-soft text-primary' : 'border-border text-faint-foreground')}>
+        <input {...getInputProps()} />
+        {subiendo ? 'Subiendo…' : url ? 'Reemplazar archivo' : 'Arrastrar o elegir el logo (PNG/JPG)'}
+      </div>
+      {error && <Aviso tono="error">{error}</Aviso>}
+      {url && <img className="mt-2 max-h-16 rounded-md border border-border" src={url} alt="Logo" />}
+    </div>
+  );
+}
+
 // ============ panel: zona ============
 function PanelZona({ zona, anclasDisponibles, anclasResueltas, onRenombrar, onActualizar, onCambiarGrupo, hermanas, onQuitar, onDuplicar, onCruzar, onVolverAUnPunto }) {
   const cruzada = !!(zona.anclaX && zona.anclaY && zona.anclaX !== zona.anclaY);
@@ -789,15 +837,19 @@ function PanelZona({ zona, anclasDisponibles, anclasResueltas, onRenombrar, onAc
 
       <div className="flex flex-col gap-2 border-t border-border pt-3">
         <span className="text-xs font-semibold text-faint-foreground">Qué va aquí</span>
-        <Select value={zona.campoPedido} onChange={(e) => {
-          const campo = e.target.value;
-          onActualizar({ campoPedido: campo, tipo: campo === 'numero' ? 'numero' : 'texto' });
+        <Select value={zona.tipo === 'logo' ? 'logo' : zona.campoPedido} onChange={(e) => {
+          const valor = e.target.value;
+          if (valor === 'logo') onActualizar({ tipo: 'logo', campoPedido: null });
+          else onActualizar({ campoPedido: valor, tipo: valor === 'numero' ? 'numero' : 'texto' });
         }}>
           <option value="nombre">un texto: el nombre del jugador</option>
           <option value="numero">un número (dorsal)</option>
           <option value="fijo">un texto fijo</option>
+          <option value="logo">un logo o escudo</option>
         </Select>
-        {zona.campoPedido === 'fijo' ? (
+        {zona.tipo === 'logo' ? (
+          <SelectorLogo url={zona.logoRuta} onElegir={(url) => onActualizar({ logoRuta: url })} />
+        ) : zona.campoPedido === 'fijo' ? (
           <Input placeholder="Texto fijo" value={zona.valorFijo || ''} onChange={(e) => onActualizar({ valorFijo: e.target.value })} />
         ) : (
           <Input placeholder={zona.campoPedido === 'nombre' ? 'Ejemplo: PEÑA' : 'Ejemplo: 7'} value={zona.valorEjemplo || ''} onChange={(e) => onActualizar({ valorEjemplo: e.target.value })} />
@@ -815,8 +867,29 @@ function PanelZona({ zona, anclasDisponibles, anclasResueltas, onRenombrar, onAc
 
       <div className="flex flex-col gap-2 border-t border-border pt-3">
         <span className="text-xs font-semibold text-faint-foreground">Tamaño</span>
-        <LineaMedida etiqueta="Ancho" valor={zona.ancho} onCambiar={(m) => onActualizar({ ancho: m })} />
-        <LineaMedida etiqueta="Alto" valor={zona.alto} onCambiar={(m) => onActualizar({ alto: m })} />
+        {zona.tipo === 'logo' && (
+          <div className="flex items-center gap-1.5">
+            <label className="flex items-center gap-1.5 text-xs text-foreground">
+              <input type="checkbox" checked={zona.cruz !== false} onChange={(e) => onActualizar({ cruz: e.target.checked })} />
+              Zona en cruz
+            </label>
+            <Ayuda>
+              Con la cruz activada, el logo tiene un cuadro central garantizado más dos brazos
+              (uno para logos anchos, otro para altos), sin deformarlo ni recortarlo -- "Cabe en"
+              es el lado de ese cuadro. Sin cruz, es un rectángulo normal de ancho y alto propios:
+              para un logo con tamaño ya decidido de antemano (ej. un sponsor), sin ese margen
+              extra.
+            </Ayuda>
+          </div>
+        )}
+        {zona.tipo === 'logo' && zona.cruz !== false ? (
+          <LineaMedida etiqueta="Cabe en" valor={zona.lado} onCambiar={(m) => onActualizar({ lado: m })} />
+        ) : (
+          <>
+            <LineaMedida etiqueta="Ancho" valor={zona.ancho} onCambiar={(m) => onActualizar({ ancho: m })} />
+            <LineaMedida etiqueta="Alto" valor={zona.alto} onCambiar={(m) => onActualizar({ alto: m })} />
+          </>
+        )}
       </div>
 
       <div className="flex flex-col gap-2 border-t border-border pt-3">
@@ -858,6 +931,18 @@ function PanelZona({ zona, anclasDisponibles, anclasResueltas, onRenombrar, onAc
         <span className="text-xs font-semibold text-faint-foreground">Corrección</span>
         <LineaMedida etiqueta="Mover X" valor={zona.offset.x} onCambiar={(m) => onActualizar({ offset: { ...zona.offset, x: m } })} />
         <LineaMedida etiqueta="Mover Y" valor={zona.offset.y} onCambiar={(m) => onActualizar({ offset: { ...zona.offset, y: m } })} />
+        <div className="flex items-center gap-2">
+          <span className="w-24 flex-none text-xs text-muted-foreground">Girar</span>
+          <Input className="w-20" type="number" step="1" value={zona.rotacion || 0}
+            onChange={(e) => onActualizar({ rotacion: Number(e.target.value) })} />
+          <span className="text-xs text-muted-foreground">°</span>
+          {[0, 90, 180, 270].map((g) => (
+            <button key={g} type="button" onClick={() => onActualizar({ rotacion: g })}
+              className={'rounded-full border px-2 py-0.5 text-[10px] ' + ((zona.rotacion || 0) === g ? 'border-primary bg-primary-soft text-primary' : 'border-border text-faint-foreground hover:border-primary')}>
+              {g}°
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex items-center gap-2 border-t border-border pt-3">
@@ -868,90 +953,3 @@ function PanelZona({ zona, anclasDisponibles, anclasResueltas, onRenombrar, onAc
   );
 }
 
-// ============ 3. comprobar en otra talla ============
-// La prueba de que el sistema hace lo que promete: se resuelve la MISMA
-// relación contra otra talla y se enseñan las dos, a la misma escala (para
-// que se vea de verdad la diferencia de tamaño). No se guarda nada.
-function ComprobarOtraTalla({ grupoId, piezaActiva, anclaje, tallaActual, tallasDisponibles, piezaObj }) {
-  const [comparando, setComparando] = useState(null);
-  const [cargando, setCargando] = useState(false);
-  const [error, setError] = useState(null);
-
-  useEffect(() => { setComparando(null); }, [piezaActiva, tallaActual]);
-
-  async function comparar(talla) {
-    setCargando(true); setError(null);
-    try {
-      const r = await compararAnclajeEnTalla(grupoId, piezaActiva, tallaActual, talla, anclaje);
-      setComparando({ talla, ...r });
-    } catch (e) { setError(e.message); }
-    finally { setCargando(false); }
-  }
-
-  const otras = tallasDisponibles.filter((t) => t !== tallaActual);
-  const dimA = piezaObj?.dimensionesPorTalla?.[tallaActual];
-  const dimB = comparando ? piezaObj?.dimensionesPorTalla?.[comparando.talla] : null;
-
-  return (
-    <div className="mt-4 border-t border-border pt-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground"><span className="mr-1 text-primary">3</span>Comprobar en otra talla</h3>
-      {otras.length === 0 ? (
-        <p className="text-xs text-faint-foreground">Esta pieza no tiene otras tallas cargadas para comparar.</p>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          {otras.map((t) => (
-            <button key={t} type="button" onClick={() => comparar(t)}
-              className={'rounded-full border px-3 py-1 text-xs ' + (comparando?.talla === t ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface text-muted-foreground hover:border-primary')}>
-              {t}
-            </button>
-          ))}
-        </div>
-      )}
-      {cargando && <p className="mt-2 text-xs text-faint-foreground">Comparando…</p>}
-      {error && <Aviso tono="error">{error}</Aviso>}
-      {comparando && dimA && dimB && (
-        <div className="mt-3">
-          <div className="flex gap-3">
-            <ColumnaComparar talla={tallaActual} dim={dimA} lista={comparando.a.lista} piezaActiva={piezaActiva} />
-            <ColumnaComparar talla={comparando.talla} dim={dimB} lista={comparando.b.lista} piezaActiva={piezaActiva} />
-          </div>
-          {comparando.b.errores?.length > 0 && comparando.b.errores.map((e, i) => <Aviso key={i} tono="error">Talla {comparando.talla}: {e}</Aviso>)}
-          <table className="mt-2 w-full text-xs">
-            <thead>
-              <tr className="text-left text-faint-foreground">
-                <th className="pb-1">Zona</th><th className="pb-1 text-right">{tallaActual}</th><th className="pb-1 text-right">{comparando.talla}</th><th className="pb-1 text-right">se mueve</th>
-              </tr>
-            </thead>
-            <tbody>
-              {comparando.filas.map((f) => (
-                <tr key={f.zona} className="border-t border-border">
-                  <td className="py-1">{f.zona}</td>
-                  <td className="py-1 text-right text-muted-foreground">{f.a.x}, {f.a.y}</td>
-                  <td className="py-1 text-right text-muted-foreground">{f.b ? f.b.x + ', ' + f.b.y : '—'}</td>
-                  <td className="py-1 text-right text-muted-foreground">{f.b ? r1(f.dx) + ', ' + r1(f.dy) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-function r1(n) { return Math.round(n * 100) / 100; }
-
-function ColumnaComparar({ talla, dim, lista, piezaActiva }) {
-  const W = dim.anchoCm, H = dim.altoCm;
-  const zonas = (lista?.zonas || []).filter((z) => z.pieza === piezaActiva);
-  const anclas = (lista?.anclas || []).filter((a) => a.pieza === piezaActiva);
-  return (
-    <div className="flex-1">
-      <p className="mb-1 text-xs text-faint-foreground">Talla {talla} · {W} × {H} cm</p>
-      <svg viewBox={'0 0 ' + W + ' ' + H} preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: 160, background: 'var(--color-surface-muted)', borderRadius: 6 }}>
-        <rect x={0} y={0} width={W} height={H} fill="none" stroke="#2b303d" strokeWidth={Math.max(W, H) * 0.006} />
-        {zonas.map((z) => <rect key={z.id} x={z.x} y={z.y} width={z.ancho} height={z.alto} fill="rgba(76,141,255,0.25)" stroke="#4c8dff" strokeWidth={Math.max(W, H) * 0.006} />)}
-        {anclas.map((a) => <circle key={a.id} cx={a.x} cy={a.y} r={Math.max(W, H) / 55} fill="#f5a623" />)}
-      </svg>
-    </div>
-  );
-}

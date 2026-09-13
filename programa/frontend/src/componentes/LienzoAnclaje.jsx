@@ -30,6 +30,15 @@ const PARTE_DESDE_ORIGEN = {
   centroArriba: 'arriba', centroAbajo: 'abajo', centroIzq: 'izquierda', centroDer: 'derecha',
 };
 
+// Mismo RATIO_BRAZO que host.jsx (colocarLogoEnZonaCruz/crearZonaCruz,
+// programa/panel/jsx/host.jsx): una zona de logo "en cruz" no es un cuadro
+// único, es una cruz de dos brazos (uno para logos anchos, otro para
+// altos) que se cruzan en el cuadrado central de lado "lado" -- acá
+// z.ancho === z.alto === "lado" cuando cruz está activa (resolverZona ya
+// lo resuelve así, motor/anclaje/resolver.js). 4cm×2.5cm = 1.6 es la
+// proporción real que ya traía el usuario, no un número inventado.
+const RATIO_BRAZO = 4 / 2.5;
+
 function r1(n) { return Math.round(n * 100) / 100; }
 
 // Los candidatos que de verdad se pueden reencontrar en otra talla: nunca
@@ -203,18 +212,54 @@ export function LienzoAnclaje({
         {zonasResueltas.map((z) => {
           const fuera = z.x < 0 || z.y < 0 || z.x + z.ancho > W + 0.01 || z.y + z.alto > H + 0.01;
           const elegida = z.id === zonaSeleccionadaId;
+          const esLogo = z.tipo === 'logo';
+          // Girar (web-only, no viene del puerto): pivota sobre el CENTRO
+          // real de la zona (z.cx/z.cy, que sí resuelve el motor), no sobre
+          // la esquina -- así el punto de referencia no se corre al girar.
+          const transformZona = z.rotacion ? 'rotate(' + z.rotacion + ' ' + z.cx + ' ' + z.cy + ')' : undefined;
           return (
-            <g key={z.id} onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }} style={{ cursor: 'pointer' }}>
-              <rect
-                x={z.x} y={z.y} width={z.ancho} height={z.alto}
-                fill={fuera ? 'rgba(248,113,113,0.15)' : 'rgba(76,141,255,0.18)'}
-                stroke={fuera ? COLOR.zonaFuera : COLOR.zonaRect}
-                strokeWidth={elegida ? R * 0.5 : R * 0.28}
-                vectorEffect="non-scaling-stroke"
-              />
-              {(elegida || zonasResueltas.length <= 1) && (
-                <text x={z.x + z.ancho / 2} y={z.y + z.alto / 2 + F * 0.35} textAnchor="middle" fontSize={F} fill="#e6e9f0" stroke="#0d0f14" strokeWidth={F / 6} paintOrder="stroke">
-                  {z.etiqueta}
+            <g key={z.id} transform={transformZona} onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }} style={{ cursor: 'pointer' }}>
+              {esLogo && z.cruz !== false ? (
+                // Cruz: dos brazos que se cruzan en el cuadrado central de
+                // lado z.ancho (=== z.alto con cruz activa) -- mismo dibujo
+                // que crearZonaCruz() de host.jsx, para que el límite real
+                // de dónde puede caber el logo se vea, no solo se explique.
+                (() => {
+                  const lado = z.ancho, brazo = lado * RATIO_BRAZO;
+                  const stroke = fuera ? COLOR.zonaFuera : COLOR.zonaRect;
+                  const sw = elegida ? R * 0.5 : R * 0.28;
+                  return (
+                    <>
+                      <rect x={z.cx - lado / 2} y={z.cy - brazo / 2} width={lado} height={brazo} fill="rgba(76,141,255,0.1)" stroke={stroke} strokeWidth={sw} vectorEffect="non-scaling-stroke" />
+                      <rect x={z.cx - brazo / 2} y={z.cy - lado / 2} width={brazo} height={lado} fill="rgba(76,141,255,0.1)" stroke={stroke} strokeWidth={sw} vectorEffect="non-scaling-stroke" />
+                      {z.logoRuta && (
+                        // Aproximación de vista previa: encaja "contain"
+                        // dentro del cuadrado que contiene a los dos brazos
+                        // (brazo×brazo) -- el ajuste EXACTO (que sí prueba
+                        // los dos brazos por separado, como host.jsx) se
+                        // calcula recién en el PDF de producción
+                        // (exportarPdf.js), donde ya se conoce el tamaño
+                        // real del archivo.
+                        <image href={z.logoRuta} x={z.cx - brazo / 2} y={z.cy - brazo / 2} width={brazo} height={brazo} preserveAspectRatio="xMidYMid meet" />
+                      )}
+                    </>
+                  );
+                })()
+              ) : (
+                <rect
+                  x={z.x} y={z.y} width={z.ancho} height={z.alto}
+                  fill={fuera ? 'rgba(248,113,113,0.15)' : 'rgba(76,141,255,0.18)'}
+                  stroke={fuera ? COLOR.zonaFuera : COLOR.zonaRect}
+                  strokeWidth={elegida ? R * 0.5 : R * 0.28}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
+              {esLogo && z.logoRuta && z.cruz === false && (
+                <image href={z.logoRuta} x={z.x} y={z.y} width={z.ancho} height={z.alto} preserveAspectRatio="xMidYMid meet" />
+              )}
+              {(elegida || zonasResueltas.length <= 1) && (!esLogo || !z.logoRuta) && (
+                <text x={z.cx} y={z.cy + F * 0.35} textAnchor="middle" fontSize={F} fill="#e6e9f0" stroke="#0d0f14" strokeWidth={F / 6} paintOrder="stroke">
+                  {esLogo ? 'LOGO' : z.etiqueta}
                 </text>
               )}
             </g>

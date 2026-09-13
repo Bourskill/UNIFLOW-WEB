@@ -76,6 +76,14 @@ export function eliminarPieza(id) {
   return pedirJson('/piezas/' + id, { method: 'DELETE' });
 }
 
+// Recalcula la geometría de TODAS las tallas de una pieza ya subida, a
+// partir de su archivo original guardado -- sin volver a subirla. Pensado
+// para piezas que ya existían antes de que el importador supiera separar
+// piquetes sueltos (pasada 19): esto es lo que las pone al día.
+export function reprocesarPieza(id) {
+  return pedirJson('/piezas/' + id + '/reprocesar', { method: 'POST' });
+}
+
 // --- Grupos (catálogo: una prenda = piezas de biblioteca por rol) ---------
 
 export function listarGrupos() {
@@ -98,15 +106,6 @@ export function resolverAnclaje(grupoId, tallaPorRol, anclaje) {
   return pedirJson('/anclaje/resolver', {
     method: 'POST',
     body: JSON.stringify({ grupoId, tallaPorRol, anclaje }),
-  });
-}
-
-// "Comprobar en otra talla": la misma pieza, dos tallas, para ver si algo
-// se descoloca al gradar antes de producir (paso 3 del apartado real).
-export function compararAnclajeEnTalla(grupoId, pieza, tallaA, tallaB, anclaje) {
-  return pedirJson('/anclaje/comparar', {
-    method: 'POST',
-    body: JSON.stringify({ grupoId, pieza, tallaA, tallaB, anclaje }),
   });
 }
 

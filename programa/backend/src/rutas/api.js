@@ -5,7 +5,7 @@ import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
 import { resolverPiezasDePedido } from '../motor/resolverPedido.js';
-import { resolver as resolverAnclaje, comparar as compararAnclaje } from '../motor/anclaje/resolver.js';
+import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
 import { geometriaDelGrupo } from '../motor/geometriaAnclaje.js';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
 import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf } from '../motor/importarPdf.js';
@@ -219,6 +219,115 @@ router.put('/piezas/:id/tallas/:talla', async (req, res) => {
   res.json(pieza);
 });
 
+// Recalcula la geometría de TODAS las tallas de una Pieza ya existente a
+// partir de su archivo original guardado (archivoOriginal) -- sin resubir
+// nada a mano. Pensado para piezas subidas antes de que el importador
+// supiera separar piquetesMm (pasada 19, geometriaComun.js): sin esto, la
+// única forma de que una pieza vieja ganara piquetes era resubir el
+// archivo entero y rehacer las asignaciones de talla desde cero.
+//
+// No se adivina la escala de nuevo si no hace falta: si el archivo trae
+// $INSUNITS (DXF) se usa tal cual; si no, se infiere del ancho en cm de una
+// talla que YA está guardada (dato de producción real), en vez de pedirlo
+// de nuevo. Y antes de guardar nada se compara el resultado contra las
+// dimensiones ya guardadas de cada talla -- "nunca dar una talla por
+// buena": si alguna se corre más de la tolerancia, no se guarda NINGUNA
+// (ni las que sí coincidían), se avisa con el detalle, y no se toca la
+// pieza real.
+const TOLERANCIA_REPROCESO_CM = 0.3;
+
+router.post('/piezas/:id/reprocesar', async (req, res) => {
+  const pieza = await leerRegistro('piezas', req.params.id);
+  if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
+  if (!pieza.archivoOriginal || !pieza.formatoOriginal) {
+    return res.status(400).json({
+      error: 'Esta pieza no tiene el archivo original guardado (se subió antes de Storage) -- hay que resubirla entera.',
+    });
+  }
+  const motor = motorPorFormato(pieza.formatoOriginal);
+  if (!motor) return res.status(400).json({ error: 'Formato original desconocido: ' + pieza.formatoOriginal });
+
+  let contenido;
+  try {
+    const respuesta = await fetch(pieza.archivoOriginal);
+    if (!respuesta.ok) throw new Error('HTTP ' + respuesta.status);
+    contenido = pieza.formatoOriginal === 'pdf'
+      ? Buffer.from(await respuesta.arrayBuffer()).toString('base64')
+      : await respuesta.text();
+  } catch (error) {
+    return res.status(400).json({ error: 'No se pudo bajar el archivo original: ' + error.message });
+  }
+
+  let analisis;
+  try {
+    analisis = await motor.analizar(motor.decodificar(contenido));
+  } catch (error) {
+    return res.status(400).json({ error: 'No se pudo releer el archivo original: ' + error.message });
+  }
+
+  // Empareja cada talla YA guardada contra un candidato de este análisis
+  // por NOMBRE (sin importar mayúsculas) -- nunca por posición/índice, que
+  // puede correrse si el archivo cambió de capas entre medio.
+  const tallasGuardadas = Object.keys(pieza.geometriaPorTalla || {});
+  const mapaTallaAIndice = {};
+  const sinCoincidencia = [];
+  for (const talla of tallasGuardadas) {
+    const candidato = analisis.asignaciones.find(
+      (a) => (a.tallaAsignada || '').toUpperCase() === talla.toUpperCase()
+    );
+    if (candidato) mapaTallaAIndice[talla] = candidato.indice;
+    else sinCoincidencia.push(talla);
+  }
+  if (Object.keys(mapaTallaAIndice).length === 0) {
+    return res.status(400).json({
+      error: 'Ninguna capa del archivo original coincide con las tallas ya guardadas (' +
+        tallasGuardadas.join(', ') + '). ¿Es el mismo archivo?',
+    });
+  }
+
+  let opciones = { mmPorUnidad: analisis.mmPorUnidad };
+  if (!analisis.mmPorUnidad) {
+    const tallaReferencia = Object.keys(mapaTallaAIndice)[0];
+    opciones = {
+      anchoConocidoCm: pieza.dimensionesPorTalla[tallaReferencia].anchoCm,
+      indiceReferencia: mapaTallaAIndice[tallaReferencia],
+    };
+  }
+
+  let resuelto;
+  try {
+    resuelto = await motor.resolver(motor.decodificar(contenido), mapaTallaAIndice, opciones);
+  } catch (error) {
+    return res.status(400).json({ error: 'No se pudo recalcular la geometría: ' + error.message });
+  }
+
+  const diferencias = [];
+  for (const [talla, geo] of Object.entries(resuelto.geometriasPorTalla)) {
+    const anchoCm = round2(geo.boundingBoxMm.anchoMm / 10);
+    const altoCm = round2(geo.boundingBoxMm.altoMm / 10);
+    const anterior = pieza.dimensionesPorTalla[talla];
+    if (Math.abs(anchoCm - anterior.anchoCm) > TOLERANCIA_REPROCESO_CM ||
+        Math.abs(altoCm - anterior.altoCm) > TOLERANCIA_REPROCESO_CM) {
+      diferencias.push(talla + ': era ' + anterior.anchoCm + '×' + anterior.altoCm + 'cm, salió ' + anchoCm + '×' + altoCm + 'cm');
+    }
+  }
+  if (diferencias.length > 0) {
+    return res.status(400).json({
+      error: 'El recálculo no coincide con las medidas ya guardadas -- no se tocó nada. ' + diferencias.join(' · '),
+    });
+  }
+
+  for (const [talla, geo] of Object.entries(resuelto.geometriasPorTalla)) {
+    pieza.geometriaPorTalla[talla] = geo;
+  }
+  await actualizarRegistro('piezas', req.params.id, pieza);
+  res.json({
+    pieza,
+    tallasReprocesadas: Object.keys(resuelto.geometriasPorTalla),
+    tallasSinCoincidencia: sinCoincidencia,
+  });
+});
+
 // --- Grupos (catálogo: una prenda = piezas de biblioteca por rol) ---------
 // No se sube nada acá — Grupos solo arma una prenda eligiendo piezas que ya
 // existen en la biblioteca. Reciclar una pieza en otro grupo es elegirla de
@@ -274,41 +383,6 @@ router.post('/anclaje/resolver', async (req, res) => {
 
   const geometria = geometriaDelGrupo(piezasDelGrupo, tallaPorRol);
   const resultado = resolverAnclaje(anclaje, geometria, { talla: null });
-  res.json(resultado);
-});
-
-// "Comprobar en otra talla": resuelve el MISMO anclaje contra dos tallas
-// distintas de una pieza y devuelve las dos listas, para que el editor
-// las pinte lado a lado a la misma escala -- la prueba de que el sistema
-// hace lo que promete (motor/anclaje/resolver.js, comparar()).
-router.post('/anclaje/comparar', async (req, res) => {
-  const { grupoId, pieza, tallaA, tallaB, anclaje } = req.body;
-  if (!grupoId || !pieza || !tallaA || !tallaB || !anclaje) {
-    return res.status(400).json({ error: 'Faltan grupoId, pieza, tallaA, tallaB o anclaje' });
-  }
-  const [grupos, piezas] = await Promise.all([leerColeccion('grupos'), leerColeccion('piezas')]);
-  const grupo = grupos.find((g) => g.id === grupoId);
-  if (!grupo) return res.status(404).json({ error: 'Grupo no encontrado' });
-
-  let piezasDelGrupo;
-  try {
-    piezasDelGrupo = resolverPiezasDeGrupo(grupo, piezas);
-  } catch (error) {
-    return res.status(400).json({ error: error.message });
-  }
-
-  const geometriaA = geometriaDelGrupo(piezasDelGrupo, { [pieza]: tallaA });
-  const geometriaB = geometriaDelGrupo(piezasDelGrupo, { [pieza]: tallaB });
-  // El resto de piezas del grupo también hace falta si alguna ancla/zona
-  // referencia otra pieza (ver referencias.js, ref.pieza) -- se manda la
-  // MISMA talla de trabajo que ya tenía cada una en el editor, salvo la
-  // pieza que se está comparando.
-  const otrasTallas = {};
-  for (const p of piezasDelGrupo) if (p.nombre !== pieza) otrasTallas[p.nombre] = tallaA;
-  const geoCompletaA = { ...geometriaDelGrupo(piezasDelGrupo, otrasTallas), ...geometriaA };
-  const geoCompletaB = { ...geometriaDelGrupo(piezasDelGrupo, otrasTallas), ...geometriaB };
-
-  const resultado = compararAnclaje(anclaje, geoCompletaA, geoCompletaB, tallaA, tallaB);
   res.json(resultado);
 });
 

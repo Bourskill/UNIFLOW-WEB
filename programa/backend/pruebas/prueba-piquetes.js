@@ -97,5 +97,22 @@ console.log('\n--- El umbral es real (2.5cm), no un número cualquiera ---');
   comprobar('Justo por debajo del umbral, cuenta como piquete', r.piquetesMm.length === 1, 'piquetes=' + r.piquetesMm.length);
 }
 
+console.log('\n--- Una línea de referencia larga y angosta NO le gana al contorno ---');
+{
+  // El bug real que motivó este cambio: elegir el contorno por PERÍMETRO
+  // (como hacía esta función antes) se rompe con una marca de hilo/doblez
+  // -- una línea recta que puede medir más de largo que el contorno real
+  // sin ser el molde. Por ÁREA de caja (mismo criterio que host.jsx) esto
+  // no pasa nunca: una línea, por larga que sea, tiene una caja casi sin
+  // área (un lado es 0).
+  const contorno = rectangulo(0, 0, 40, 30); // perímetro 140cm, área 1200cm²
+  const lineaLarga = linea(20, 0, 20, 100);  // perímetro 100cm... pero área de caja = 0 (ancho 0)
+  const r = contornoYPiquetesDeTrazos([contorno, lineaLarga], MM_POR_CM);
+  comprobar('El contorno sigue siendo el rectángulo real, no la línea larga',
+    casi(r.boundingBoxMm.anchoMm, 400) && casi(r.boundingBoxMm.altoMm, 300),
+    'anchoMm=' + r.boundingBoxMm.anchoMm + ' altoMm=' + r.boundingBoxMm.altoMm);
+  comprobar('La línea (100cm, muy por encima del umbral) no se cuenta como piquete', r.piquetesMm.length === 0, 'piquetes=' + r.piquetesMm.length);
+}
+
 console.log('\n' + pasadas + ' pasadas · ' + fallos + ' fallidas\n');
 if (fallos > 0) process.exit(1);

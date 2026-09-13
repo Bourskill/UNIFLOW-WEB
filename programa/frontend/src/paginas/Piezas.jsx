@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { listarPiezas, listarGrupos, editarPieza, eliminarPieza } from '../api.js';
+import { listarPiezas, listarGrupos, editarPieza, eliminarPieza, reprocesarPieza } from '../api.js';
 import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
-import { Boton, Campo, Input, Select, Tarjeta, Chip } from '../componentes/ui.jsx';
+import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
 
 function presetDe(angulosPermitidos) {
@@ -17,6 +17,8 @@ function FilaPieza({ pieza, usadaEn, onCambio, onBorrar }) {
   const [categoria, setCategoria] = useState(pieza.categoria || '');
   const [tela, setTela] = useState(pieza.tela || '');
   const [presetAngulos, setPresetAngulos] = useState(presetDe(pieza.angulosPermitidos));
+  const [reprocesando, setReprocesando] = useState(false);
+  const [resultadoReproceso, setResultadoReproceso] = useState(null);
 
   async function guardar() {
     const preset = PRESETS_ANGULOS.find((p) => p.id === presetAngulos);
@@ -25,7 +27,26 @@ function FilaPieza({ pieza, usadaEn, onCambio, onBorrar }) {
     onCambio();
   }
 
+  async function reprocesar() {
+    setReprocesando(true);
+    setResultadoReproceso(null);
+    try {
+      const r = await reprocesarPieza(pieza.id);
+      setResultadoReproceso({
+        tono: 'info',
+        texto: 'Recalculadas: ' + r.tallasReprocesadas.join(', ') +
+          (r.tallasSinCoincidencia.length ? ' · sin coincidencia en el archivo: ' + r.tallasSinCoincidencia.join(', ') : ''),
+      });
+      onCambio();
+    } catch (e) {
+      setResultadoReproceso({ tono: 'error', texto: e.message });
+    } finally {
+      setReprocesando(false);
+    }
+  }
+
   const tallas = ordenarTallasNatural(Object.keys(pieza.dimensionesPorTalla || {}));
+  const faltanPiquetes = tallas.some((t) => !pieza.geometriaPorTalla?.[t]?.piquetesMm?.length);
 
   return (
     <Tarjeta className="flex flex-col gap-3">
@@ -50,13 +71,31 @@ function FilaPieza({ pieza, usadaEn, onCambio, onBorrar }) {
             {usadaEn.length === 0 ? 'Sin usar en ninguna prenda todavía' : 'Usada en: ' + usadaEn.join(', ')}
           </div>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Boton variante="secundario" tamano="sm" onClick={() => setEditando((v) => !v)}>
-            {editando ? 'Cerrar' : 'Editar'}
-          </Boton>
-          <Boton variante="fantasma" tamano="sm" onClick={onBorrar}>Eliminar</Boton>
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <div className="flex gap-2">
+            <Boton variante="secundario" tamano="sm" onClick={() => setEditando((v) => !v)}>
+              {editando ? 'Cerrar' : 'Editar'}
+            </Boton>
+            <Boton variante="fantasma" tamano="sm" onClick={onBorrar}>Eliminar</Boton>
+          </div>
+          {pieza.archivoOriginal && tallas.length > 0 && (
+            <div className="flex items-center gap-1">
+              {faltanPiquetes && <span className="text-[10px] text-faint-foreground">sin piquetes</span>}
+              <Boton variante="fantasma" tamano="sm" onClick={reprocesar} disabled={reprocesando}>
+                {reprocesando ? 'Recalculando…' : 'Reprocesar geometría'}
+              </Boton>
+              <Ayuda>
+                Vuelve a leer el archivo original ya guardado (sin resubirlo) y recalcula el
+                contorno y los piquetes de cada talla con el importador actual -- para piezas
+                subidas antes de que se supiera separar los piquetes sueltos. Si el resultado no
+                coincide con las medidas ya guardadas, no toca nada y avisa.
+              </Ayuda>
+            </div>
+          )}
         </div>
       </div>
+
+      {resultadoReproceso && <Aviso tono={resultadoReproceso.tono}>{resultadoReproceso.texto}</Aviso>}
 
       {editando && (
         <div className="flex flex-wrap items-end gap-3 border-t border-border pt-3">

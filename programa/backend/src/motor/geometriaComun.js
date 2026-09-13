@@ -65,27 +65,40 @@ function largoDeTrazoMm(puntosMm, cerrado) {
 // que ya recibe todo mezclado en una sola lista de puntos y no puede
 // distinguir de dónde vino cada uno.
 //
-// El contorno real es el trazo MÁS LARGO de la capa (en cualquier pieza
-// real, el molde mide decenas de cm; nada más en la capa se le acerca).
-// Cualquier otro trazo de menos de PIQUETE_LARGO_MAX_CM reales es un
-// piquete suelto: se guarda por su CENTRO y su caja (ancho/alto), no por
-// sus puntos -- es lo que espera motor/anclaje/referencias.js (el mismo
-// convenio que ya usaban los piquetes de Illustrator: "la geometría da el
-// piquete por su centro, no por su esquina"). Un trazo que no es ni el
-// contorno ni corto (un trazo grande de más en la misma capa) no se adivina
-// como ninguna de las dos cosas: se ignora, mismo criterio que host.jsx
-// (ahí queda como diagnóstico de "trazos de más", no como dato).
+// El contorno real es el trazo con la CAJA (ancho × alto) más grande de la
+// capa -- mismo criterio que host.jsx (geometriaDeItem: "el contorno: la
+// hoja de mayor area", elegida por areaDeCaja(geometricBounds), NO por
+// perímetro). Se leyó ese código antes de escribir esto: elegir por
+// perímetro (como hacía esta función antes) se rompe con una línea de
+// referencia larga y angosta en la misma capa (ej. una marca de hilo o
+// doblez) -- puede medir más que el contorno real sin ser el molde, y
+// terminaba ganando por longitud. Por área eso no pasa nunca: una línea,
+// por larga que sea, tiene una caja casi sin área (uno de sus lados es
+// ~0), así que jamás le gana a la caja real de la pieza.
+//
+// Cualquier otro trazo de menos de PIQUETE_LARGO_MAX_CM reales (por
+// PERÍMETRO -- eso sí es fiel a pareceUnPiquete()) es un piquete suelto: se
+// guarda por su CENTRO y su caja (ancho/alto), no por sus puntos -- es lo
+// que espera motor/anclaje/referencias.js (el mismo convenio que ya usaban
+// los piquetes de Illustrator: "la geometría da el piquete por su centro,
+// no por su esquina"). Un trazo que no es ni el contorno ni corto (un trazo
+// grande de más en la misma capa) no se adivina como ninguna de las dos
+// cosas: se ignora, mismo criterio que host.jsx (ahí queda como diagnóstico
+// de "trazos de más", no como dato).
 export function contornoYPiquetesDeTrazos(trazos, mmPorUnidad) {
-  const conLongitud = trazos.map((t) => {
+  const conMedidas = trazos.map((t) => {
     const puntosMm = t.puntos.map(([x, y]) => [x * mmPorUnidad, y * mmPorUnidad]);
-    return { puntosMm, cerrado: t.cerrado, largoCm: largoDeTrazoMm(puntosMm, t.cerrado) / 10 };
+    const xs = puntosMm.map((p) => p[0]);
+    const ys = puntosMm.map((p) => p[1]);
+    const areaCajaMm2 = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+    return { puntosMm, cerrado: t.cerrado, largoCm: largoDeTrazoMm(puntosMm, t.cerrado) / 10, areaCajaMm2 };
   });
 
-  let contorno = conLongitud[0];
-  for (const t of conLongitud) if (t.largoCm > contorno.largoCm) contorno = t;
+  let contorno = conMedidas[0];
+  for (const t of conMedidas) if (t.areaCajaMm2 > contorno.areaCajaMm2) contorno = t;
 
   const piquetesMm = [];
-  for (const t of conLongitud) {
+  for (const t of conMedidas) {
     if (t === contorno || t.largoCm >= PIQUETE_LARGO_MAX_CM) continue;
     const xs = t.puntosMm.map((p) => p[0]);
     const ys = t.puntosMm.map((p) => p[1]);
