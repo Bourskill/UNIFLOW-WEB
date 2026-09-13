@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { listarPiezas, crearPieza, editarPieza, eliminarPieza, analizarPieza, resolverPieza } from '../api.js';
-import { TALLAS, PRESETS_ANGULOS } from '../constantes.js';
-import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso } from '../componentes/ui.jsx';
+import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
+import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
 
 function leerArchivoComoTexto(archivo) {
   return new Promise((resolve, reject) => {
@@ -20,20 +20,20 @@ function formatoDeArchivo(archivo) {
   return null;
 }
 
-// Un solo archivo (.svg o .dxf) con todas las tallas de la pieza adentro
-// (cada forma/capa nombrada: "S", "M", "L"...) — se analiza, se matchea cada
-// una contra una talla conocida, y lo que no matchea se asigna a mano. Nunca
-// se adivina. DXF es preferible cuando importa la medida exacta: trae su
-// propia unidad real (mm/cm/in) en la cabecera del archivo, en vez de
-// depender de que el SVG haya declarado un ancho físico.
+// Un solo archivo (.svg o .dxf) con todas las tallas de la pieza adentro:
+// el nombre de cada forma/capa ES su talla, tal cual esté escrito en el
+// archivo — "S", "2", "34", lo que sea, nunca contra una lista cerrada.
+// Formas sin nombre quedan afuera solas (no hay de dónde sacarles una
+// talla); dos formas con el mismo nombre quedan ambiguas para resolver a
+// mano. El editor manual está siempre disponible pero arranca cerrado —
+// se abre solo cuando hay algo real para revisar (una ambigüedad).
 function ZonaSubidaPieza({ onGeometriaLista }) {
   const [estado, setEstado] = useState('vacio'); // vacio | analizando | revisando | resuelto | error
   const [archivoTexto, setArchivoTexto] = useState(null);
   const [formato, setFormato] = useState(null);
   const [analisis, setAnalisis] = useState(null);
-  const [asignacionesManual, setAsignacionesManual] = useState({});
-  const [tallaNueva, setTallaNueva] = useState('');
-  const [indiceNuevo, setIndiceNuevo] = useState('');
+  const [overrides, setOverrides] = useState({}); // indice -> talla escrita a mano ('' = excluida)
+  const [editando, setEditando] = useState(false);
   const [indiceReferencia, setIndiceReferencia] = useState('');
   const [anchoConocidoCm, setAnchoConocidoCm] = useState('');
   const [geometrias, setGeometrias] = useState(null);
@@ -51,7 +51,7 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
     setEstado('analizando');
     setError(null);
     setGeometrias(null);
-    setAsignacionesManual({});
+    setOverrides({});
     onGeometriaLista(null);
     try {
       const texto = await leerArchivoComoTexto(archivo);
@@ -59,6 +59,10 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
       setFormato(formatoDetectado);
       const r = await analizarPieza(texto, formatoDetectado);
       setAnalisis(r);
+      // Se abre el editor solo si quedó algo genuinamente ambiguo (dos
+      // formas con el mismo nombre) — una forma sin nombre no es una
+      // ambigüedad, es simplemente "no es una talla", y no necesita review.
+      setEditando(r.asignaciones.some((a) => a.nombreDetectado && !a.tallaAsignada));
       setEstado('revisando');
     } catch (e) {
       setError(e.message);
@@ -73,32 +77,31 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
     multiple: false,
   });
 
-  const mapaFinal = useMemo(() => {
+  // Talla efectiva de cada forma: la que detectó el backend por su nombre,
+  // salvo que se haya corregido a mano (renombrada o excluida).
+  const tallaPorIndice = useMemo(() => {
     if (!analisis) return {};
     const mapa = {};
-    for (const a of analisis.asignaciones) if (a.tallaAsignada) mapa[a.tallaAsignada] = a.indice;
-    for (const [talla, indice] of Object.entries(asignacionesManual)) {
-      if (indice !== '') mapa[talla] = Number(indice);
+    for (const c of analisis.candidatos) {
+      const auto = analisis.asignaciones.find((a) => a.indice === c.indice)?.tallaAsignada || '';
+      mapa[c.indice] = overrides[c.indice] ?? auto;
     }
     return mapa;
-  }, [analisis, asignacionesManual]);
+  }, [analisis, overrides]);
 
-  const candidatosSinTalla = useMemo(() => {
-    if (!analisis) return [];
-    const indicesUsados = new Set(Object.values(mapaFinal));
-    return analisis.candidatos.filter((c) => !indicesUsados.has(c.indice));
-  }, [analisis, mapaFinal]);
+  const mapaFinal = useMemo(() => {
+    const mapa = {};
+    for (const [indice, talla] of Object.entries(tallaPorIndice)) {
+      if (talla) mapa[talla] = Number(indice);
+    }
+    return mapa;
+  }, [tallaPorIndice]);
+
+  const tallasOrdenadas = useMemo(() => ordenarTallasNatural(Object.keys(mapaFinal)), [mapaFinal]);
 
   const necesitaEscala = analisis && !analisis.escalaConfirmada;
   const puedeResolver =
     analisis && Object.keys(mapaFinal).length > 0 && (!necesitaEscala || (indiceReferencia !== '' && anchoConocidoCm));
-
-  function agregarAsignacionManual() {
-    if (!tallaNueva || indiceNuevo === '') return;
-    setAsignacionesManual((prev) => ({ ...prev, [tallaNueva]: indiceNuevo }));
-    setTallaNueva('');
-    setIndiceNuevo('');
-  }
 
   async function resolver() {
     setError(null);
@@ -132,9 +135,8 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
           }
         >
           <input {...getInputProps()} />
-          Arrastrá acá el archivo <strong>.svg o .dxf</strong> con{' '}
-          <strong>todas las tallas de esta pieza juntas</strong>, cada una nombrada (ej. "S", "M",
-          "L", "XL") — en DXF, una capa por talla.
+          Arrastrá acá el archivo <strong>.svg o .dxf</strong> con todas las tallas de esta pieza
+          juntas, cada una nombrada.
         </div>
       )}
 
@@ -143,60 +145,57 @@ function ZonaSubidaPieza({ onGeometriaLista }) {
 
       {(estado === 'revisando' || estado === 'resuelto') && analisis && (
         <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-muted p-3">
-          <div className="flex flex-wrap gap-1">
-            {Object.keys(mapaFinal).length === 0 ? (
-              <span className="text-xs text-faint-foreground">Ninguna talla detectada todavía.</span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {tallasOrdenadas.length === 0 ? (
+              <span className="text-xs text-faint-foreground">No se detectó ninguna talla.</span>
             ) : (
-              Object.entries(mapaFinal).map(([talla, indice]) => (
-                <Chip key={talla} tono="activo">
-                  {talla} ({analisis.candidatos[indice]?.nombre || '#' + indice})
-                </Chip>
-              ))
+              tallasOrdenadas.map((talla) => <Chip key={talla} tono="activo">{talla}</Chip>)
             )}
+            <Boton tamano="sm" variante="fantasma" type="button" onClick={() => setEditando((v) => !v)}>
+              {editando ? 'Listo' : 'Editar'}
+            </Boton>
           </div>
 
-          {candidatosSinTalla.length > 0 && (
-            <div className="text-xs text-faint-foreground">
-              <p className="mb-1">
-                Formas sin talla asignada: {candidatosSinTalla.map((c) => c.nombre || 'forma #' + c.indice).join(', ')}
-                {' '}— si alguna es en realidad una talla, asignala:
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Select value={tallaNueva} onChange={(e) => setTallaNueva(e.target.value)} className="max-w-[100px]">
-                  <option value="">Talla…</option>
-                  {TALLAS.map((t) => <option key={t} value={t}>{t}</option>)}
-                </Select>
-                <Select value={indiceNuevo} onChange={(e) => setIndiceNuevo(e.target.value)} className="max-w-[180px]">
-                  <option value="">Forma…</option>
-                  {candidatosSinTalla.map((c) => (
-                    <option key={c.indice} value={c.indice}>{c.nombre || 'forma #' + c.indice}</option>
-                  ))}
-                </Select>
-                <Boton tamano="sm" type="button" onClick={agregarAsignacionManual}>Asignar</Boton>
-              </div>
+          {editando && (
+            <div className="flex flex-col gap-1.5 border-t border-border pt-2">
+              {analisis.candidatos.map((c) => (
+                <div key={c.indice} className="flex items-center gap-2">
+                  <span className="w-32 shrink-0 truncate text-xs text-faint-foreground" title={c.nombre || ''}>
+                    {c.nombre || '(forma sin nombre)'}
+                  </span>
+                  <Input
+                    value={tallaPorIndice[c.indice]}
+                    onChange={(e) => setOverrides((prev) => ({ ...prev, [c.indice]: e.target.value }))}
+                    placeholder="no es una talla"
+                    className="max-w-[140px]"
+                  />
+                </div>
+              ))}
             </div>
           )}
 
           {necesitaEscala && (
-            <Aviso tono="info">
-              Este SVG no declara una unidad física (mm/cm/in) — elegí una forma de referencia y
-              decime cuánto mide de ancho en cm.
-              <div className="mt-2 flex gap-2">
-                <Select value={indiceReferencia} onChange={(e) => setIndiceReferencia(e.target.value)} className="max-w-[180px]">
-                  <option value="">Forma de referencia…</option>
-                  {analisis.candidatos.map((c) => (
-                    <option key={c.indice} value={c.indice}>{c.nombre || 'forma #' + c.indice}</option>
-                  ))}
-                </Select>
-                <Input
-                  type="number"
-                  placeholder="Ancho real (cm)"
-                  value={anchoConocidoCm}
-                  onChange={(e) => setAnchoConocidoCm(e.target.value)}
-                  className="max-w-[140px]"
-                />
-              </div>
-            </Aviso>
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/20 bg-primary-soft px-3 py-2 text-sm text-primary">
+              <span>Sin unidad física — ancho real de</span>
+              <Select value={indiceReferencia} onChange={(e) => setIndiceReferencia(e.target.value)} className="max-w-[150px]">
+                <option value="">una forma…</option>
+                {analisis.candidatos.map((c) => (
+                  <option key={c.indice} value={c.indice}>{c.nombre || 'forma #' + c.indice}</option>
+                ))}
+              </Select>
+              <Input
+                type="number"
+                placeholder="cm"
+                value={anchoConocidoCm}
+                onChange={(e) => setAnchoConocidoCm(e.target.value)}
+                className="max-w-[70px]"
+              />
+              <Ayuda>
+                Pasa sobre todo con SVG: el archivo no declara cuánto mide de verdad (mm/cm/in), así
+                que hace falta confirmarlo a mano una vez para poder calcular el resto a escala. Un
+                DXF casi siempre trae esto solo.
+              </Ayuda>
+            </div>
           )}
 
           {error && <Aviso tono="error">{error}</Aviso>}

@@ -1,15 +1,17 @@
 // Lo que comparten los importadores de SVG y DXF: una vez que cada formato
 // entrega sus puntos ya en "unidades del archivo" (sin importar de dónde
-// salieron), matchear el nombre contra una talla conocida y calcular
-// bounding box en mm es exactamente el mismo cálculo.
-
-import { TALLAS_ORDEN } from '../dominio/modelos.js';
-
-const TALLAS_NORMALIZADAS = new Set(TALLAS_ORDEN.map((t) => t.toUpperCase()));
+// salieron), matchear el nombre de una forma/capa contra "es una talla" y
+// calcular bounding box en mm es exactamente el mismo cálculo.
+//
+// La talla NO se valida contra una lista fija (XS/S/M/.../XL) -- eso
+// forzaba una sola escala (ropa de adulto unisex) y dejaba afuera tallas de
+// niño (2, 4, 6...), de pantalón (30, 32, 34...) o cualquier nomenclatura
+// propia de marca. El nombre que trae el archivo ES la talla, tal cual; solo
+// se descarta si está vacío (una forma sin nombre no puede ser una talla).
 
 export function normalizarTalla(nombre) {
-  const limpio = (nombre || '').trim().toUpperCase();
-  return TALLAS_NORMALIZADAS.has(limpio) ? limpio : null;
+  const limpio = (nombre || '').trim();
+  return limpio || null;
 }
 
 export function anchoDePuntos(puntosUnidades) {
@@ -32,19 +34,25 @@ export function poligonoYBoundingBoxDePuntos(puntosUnidades, mmPorUnidad) {
 
 // Dado el conjunto crudo de "candidatos" (una forma/capa por índice, cada uno
 // con nombre y sus puntos en unidades del archivo), arma las asignaciones
-// automáticas talla->índice por nombre exacto. Si dos candidatos matchean la
-// misma talla, ninguno se asigna solo -- queda ambiguo para resolver a mano.
+// automáticas talla->índice: el nombre de cada forma ES su talla. Si dos
+// formas comparten nombre (comparando sin importar mayúsculas -- "M" y "m"
+// son la misma talla escrita distinto, no dos tallas), ninguna se asigna
+// sola: queda ambiguo para resolver a mano en vez de guardar cualquiera de
+// las dos por adivinar.
 export function asignarTallasPorNombre(candidatos) {
   const asignacionesCrudas = candidatos.map((c) => ({
     indice: c.indice,
     nombreDetectado: c.nombre,
     tallaAsignada: normalizarTalla(c.nombre),
   }));
-  const conteoPorTalla = {};
+  const conteoPorTallaClave = {};
   for (const a of asignacionesCrudas) {
-    if (a.tallaAsignada) conteoPorTalla[a.tallaAsignada] = (conteoPorTalla[a.tallaAsignada] || 0) + 1;
+    if (a.tallaAsignada) {
+      const clave = a.tallaAsignada.toUpperCase();
+      conteoPorTallaClave[clave] = (conteoPorTallaClave[clave] || 0) + 1;
+    }
   }
   return asignacionesCrudas.map((a) =>
-    a.tallaAsignada && conteoPorTalla[a.tallaAsignada] > 1 ? { ...a, tallaAsignada: null } : a
+    a.tallaAsignada && conteoPorTallaClave[a.tallaAsignada.toUpperCase()] > 1 ? { ...a, tallaAsignada: null } : a
   );
 }

@@ -81,3 +81,25 @@ export function Aviso({ tono = 'info', children }) {
     <p className={'rounded-lg border px-3 py-2 text-sm ' + tonos[tono]}>{children}</p>
   );
 }
+
+// El "por qué" de algo puntual va detrás de un "?", no como párrafo siempre
+// visible -- la pantalla se lee sola, y el detalle está ahí para quien lo
+// necesite. <details> nativo: sin JS propio, se cierra solo con Escape/foco.
+export function Ayuda({ children }) {
+  return (
+    <details className="group relative inline-block align-middle">
+      <summary
+        className={
+          'inline-flex h-4 w-4 cursor-pointer items-center justify-center rounded-full border ' +
+          'border-current text-[10px] font-bold leading-none opacity-70 hover:opacity-100 ' +
+          '[&::-webkit-details-marker]:hidden [&::marker]:content-none'
+        }
+      >
+        ?
+      </summary>
+      <div className="absolute left-0 top-5 z-10 w-64 rounded-lg border border-border bg-surface p-2.5 text-xs font-normal normal-case text-muted-foreground shadow-md">
+        {children}
+      </div>
+    </details>
+  );
+}
