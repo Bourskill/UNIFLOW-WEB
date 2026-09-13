@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Formulario } from './paginas/Formulario.jsx';
 import { Prendas } from './paginas/Prendas.jsx';
 import { Piezas } from './paginas/Piezas.jsx';
-import { Disenos } from './paginas/Disenos.jsx';
 import { Productos } from './paginas/Productos.jsx';
 import { Pedidos } from './paginas/Pedidos.jsx';
 import { Historial } from './paginas/Historial.jsx';
@@ -69,12 +68,13 @@ function App() {
             />
           )}
           {pestana === 'diseno' && (
-            <SubTabs
-              tabs={[
-                { id: 'disenos', etiqueta: 'Diseños', contenido: <Disenos recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
-                { id: 'productos', etiqueta: 'Productos', contenido: <Productos recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
-              ]}
-            />
+            // Una sola pantalla, sin sub-pestañas -- unificado a pedido del
+            // usuario (antes Diseños y Productos eran dos pasos separados
+            // que había que guardar por separado y volver a conectar por
+            // nombre; ver Productos.jsx).
+            <div className="h-full overflow-y-auto p-8">
+              <Productos recargarSenal={recargarSenal} onCambio={marcarCambio} />
+            </div>
           )}
           {pestana === 'produccion' && (
             <SubTabs

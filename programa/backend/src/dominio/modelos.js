@@ -58,6 +58,7 @@
  * @property {string} id
  * @property {string} tipo                  'texto' | 'numero' | 'imagen'
  * @property {string} ancla                 referencia de piquete/posición en el diseño
+ * @property {string} [valorEjemplo]        solo para previsualizar en el editor, nunca se produce con esto
  * @property {'proporcional'|'porRangos'} modoEscalado
  * @property {{ altoCm: number }} [referenciaProporcional]   base para escalado continuo
  * @property {string} [tallaReferencia]     a qué talla corresponde ese alto de referencia
@@ -66,13 +67,18 @@
 
 /**
  * Producto: unión de un grupo (piezas reales), un diseño y overrides de
- * personalización (equivalente a "Elementos" en la referencia externa).
+ * personalización (equivalente a "Elementos" en la referencia externa) --
+ * todo editado en una sola pantalla (`paginas/Productos.jsx`), no en dos
+ * pasos separados.
  *
  * @typedef {Object} Producto
  * @property {string} id
  * @property {string} nombre
  * @property {string} grupoId
  * @property {string} disenoId
+ * @property {{activo: boolean, colorHex: string, grosorCm: number}} [bordeContraste]
+ *   contorno del molde por encima del diseño recortado, para no perder los
+ *   piquetes bajo el arte -- opcional, grosor real en cm (default 0.03)
  */
 
 /**

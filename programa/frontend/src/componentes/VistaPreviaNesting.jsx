@@ -1,24 +1,9 @@
-import { useEffect, useState } from 'react';
 import { Stage, Layer, Rect, Text, Image as ImagenKonva, Group } from 'react-konva';
+import { useImagenCargada } from './useImagenCargada.js';
 
 // Un pixel por cm es suficiente para la vista previa; no es la resolución del
 // PDF final (eso lo decide exportarPdf.js en el backend con puntos reales).
 const PX_POR_CM = 6;
-
-function useImagenCargada(dataUrl) {
-  const [imagen, setImagen] = useState(null);
-  useEffect(() => {
-    if (!dataUrl) {
-      setImagen(null);
-      return;
-    }
-    const elemento = new window.Image();
-    elemento.crossOrigin = 'anonymous'; // la imagen ahora suele venir de Supabase Storage, no embebida
-    elemento.onload = () => setImagen(elemento);
-    elemento.src = dataUrl;
-  }, [dataUrl]);
-  return imagen;
-}
 
 export function VistaPreviaNesting({ resultado }) {
   const ancho = resultado.anchoLienzoCm * PX_POR_CM;

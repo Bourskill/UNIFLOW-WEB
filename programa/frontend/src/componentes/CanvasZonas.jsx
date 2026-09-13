@@ -1,4 +1,5 @@
-import { Stage, Layer, Line, Group, Rect, Text } from 'react-konva';
+import { Stage, Layer, Line, Group, Rect, Text, Image as ImagenKonva } from 'react-konva';
+import { useImagenCargada } from './useImagenCargada.js';
 
 const MAX_ANCHO_PX = 460;
 const MAX_ALTO_PX = 480;
@@ -13,6 +14,12 @@ const COLOR_TEXTO = '#e6e9f0';
 
 const ETIQUETA_TIPO = { nombre: 'Nombre', numero: 'N°', texto: 'Texto' };
 
+// Grosor mínimo VISIBLE en pantalla para el borde de contraste. El grosor
+// real configurado (0.03cm por defecto) es el correcto para producción, pero
+// a la escala de este canvas eso es menos de 1px -- no significa que el
+// borde "no está", solo que a este zoom hay que exagerarlo para poder verlo.
+const GROSOR_BORDE_MIN_PX = 1.5;
+
 // El contorno real de la pieza (no un rectángulo) como fondo, y cada
 // elemento (nombre/número/texto) como una caja arrastrable encima -- eso es
 // lo que pedía el usuario en vez de tipear X/Y a ciegas en un formulario.
@@ -23,7 +30,28 @@ const ETIQUETA_TIPO = { nombre: 'Nombre', numero: 'N°', texto: 'Texto' };
 // calcula para que la pieza siempre entre en un tamaño de canvas razonable
 // -- una espalda de 76cm de alto no puede pintarse al mismo px/cm que un
 // cuello de 8cm.
-export function CanvasZonas({ poligonoMm, anchoCm, altoCm, elementos, elementoActivoId, onSeleccionar, onMover, onCrear }) {
+//
+// Si se pasa `imagenUrl`, el diseño se pinta de fondo RECORTADO a la forma
+// real del polígono (Konva `clipFunc`), no estirado a un rectángulo -- "el
+// diseño va adentro del molde como máscara". `borde` agrega encima el
+// contorno de contraste opcional para no perder los piquetes bajo el diseño
+// (grosor real en cm, color a elección del usuario -- detectar el color
+// dominante del diseño para elegir el contraste solo no está implementado,
+// se deja a mano a propósito).
+export function CanvasZonas({
+  poligonoMm,
+  anchoCm,
+  altoCm,
+  imagenUrl,
+  borde,
+  elementos,
+  elementoActivoId,
+  onSeleccionar,
+  onMover,
+  onCrear,
+}) {
+  const imagen = useImagenCargada(imagenUrl);
+
   if (!poligonoMm || poligonoMm.length === 0) {
     return (
       <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-border text-sm text-faint-foreground">
@@ -39,13 +67,21 @@ export function CanvasZonas({ poligonoMm, anchoCm, altoCm, elementos, elementoAc
   const minX = Math.min(...xs);
   const maxY = Math.max(...ys);
 
-  const puntosPx = poligonoMm.flatMap(([x, y]) => [
+  const puntosParesPx = poligonoMm.map(([x, y]) => [
     ((x - minX) / 10) * pxPorCm,
     ((maxY - y) / 10) * pxPorCm,
   ]);
+  const puntosPx = puntosParesPx.flat();
 
   const anchoPx = anchoCm * pxPorCm;
   const altoPx = altoCm * pxPorCm;
+
+  function recortarAlPoligono(ctx) {
+    ctx.beginPath();
+    ctx.moveTo(puntosParesPx[0][0], puntosParesPx[0][1]);
+    for (let i = 1; i < puntosParesPx.length; i++) ctx.lineTo(puntosParesPx[i][0], puntosParesPx[i][1]);
+    ctx.closePath();
+  }
 
   function alClickearFondo(e) {
     if (e.target !== e.target.getStage() && e.target.name() !== 'fondo-pieza') return;
@@ -58,14 +94,33 @@ export function CanvasZonas({ poligonoMm, anchoCm, altoCm, elementos, elementoAc
       <Stage width={anchoPx + 40} height={altoPx + 40} onClick={alClickearFondo}>
         <Layer x={20} y={20}>
           <Rect name="fondo-pieza" x={0} y={0} width={anchoPx} height={altoPx} fill="transparent" />
-          <Line
-            points={puntosPx}
-            closed
-            stroke={COLOR_PRIMARIO}
-            strokeWidth={1.5}
-            fill="rgba(76,141,255,0.08)"
-            listening={false}
-          />
+
+          {imagen ? (
+            <Group clipFunc={recortarAlPoligono}>
+              <ImagenKonva image={imagen} x={0} y={0} width={anchoPx} height={altoPx} listening={false} />
+            </Group>
+          ) : (
+            <Line
+              points={puntosPx}
+              closed
+              stroke={COLOR_PRIMARIO}
+              strokeWidth={1.5}
+              fill="rgba(76,141,255,0.08)"
+              listening={false}
+            />
+          )}
+
+          {imagen && (
+            <Line
+              points={puntosPx}
+              closed
+              stroke={borde?.activo ? borde.colorHex : COLOR_PRIMARIO}
+              strokeWidth={borde?.activo ? Math.max((borde.grosorCm || 0.03) * pxPorCm, GROSOR_BORDE_MIN_PX) : 1}
+              opacity={borde?.activo ? 1 : 0.5}
+              listening={false}
+            />
+          )}
+
           {elementos.map((el) => (
             <ZonaArrastrable
               key={el.id}
@@ -89,7 +144,9 @@ function ZonaArrastrable({ elemento, activo, pxPorCm, onSeleccionar, onMover }) 
   const altoTextoPx = (elemento.referenciaProporcional?.altoCm || 3) * pxPorCm;
   const anchoAprox = elemento.tipo === 'numero' ? altoTextoPx * 1.4 : altoTextoPx * 3.2;
   const etiqueta =
-    elemento.tipo === 'texto' && elemento.valorFijo ? elemento.valorFijo : ETIQUETA_TIPO[elemento.tipo] || elemento.tipo;
+    elemento.tipo === 'texto' && elemento.valorFijo ? elemento.valorFijo :
+    elemento.valorEjemplo ? elemento.valorEjemplo :
+    ETIQUETA_TIPO[elemento.tipo] || elemento.tipo;
 
   return (
     <Group
