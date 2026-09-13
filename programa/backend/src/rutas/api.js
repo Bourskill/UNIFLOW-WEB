@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
-import { leerColeccion, escribirColeccion } from '../dominio/almacen.js';
+import { leerColeccion, leerRegistro, crearRegistro, actualizarRegistro, borrarRegistro } from '../dominio/almacen.js';
 import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
@@ -29,26 +29,21 @@ function crudSimple(nombreColeccion) {
   });
 
   router.post('/' + nombreColeccion, async (req, res) => {
-    const coleccion = await leerColeccion(nombreColeccion);
     const registro = { id: nanoid(), ...req.body };
-    coleccion.push(registro);
-    await escribirColeccion(nombreColeccion, coleccion);
+    await crearRegistro(nombreColeccion, registro);
     res.status(201).json(registro);
   });
 
   router.put('/' + nombreColeccion + '/:id', async (req, res) => {
-    const coleccion = await leerColeccion(nombreColeccion);
-    const indice = coleccion.findIndex((r) => r.id === req.params.id);
-    if (indice === -1) return res.status(404).json({ error: 'No encontrado' });
-    coleccion[indice] = { ...coleccion[indice], ...req.body, id: req.params.id };
-    await escribirColeccion(nombreColeccion, coleccion);
-    res.json(coleccion[indice]);
+    const existente = await leerRegistro(nombreColeccion, req.params.id);
+    if (!existente) return res.status(404).json({ error: 'No encontrado' });
+    const registro = { ...existente, ...req.body, id: req.params.id };
+    await actualizarRegistro(nombreColeccion, req.params.id, registro);
+    res.json(registro);
   });
 
   router.delete('/' + nombreColeccion + '/:id', async (req, res) => {
-    const coleccion = await leerColeccion(nombreColeccion);
-    const restante = coleccion.filter((r) => r.id !== req.params.id);
-    await escribirColeccion(nombreColeccion, restante);
+    await borrarRegistro(nombreColeccion, req.params.id);
     res.status(204).end();
   });
 }
@@ -137,7 +132,6 @@ router.post('/piezas', async (req, res) => {
     ])
   );
 
-  const piezas = await leerColeccion('piezas');
   const registro = {
     id: nanoid(),
     nombre,
@@ -146,27 +140,24 @@ router.post('/piezas', async (req, res) => {
     geometriaPorTalla,
     dimensionesPorTalla,
   };
-  piezas.push(registro);
-  await escribirColeccion('piezas', piezas);
+  await crearRegistro('piezas', registro);
   res.status(201).json(registro);
 });
 
 router.put('/piezas/:id', async (req, res) => {
   const { nombre, angulosPermitidos, tela } = req.body;
-  const piezas = await leerColeccion('piezas');
-  const pieza = piezas.find((p) => p.id === req.params.id);
+  const pieza = await leerRegistro('piezas', req.params.id);
   if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
 
   if (nombre !== undefined) pieza.nombre = nombre;
   if (angulosPermitidos !== undefined) pieza.angulosPermitidos = angulosPermitidos;
   if (tela !== undefined) pieza.tela = tela;
-  await escribirColeccion('piezas', piezas);
+  await actualizarRegistro('piezas', req.params.id, pieza);
   res.json(pieza);
 });
 
 router.delete('/piezas/:id', async (req, res) => {
-  const piezas = await leerColeccion('piezas');
-  await escribirColeccion('piezas', piezas.filter((p) => p.id !== req.params.id));
+  await borrarRegistro('piezas', req.params.id);
   res.status(204).end();
 });
 
@@ -178,8 +169,7 @@ router.put('/piezas/:id/tallas/:talla', async (req, res) => {
   const { boundingBoxMm } = req.body;
   if (!boundingBoxMm) return res.status(400).json({ error: 'Falta la geometría resuelta' });
 
-  const piezas = await leerColeccion('piezas');
-  const pieza = piezas.find((p) => p.id === req.params.id);
+  const pieza = await leerRegistro('piezas', req.params.id);
   if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
 
   pieza.geometriaPorTalla[req.params.talla] = req.body;
@@ -187,7 +177,7 @@ router.put('/piezas/:id/tallas/:talla', async (req, res) => {
     anchoCm: round2(boundingBoxMm.anchoMm / 10),
     altoCm: round2(boundingBoxMm.altoMm / 10),
   };
-  await escribirColeccion('piezas', piezas);
+  await actualizarRegistro('piezas', req.params.id, pieza);
   res.json(pieza);
 });
 
@@ -211,16 +201,13 @@ router.post('/grupos', async (req, res) => {
     }
   }
 
-  const grupos = await leerColeccion('grupos');
   const grupo = { id: nanoid(), nombre, piezas };
-  grupos.push(grupo);
-  await escribirColeccion('grupos', grupos);
+  await crearRegistro('grupos', grupo);
   res.status(201).json(grupo);
 });
 
 router.delete('/grupos/:id', async (req, res) => {
-  const grupos = await leerColeccion('grupos');
-  await escribirColeccion('grupos', grupos.filter((g) => g.id !== req.params.id));
+  await borrarRegistro('grupos', req.params.id);
   res.status(204).end();
 });
 
@@ -345,7 +332,6 @@ router.post('/nesting/generar', async (req, res) => {
 
   const pdfBytes = await generarPdfNesting(resultadoNesting);
 
-  const generaciones = await leerColeccion('generaciones');
   const generacion = {
     id: nanoid(),
     creadoEn: new Date().toISOString(),
@@ -354,8 +340,7 @@ router.post('/nesting/generar', async (req, res) => {
     utilizacion: resultadoNesting.utilizacion,
     piezas: resultadoNesting.piezas.map((p) => ({ ...p, estado: 'generada' })),
   };
-  generaciones.push(generacion);
-  await escribirColeccion('generaciones', generaciones);
+  await crearRegistro('generaciones', generacion);
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', 'attachment; filename="generacion-' + generacion.id + '.pdf"');
@@ -366,8 +351,7 @@ router.post('/nesting/generar', async (req, res) => {
 // tocar el resto del lote. Es el hallazgo más accionable de la investigación
 // de referencia (ver claude/README.md).
 router.post('/nesting/:generacionId/reposicion/:piezaId', async (req, res) => {
-  const generaciones = await leerColeccion('generaciones');
-  const generacion = generaciones.find((g) => g.id === req.params.generacionId);
+  const generacion = await leerRegistro('generaciones', req.params.generacionId);
   if (!generacion) return res.status(404).json({ error: 'Generación no encontrada' });
 
   const pieza = generacion.piezas.find((p) => p.id === req.params.piezaId);
@@ -380,7 +364,7 @@ router.post('/nesting/:generacionId/reposicion/:piezaId', async (req, res) => {
   const pdfBytes = await generarPdfNesting(layoutDeUnaPieza);
 
   pieza.estado = 'repuesta';
-  await escribirColeccion('generaciones', generaciones);
+  await actualizarRegistro('generaciones', req.params.generacionId, generacion);
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', 'attachment; filename="reposicion-' + pieza.id + '.pdf"');
