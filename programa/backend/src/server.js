@@ -12,7 +12,12 @@ process.on('unhandledRejection', (error) => {
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+// Los diseños suben imagen por pieza como data URL embebida en el JSON (no
+// un archivo aparte), y las Piezas en PDF viajan en base64 dentro del mismo
+// body -- ambos casos pueden pasar varios MB fácil. 10mb se quedaba corto
+// con una sola imagen de diseño en buena resolución ("request entity too
+// large"); 50mb da margen real sin abrir la puerta a payloads absurdos.
+app.use(express.json({ limit: '50mb' }));
 app.use('/api', apiRouter);
 
 app.get('/api/salud', (req, res) => res.json({ ok: true }));
