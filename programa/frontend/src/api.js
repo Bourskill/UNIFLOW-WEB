@@ -90,6 +90,17 @@ export function eliminarGrupo(id) {
   return pedirJson('/grupos/' + id, { method: 'DELETE' });
 }
 
+// Resuelve un anclaje (anclas/zonas) TODAVÍA NO GUARDADO contra la
+// geometría real de un grupo -- lo llama el canvas de Productos.jsx cada
+// vez que el usuario mueve algo o cambia de talla de trabajo, para mostrar
+// en vivo dónde cae cada ancla/zona (ver motor/anclaje/resolver.js).
+export function resolverAnclaje(grupoId, tallaPorRol, anclaje) {
+  return pedirJson('/anclaje/resolver', {
+    method: 'POST',
+    body: JSON.stringify({ grupoId, tallaPorRol, anclaje }),
+  });
+}
+
 export function anidarDesdeGrupo(grupoId, lineas, anchoLienzoCm) {
   return pedirJson('/nesting/desde-grupo', {
     method: 'POST',

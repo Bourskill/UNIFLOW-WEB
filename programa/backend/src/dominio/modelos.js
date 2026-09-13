@@ -11,7 +11,7 @@
  * de un DXF o un PDF con capas (una capa por talla) — nunca se deriva
  * ancho×alto sin ella. dimensionesPorTalla se calcula A PARTIR del bounding
  * box de esa geometría, no al revés; se guarda aparte solo porque
- * calibracion.js y nesting.js ya trabajan con cm planos.
+ * motor/anclaje/ y nesting.js ya trabajan con cm planos.
  *
  * @typedef {Object} Pieza
  * @property {string} id
@@ -50,25 +50,84 @@
  */
 
 /**
- * Diseño: la plantilla visual + las zonas de personalización ancladas a ella.
- * El ancla vive en el diseño, NUNCA se deriva de la geometría cruda de la
- * moldería (ver claude/README.md — bug ya pagado en la versión Illustrator).
+ * Anclaje: el grafo de anclas y zonas de un Producto -- puerto FIEL del
+ * sistema de zonas/anclajes de UNIFLOW/Illustrator (motor/anclaje/, portado
+ * línea por línea desde programa/cerebro/src/anclaje/ del panel; ver los
+ * comentarios de esos archivos para el porqué de cada regla). La idea
+ * central, tal cual la pedía el enunciado original: "no guardar
+ * posiciones, guardar relaciones que permitan reconstruirlas" -- así una
+ * zona sigue en el mismo lugar relativo al gradar de talla, en vez de
+ * quedar pegada en centímetros fijos.
+ *
+ * Una Ancla es un punto: cada eje (x, y) tiene su propia Referencia (a qué
+ * rasgo real de la pieza se agarra) y un modo fijo/proporcional. Una Zona
+ * es una caja anclada a una o dos Anclas (dos = "la X de una, la Y de la
+ * otra", la intersección del punto 7 del enunciado original).
+ *
+ * `campoPedido` y `valorFijo` son la ÚNICA parte de esto que NO viene del
+ * puerto: motor/anclaje/resolver.js deliberadamente no sabe qué es un
+ * pedido (es aritmética pura), así que qué dato de la línea de pedido llena
+ * cada zona ("nombre" | "numero" | "fijo") vive acá, al lado, y
+ * resolverPedido.js lo lee del anclaje crudo por id -- nunca se le agregó
+ * ese campo al motor portado para no dejar de ser un puerto fiel.
+ *
+ * @typedef {Object} Referencia
+ * @property {'contorno'|'extremo'|'vertice'|'saliente'|'piquete'|'zona'|'ancla'} tipo
+ * @property {string} [pieza]      si falta, la propia pieza del nodo que la usa
+ * @property {string} [parte]      'centro'|'arriba'|'abajo'|'izquierda'|'derecha'|'supIzq'|'supDer'|'infIzq'|'infDer'
+ * @property {number} [indice]     para 'vertice'/'saliente'/'piquete'
+ * @property {number} [puntos]     huella: nº de vértices al crear el ancla ('vertice')
+ * @property {number} [total]      huella: nº de salientes/piquetes al crear el ancla
+ * @property {number} [rx]         posición relativa (0-1) del rasgo en la pieza, para reemparejar si cambia la cuenta
+ * @property {number} [ry]
+ * @property {string} [zona]       id de la zona referenciada ('zona')
+ * @property {string} [ancla]      id del ancla referenciada ('ancla')
+ *
+ * @typedef {Object} Eje
+ * @property {Referencia} ref
+ * @property {'fijo'|'proporcional'} modo
+ * @property {number} valor        cm si es fijo, fracción (0.2 = 20%) si es proporcional
+ * @property {'pieza'|'referencia'} [base]   contra qué dimensión se mide lo proporcional
+ *
+ * @typedef {Object} Ancla
+ * @property {string} id
+ * @property {string} [nombre]
+ * @property {string} pieza        rol de GrupoPieza al que pertenece
+ * @property {Eje} x
+ * @property {Eje} y
  *
  * @typedef {Object} Zona
  * @property {string} id
- * @property {string} tipo                  'texto' | 'numero' | 'imagen'
- * @property {string} ancla                 referencia de piquete/posición en el diseño
- * @property {string} [valorEjemplo]        solo para previsualizar en el editor, nunca se produce con esto
- * @property {'proporcional'|'porRangos'} modoEscalado
- * @property {{ altoCm: number }} [referenciaProporcional]   base para escalado continuo
- * @property {string} [tallaReferencia]     a qué talla corresponde ese alto de referencia
- * @property {Array<{ desdeTalla: string, hastaTalla: string, anchoCm: number, altoCm: number }>} [rangos]
+ * @property {string} [nombre]
+ * @property {string} [grupo]      id libre, puede repetirse (varias zonas sincronizadas, ej. un sponsor en 2 piezas)
+ * @property {string} pieza
+ * @property {'texto'|'numero'|'logo'} tipo
+ * @property {string} anclaX
+ * @property {string} anclaY       igual a anclaX si la zona cuelga de un solo punto
+ * @property {'esquina'|'medio'} [modoCruce]   con dos anclas distintas: qué punto se usa
+ * @property {number|{modo:'fijo'|'proporcional',valor:number}} [ancho]
+ * @property {number|{modo:'fijo'|'proporcional',valor:number}} [alto]
+ * @property {number|{modo:'fijo'|'proporcional',valor:number}} [lado]   solo tipo 'logo' con cruz activa
+ * @property {boolean} [cruz]      solo tipo 'logo': cruz de 2 medidas vs. rectángulo con ancho/alto propios
+ * @property {'centro'|'supIzq'|'supDer'|'infIzq'|'infDer'|'centroArriba'|'centroAbajo'|'centroIzq'|'centroDer'} [origen]
+ * @property {{x:number|object, y:number|object}} [offset]   desplazamiento posterior, fijo o proporcional
+ * @property {Object} [muestra]    contenido de vista previa al materializar (no se usa en producción)
+ * @property {string} [logoRuta]
+ * @property {'nombre'|'numero'|'fijo'} [campoPedido]   propio de UNIFLOW WEB, ver arriba
+ * @property {string} [valorFijo]  solo si campoPedido === 'fijo'
+ * @property {string} [valorEjemplo]  solo para previsualizar en el editor, nunca se produce con esto
+ * @property {string} [colorHex]
+ *
+ * @typedef {Object} Anclaje
+ * @property {number} [version]
+ * @property {Ancla[]} anclas
+ * @property {Zona[]} zonas
  */
 
 /**
- * Producto: unión de un grupo (piezas reales), un diseño y overrides de
- * personalización (equivalente a "Elementos" en la referencia externa) --
- * todo editado en una sola pantalla (`paginas/Productos.jsx`), no en dos
+ * Producto: unión de un grupo (piezas reales), un diseño y el Anclaje
+ * (dónde va cada nombre/número/logo y con qué tamaño, gradando por talla)
+ * -- todo editado en una sola pantalla (`paginas/Productos.jsx`), no en dos
  * pasos separados.
  *
  * @typedef {Object} Producto
@@ -76,6 +135,7 @@
  * @property {string} nombre
  * @property {string} grupoId
  * @property {string} disenoId
+ * @property {Anclaje} anclaje
  * @property {{activo: boolean, colorHex: string, grosorCm: number}} [bordeContraste]
  *   contorno del molde por encima del diseño recortado, para no perder los
  *   piquetes bajo el arte -- opcional, grosor real en cm (default 0.03)
@@ -108,9 +168,3 @@
  * @property {{ x: number, y: number, rotacionGrados: 0 | 180 }} posicion
  * @property {'pendiente'|'generada'|'repuesta'} estado
  */
-
-export const TALLAS_ORDEN = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
-
-export function compararTallas(a, b) {
-  return TALLAS_ORDEN.indexOf(a) - TALLAS_ORDEN.indexOf(b);
-}

@@ -1,10 +1,3 @@
-// v0: preset de tallas comunes para los formularios de Pedidos/Productos
-// (elegir una talla ya cargada). No es una lista cerrada: Piezas acepta
-// cualquier nombre de talla que traiga el archivo subido (numérica de niño,
-// de pantalón, de marca propia...), esto es solo el atajo de estos dos
-// formularios puntuales.
-export const TALLAS = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
-
 // Orden conocido de las tallas de letra más comunes, solo para mostrar
 // chips en un orden que se lea bien (no valida ni restringe nada: una talla
 // que no está acá simplemente no tiene una posición "conocida").

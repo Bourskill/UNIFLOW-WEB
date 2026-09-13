@@ -2,23 +2,46 @@ import { useEffect, useState } from 'react';
 import {
   listarProductos,
   listarGrupos,
+  listarPiezas,
   listarPedidos,
   crearPedido,
   eliminarPedido,
   anidarDesdePedido,
   generarPdf,
 } from '../api.js';
-import { TALLAS } from '../constantes.js';
+import { ordenarTallasNatural } from '../constantes.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso } from '../componentes/ui.jsx';
 
-function lineaVacia(productoId) {
-  return { id: crypto.randomUUID(), productoId, talla: TALLAS[2], nombre: '', numero: '', piezasExcluidas: [] };
+// Las tallas válidas para un pedido son las que tienen TODAS las piezas del
+// grupo del producto -- no una lista fija (XS/S/M/L/XL/XXL en mayúscula):
+// una pieza real puede traer sus tallas numéricas o en minúscula (ver
+// tallaDeTrabajoPorDefecto en Productos.jsx, mismo problema, mismo fix).
+// Antes esta pantalla mostraba SIEMPRE "M" (mayúscula, de la lista fija) y
+// resolverPedido.js fallaba con "no tiene dimensión cargada para la talla M"
+// aunque la pieza sí tuviera "m" -- el error era real, pero la causa era el
+// desajuste de mayúsculas, no una pieza mal cargada.
+function tallasDelProducto(productoId, productos, grupos, piezas) {
+  const producto = productos.find((p) => p.id === productoId);
+  const grupo = producto && grupos.find((g) => g.id === producto.grupoId);
+  if (!grupo || grupo.piezas.length === 0) return [];
+  const conjuntos = grupo.piezas
+    .map((gp) => piezas.find((p) => p.id === gp.piezaId))
+    .filter(Boolean)
+    .map((p) => new Set(Object.keys(p.dimensionesPorTalla || {})));
+  if (conjuntos.length === 0) return [];
+  const interseccion = [...conjuntos[0]].filter((t) => conjuntos.every((s) => s.has(t)));
+  return ordenarTallasNatural(interseccion);
+}
+
+function lineaVacia(productoId, talla) {
+  return { id: crypto.randomUUID(), productoId, talla: talla || '', nombre: '', numero: '', piezasExcluidas: [] };
 }
 
 export function Pedidos({ recargarSenal }) {
   const [productos, setProductos] = useState([]);
   const [grupos, setGrupos] = useState([]);
+  const [piezas, setPiezas] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [cliente, setCliente] = useState('');
   const [lineas, setLineas] = useState([]);
@@ -31,11 +54,14 @@ export function Pedidos({ recargarSenal }) {
   const [errorGenerar, setErrorGenerar] = useState(null);
 
   async function recargar() {
-    const [ps, gs, peds] = await Promise.all([listarProductos(), listarGrupos(), listarPedidos()]);
+    const [ps, gs, pzs, peds] = await Promise.all([listarProductos(), listarGrupos(), listarPiezas(), listarPedidos()]);
     setProductos(ps);
     setGrupos(gs);
+    setPiezas(pzs);
     setPedidos(peds);
-    if (ps.length > 0 && lineas.length === 0) setLineas([lineaVacia(ps[0].id)]);
+    if (ps.length > 0 && lineas.length === 0) {
+      setLineas([lineaVacia(ps[0].id, tallasDelProducto(ps[0].id, ps, gs, pzs)[0])]);
+    }
   }
 
   useEffect(() => {
@@ -60,7 +86,8 @@ export function Pedidos({ recargarSenal }) {
   }
 
   function agregarLinea() {
-    setLineas((prev) => [...prev, lineaVacia(productos[0]?.id)]);
+    const productoId = productos[0]?.id;
+    setLineas((prev) => [...prev, lineaVacia(productoId, tallasDelProducto(productoId, productos, grupos, piezas)[0])]);
   }
 
   function quitarLinea(id) {
@@ -83,7 +110,11 @@ export function Pedidos({ recargarSenal }) {
     try {
       await crearPedido({ cliente, lineas });
       setCliente('');
-      setLineas(productos.length > 0 ? [lineaVacia(productos[0].id)] : []);
+      setLineas(
+        productos.length > 0
+          ? [lineaVacia(productos[0].id, tallasDelProducto(productos[0].id, productos, grupos, piezas)[0])]
+          : []
+      );
       await recargar();
     } catch (e) {
       setError(e.message);
@@ -139,13 +170,21 @@ export function Pedidos({ recargarSenal }) {
             <div className="flex flex-col gap-2">
               {lineas.map((linea) => {
                 const roles = rolesDelProducto(linea.productoId);
+                const tallas = tallasDelProducto(linea.productoId, productos, grupos, piezas);
                 return (
                   <div key={linea.id} className="rounded-lg border border-border bg-surface-muted p-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Select
                         className="max-w-[160px]"
                         value={linea.productoId}
-                        onChange={(e) => actualizarLinea(linea.id, { productoId: e.target.value, piezasExcluidas: [] })}
+                        onChange={(e) => {
+                          const nuevasTallas = tallasDelProducto(e.target.value, productos, grupos, piezas);
+                          actualizarLinea(linea.id, {
+                            productoId: e.target.value,
+                            piezasExcluidas: [],
+                            talla: nuevasTallas.includes(linea.talla) ? linea.talla : nuevasTallas[0] || '',
+                          });
+                        }}
                       >
                         {productos.map((p) => (
                           <option key={p.id} value={p.id}>{p.nombre}</option>
@@ -156,7 +195,8 @@ export function Pedidos({ recargarSenal }) {
                         value={linea.talla}
                         onChange={(e) => actualizarLinea(linea.id, { talla: e.target.value })}
                       >
-                        {TALLAS.map((t) => <option key={t} value={t}>{t}</option>)}
+                        {tallas.length === 0 && <option value="">— sin talla —</option>}
+                        {tallas.map((t) => <option key={t} value={t}>{t}</option>)}
                       </Select>
                       <Input
                         className="max-w-[140px]"

@@ -5,6 +5,8 @@ import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
 import { resolverPiezasDePedido } from '../motor/resolverPedido.js';
+import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
+import { geometriaDelGrupo } from '../motor/geometriaAnclaje.js';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
 import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf } from '../motor/importarPdf.js';
 
@@ -245,6 +247,34 @@ router.post('/grupos', async (req, res) => {
 router.delete('/grupos/:id', async (req, res) => {
   await borrarRegistro('grupos', req.params.id);
   res.status(204).end();
+});
+
+// --- Anclaje (zonas/anclas, puerto fiel del sistema de Illustrator) -------
+// Resuelve un grafo de anclas/zonas TODAVÍA NO GUARDADO contra la geometría
+// real de un grupo, a la talla que se esté editando -- lo usa el canvas de
+// Productos.jsx para mostrar dónde cae cada zona en vivo mientras el
+// usuario arma el anclaje, antes de guardar el producto. Ver
+// motor/anclaje/resolver.js: es puramente aritmética sobre datos, no toca
+// ningún archivo -- por eso alcanza con mandar el grafo entero cada vez.
+router.post('/anclaje/resolver', async (req, res) => {
+  const { grupoId, tallaPorRol, anclaje } = req.body;
+  if (!grupoId || !tallaPorRol || !anclaje) {
+    return res.status(400).json({ error: 'Faltan grupoId, tallaPorRol o anclaje' });
+  }
+  const [grupos, piezas] = await Promise.all([leerColeccion('grupos'), leerColeccion('piezas')]);
+  const grupo = grupos.find((g) => g.id === grupoId);
+  if (!grupo) return res.status(404).json({ error: 'Grupo no encontrado' });
+
+  let piezasDelGrupo;
+  try {
+    piezasDelGrupo = resolverPiezasDeGrupo(grupo, piezas);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  const geometria = geometriaDelGrupo(piezasDelGrupo, tallaPorRol);
+  const resultado = resolverAnclaje(anclaje, geometria, { talla: null });
+  res.json(resultado);
 });
 
 function round2(n) {
