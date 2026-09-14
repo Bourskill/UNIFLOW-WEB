@@ -49,3 +49,42 @@ export function resolverPiezasDeGrupo(grupo, piezas, versionesPiezas) {
     };
   });
 }
+
+// Productos multi-prenda ("kit": camiseta + short + medias en un solo
+// armado): combina las piezas de VARIOS grupos en una sola lista plana.
+//
+// El riesgo real que esto resuelve: dos prendas distintas pueden tener un
+// rol con el mismo nombre por casualidad (dos "Delantero", uno de la
+// camiseta y otro del short) -- el resto del motor (motor/anclaje/resolver.js,
+// referencias.js, grafo.js, geometriaAnclaje.js) usa ese nombre como CLAVE
+// PLANA en objetos, así que combinar dos grupos sin namespacear pisaría la
+// geometría de una pieza con la de la otra en silencio, sin ningún error.
+//
+// Namespacear SOLO cuando hay más de un grupo (grupoId + '::' + rol) dejar
+// intacto el caso de un solo grupo (rol tal cual, IDÉNTICO al de
+// resolverPiezasDeGrupo) es lo que mantiene compatibles todos los Productos
+// ya guardados -- su Anclaje.anclas[].pieza/Anclaje.zonas[].pieza son roles
+// crudos sin namespace, grabados antes de que este caso existiera. Un
+// Producto nuevo de un solo grupo sigue viendo exactamente lo mismo que
+// siempre; namespacear ahí también hubiera roto cada ancla/zona ya guardada.
+export function resolverPiezasDeGrupos(grupos, piezas, versionesPiezas) {
+  const namespacear = grupos.length > 1;
+  const resultado = [];
+  for (const grupo of grupos) {
+    const piezasDelGrupo = resolverPiezasDeGrupo(grupo, piezas, versionesPiezas);
+    for (const pieza of piezasDelGrupo) {
+      resultado.push({
+        ...pieza,
+        nombre: namespacear ? grupo.id + '::' + pieza.nombre : pieza.nombre,
+        // Rol crudo (sin namespace) + nombre de la prenda dueña -- para
+        // mensajes legibles (nunca mostrarle al usuario un id de grupo en
+        // crudo). `nombre` de arriba sigue siendo la CLAVE real que usa el
+        // resto del motor.
+        rol: pieza.nombre,
+        grupoId: grupo.id,
+        grupoNombre: grupo.nombre,
+      });
+    }
+  }
+  return resultado;
+}

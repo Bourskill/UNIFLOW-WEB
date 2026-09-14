@@ -21,17 +21,58 @@ import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso } from '../componente
 // resolverPedido.js fallaba con "no tiene dimensión cargada para la talla M"
 // aunque la pieza sí tuviera "m" -- el error era real, pero la causa era el
 // desajuste de mayúsculas, no una pieza mal cargada.
+// grupoIds (kit multi-prenda) o el viejo grupoId singular -- un producto
+// puede combinar varias prendas, así que la intersección se calcula sobre
+// TODAS las piezas de TODOS sus grupos juntos, no solo uno.
+function gruposDelProducto(producto, grupos) {
+  if (!producto) return [];
+  const idsGrupos = producto.grupoIds || (producto.grupoId ? [producto.grupoId] : []);
+  return idsGrupos.map((id) => grupos.find((g) => g.id === id)).filter(Boolean);
+}
+
 function tallasDelProducto(productoId, productos, grupos, piezas) {
   const producto = productos.find((p) => p.id === productoId);
-  const grupo = producto && grupos.find((g) => g.id === producto.grupoId);
-  if (!grupo || grupo.piezas.length === 0) return [];
-  const conjuntos = grupo.piezas
-    .map((gp) => piezas.find((p) => p.id === gp.piezaId))
+  const gp = gruposDelProducto(producto, grupos).flatMap((g) => g.piezas);
+  if (gp.length === 0) return [];
+  const conjuntos = gp
+    .map((x) => piezas.find((p) => p.id === x.piezaId))
     .filter(Boolean)
     .map((p) => new Set(Object.keys(p.dimensionesPorTalla || {})));
   if (conjuntos.length === 0) return [];
   const interseccion = [...conjuntos[0]].filter((t) => conjuntos.every((s) => s.has(t)));
   return ordenarTallasNatural(interseccion);
+}
+
+// Cuando un kit multi-prenda da una intersección de tallas VACÍA, "sin
+// talla" a secas no dice si el problema es que a una pieza puntual le
+// falta cargar una talla, o que las prendas combinadas de verdad no tienen
+// ninguna en común -- este diagnóstico nombra EXACTAMENTE qué prenda/pieza
+// le falta la talla más cercana a estar completa (pedido explícito: mostrar
+// qué prenda no tiene esa talla, no solo "sin talla"). No aplica a un
+// producto de una sola prenda -- ahí "sin talla" ya es lo suficientemente
+// claro (esa única prenda no tiene ninguna talla en común entre SUS piezas).
+function diagnosticoSinTallaComun(productoId, productos, grupos, piezas) {
+  const producto = productos.find((p) => p.id === productoId);
+  const gruposDelProd = gruposDelProducto(producto, grupos);
+  if (gruposDelProd.length <= 1) return null;
+
+  const piezasConGrupo = gruposDelProd
+    .flatMap((g) => g.piezas.map((gp) => ({ grupoNombre: g.nombre, rol: gp.rol, pieza: piezas.find((p) => p.id === gp.piezaId) })))
+    .filter((x) => x.pieza);
+  const todasLasTallas = new Set();
+  for (const { pieza } of piezasConGrupo) {
+    for (const t of Object.keys(pieza.dimensionesPorTalla || {})) todasLasTallas.add(t);
+  }
+  if (todasLasTallas.size === 0) return 'Ninguna de las prendas combinadas tiene ninguna talla cargada todavía.';
+
+  let mejor = null;
+  for (const talla of todasLasTallas) {
+    const sinEsta = piezasConGrupo.filter(({ pieza }) => !pieza.dimensionesPorTalla?.[talla]);
+    if (!mejor || sinEsta.length < mejor.sinEsta.length) mejor = { talla, sinEsta };
+  }
+  if (!mejor || mejor.sinEsta.length === 0) return null; // no debería pasar si la intersección ya dio vacía, pero por las dudas
+  return 'Ninguna talla está cargada en las ' + gruposDelProd.length + ' prendas combinadas -- ejemplo: la talla ' +
+    mejor.talla.toUpperCase() + ' falta en ' + mejor.sinEsta.map((x) => x.grupoNombre + ' · ' + x.rol).join(', ') + '.';
 }
 
 function lineaVacia(productoId, talla) {
@@ -104,10 +145,21 @@ export function Pedidos({ recargarSenal }) {
     setLineas((prev) => prev.filter((l) => l.id !== id));
   }
 
+  // clave: lo que de verdad se guarda en linea.piezasExcluidas -- tiene que
+  // matchear EXACTO el pieza.nombre interno que usa resolverPedido.js
+  // (namespaceado grupoId::rol en un kit de varias prendas, rol crudo en
+  // una sola -- dominio/resolverGrupo.js·resolverPiezasDeGrupos). etiqueta:
+  // lo que se le muestra al usuario, siempre legible.
   function rolesDelProducto(productoId) {
     const producto = productos.find((p) => p.id === productoId);
-    const grupo = producto && grupos.find((g) => g.id === producto.grupoId);
-    return grupo ? grupo.piezas.map((gp) => gp.rol) : [];
+    const gruposDelProd = gruposDelProducto(producto, grupos);
+    const namespacear = gruposDelProd.length > 1;
+    return gruposDelProd.flatMap((grupo) =>
+      grupo.piezas.map((gp) => ({
+        clave: namespacear ? grupo.id + '::' + gp.rol : gp.rol,
+        etiqueta: namespacear ? grupo.nombre + ' · ' + gp.rol : gp.rol,
+      }))
+    );
   }
 
   async function guardar(evento) {
@@ -210,6 +262,10 @@ export function Pedidos({ recargarSenal }) {
                         {tallas.length === 0 && <option value="">— sin talla —</option>}
                         {tallas.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
                       </Select>
+                      {tallas.length === 0 && (() => {
+                        const diagnostico = diagnosticoSinTallaComun(linea.productoId, productos, grupos, piezas);
+                        return diagnostico ? <span className="text-xs text-danger">{diagnostico}</span> : null;
+                      })()}
                       <Input
                         className="max-w-[140px]"
                         placeholder="Nombre"
@@ -230,17 +286,17 @@ export function Pedidos({ recargarSenal }) {
                     {roles.length > 0 && (
                       <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border pt-2">
                         <span className="text-xs text-faint-foreground">Excluir piezas de esta prenda puntual:</span>
-                        {roles.map((rol) => {
-                          const activo = linea.piezasExcluidas.includes(rol);
+                        {roles.map(({ clave, etiqueta }) => {
+                          const activo = linea.piezasExcluidas.includes(clave);
                           return (
-                            <label key={rol} className="cursor-pointer">
+                            <label key={clave} className="cursor-pointer">
                               <input
                                 type="checkbox"
                                 className="peer sr-only"
                                 checked={activo}
-                                onChange={() => alternarPiezaExcluida(linea.id, rol)}
+                                onChange={() => alternarPiezaExcluida(linea.id, clave)}
                               />
-                              <Chip tono={activo ? 'peligro' : 'neutro'}>{rol}</Chip>
+                              <Chip tono={activo ? 'peligro' : 'neutro'}>{etiqueta}</Chip>
                             </label>
                           );
                         })}
@@ -275,7 +331,12 @@ export function Pedidos({ recargarSenal }) {
                   <span className="text-muted-foreground">
                     — {p.lineas.length} prenda(s):{' '}
                     {p.lineas.map((l) =>
-                      (l.talla || '').toUpperCase() + ' ' + l.nombre + '/' + l.numero + (l.piezasExcluidas?.length ? ' (sin ' + l.piezasExcluidas.join(', ') + ')' : '')
+                      (l.talla || '').toUpperCase() + ' ' + l.nombre + '/' + l.numero +
+                      // piezasExcluidas puede traer la clave namespaceada
+                      // (grupoId::rol) de un kit multi-prenda -- acá alcanza
+                      // con el rol crudo (después del "::"), sin resolver
+                      // el nombre de cada prenda, para un resumen compacto.
+                      (l.piezasExcluidas?.length ? ' (sin ' + l.piezasExcluidas.map((c) => c.split('::').pop()).join(', ') + ')' : '')
                     ).join(', ')}
                   </span>
                 </div>

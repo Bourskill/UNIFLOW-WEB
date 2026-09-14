@@ -14,7 +14,16 @@
 
 import { resolver as resolverAnclaje } from './anclaje/resolver.js';
 import { geometriaDelGrupo } from './geometriaAnclaje.js';
-import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
+import { resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
+
+// Un Producto de un solo grupo sigue guardando `grupoId` (nunca se migró
+// data existente); uno multi-prenda ("kit") guarda `grupoIds`. Normalizar
+// acá, en un solo lugar, es lo que le permite a TODO lo demás de este
+// archivo tratar cualquier Producto como "una lista de grupos", sin volver
+// a distinguir el caso viejo del nuevo en cada sitio.
+function gruposIdsDe(producto) {
+  return producto.grupoIds || (producto.grupoId ? [producto.grupoId] : []);
+}
 
 // Piezas "talla única" (no escalan -- la misma moldería sirve para
 // cualquier talla del pedido, ej. una vela/refuerzo que es igual en S que
@@ -46,16 +55,22 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
     if (!producto) {
       throw new Error('Una línea del pedido no tiene un producto válido.');
     }
-    const grupo = grupos.find((g) => g.id === producto.grupoId);
-    if (!grupo) {
+    const idsGrupos = gruposIdsDe(producto);
+    const gruposDelProducto = idsGrupos.map((id) => grupos.find((g) => g.id === id)).filter(Boolean);
+    if (gruposDelProducto.length === 0) {
       throw new Error('El producto "' + producto.nombre + '" no tiene grupo (moldería) asociado.');
+    }
+    if (gruposDelProducto.length < idsGrupos.length) {
+      throw new Error(
+        'El producto "' + producto.nombre + '" combina varias prendas y al menos una ya no existe -- hay que revisar este producto.'
+      );
     }
     const diseno = disenos.find((d) => d.id === producto.disenoId);
     // versionesPiezas: producción respeta el pin de versión de cada pieza
     // (ver rutas/api.js) -- es el ÚNICO camino que de verdad genera el
     // corte/PDF final, así que es el que tiene que ver exactamente lo que
     // el producto tenía cuando se guardó, no lo último que haya en Biblioteca.
-    const piezasDelGrupo = resolverPiezasDeGrupo(grupo, piezas, producto.versionesPiezas);
+    const piezasDelGrupo = resolverPiezasDeGrupos(gruposDelProducto, piezas, producto.versionesPiezas);
     const excluidas = new Set(linea.piezasExcluidas || []);
 
     // Todas las piezas del grupo a la MISMA talla de esta línea -- a
@@ -95,7 +110,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
       const dimension = pieza.dimensionesPorTalla?.[tallaPorRol[pieza.nombre]];
       if (!dimension) {
         throw new Error(
-          'La pieza "' + pieza.nombre + '" de "' + grupo.nombre +
+          'La pieza "' + pieza.rol + '" de "' + pieza.grupoNombre +
             '" no tiene dimensión cargada para la talla ' + linea.talla + '.'
         );
       }
@@ -145,7 +160,14 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
 
       piezasParaAnidar.push({
         id: 'p' + contador++,
-        piezaId: pieza.nombre,
+        // Etiqueta LEGIBLE -- nunca la clave interna namespaced
+        // (pieza.nombre puede ser "grupoId::Delantero" en un kit
+        // multi-prenda). Esto se imprime tal cual en el PDF real
+        // (exportarPdf.js), en la vista previa de nesting y en Historial --
+        // mostrarle al usuario un id de grupo en crudo ahí sería justo el
+        // tipo de fuga de detalle interno que este proyecto evita en todos
+        // lados. Con una sola prenda en el producto, es igual que siempre.
+        piezaId: gruposDelProducto.length > 1 ? (pieza.grupoNombre + ' · ' + pieza.rol) : pieza.rol,
         lineaPedidoId: linea.id,
         talla: linea.talla,
         anchoCm: dimension.anchoCm,

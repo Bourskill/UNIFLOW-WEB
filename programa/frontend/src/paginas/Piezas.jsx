@@ -439,11 +439,16 @@ export function Piezas({ recargarSenal, onCambio }) {
   const productosPorPieza = useMemo(() => {
     const mapa = {};
     for (const producto of productos) {
-      const grupo = grupos.find((g) => g.id === producto.grupoId);
-      if (!grupo) continue;
-      for (const gp of grupo.piezas) {
-        if (!mapa[gp.piezaId]) mapa[gp.piezaId] = [];
-        mapa[gp.piezaId].push(producto);
+      // grupoIds (kit multi-prenda) o el viejo grupoId singular -- un
+      // producto que usa esta pieza en CUALQUIERA de sus prendas combinadas
+      // tiene que aparecer acá igual.
+      const idsGrupos = producto.grupoIds || (producto.grupoId ? [producto.grupoId] : []);
+      const gruposDelProducto = idsGrupos.map((id) => grupos.find((g) => g.id === id)).filter(Boolean);
+      for (const grupo of gruposDelProducto) {
+        for (const gp of grupo.piezas) {
+          if (!mapa[gp.piezaId]) mapa[gp.piezaId] = [];
+          if (!mapa[gp.piezaId].includes(producto)) mapa[gp.piezaId].push(producto);
+        }
       }
     }
     return mapa;

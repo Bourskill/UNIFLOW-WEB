@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import { leerColeccion, leerRegistro, crearRegistro, actualizarRegistro, borrarRegistro, subirArchivo } from '../dominio/almacen.js';
-import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
+import { resolverPiezasDeGrupo, resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
 import { resolverPiezasDePedido, tallaRealDePieza } from '../motor/resolverPedido.js';
@@ -460,18 +460,23 @@ router.delete('/grupos/:id', async (req, res) => {
 // usuario arma el anclaje, antes de guardar el producto. Ver
 // motor/anclaje/resolver.js: es puramente aritmética sobre datos, no toca
 // ningún archivo -- por eso alcanza con mandar el grafo entero cada vez.
+// grupoIds: un array -- un solo elemento para un producto de una prenda
+// (el caso de siempre), varios para un kit multi-prenda. Sin flujo de
+// "reabrir un producto ya guardado" en Productos.jsx (solo crea o borra),
+// este endpoint SIEMPRE recibe el estado en vivo del formulario, nunca un
+// Producto ya persistido -- no hace falta aceptar el `grupoId` viejo acá.
 router.post('/anclaje/resolver', async (req, res) => {
-  const { grupoId, tallaPorRol, anclaje } = req.body;
-  if (!grupoId || !tallaPorRol || !anclaje) {
-    return res.status(400).json({ error: 'Faltan grupoId, tallaPorRol o anclaje' });
+  const { grupoIds, tallaPorRol, anclaje } = req.body;
+  if (!Array.isArray(grupoIds) || grupoIds.length === 0 || !tallaPorRol || !anclaje) {
+    return res.status(400).json({ error: 'Faltan grupoIds, tallaPorRol o anclaje' });
   }
   const [grupos, piezas] = await Promise.all([leerColeccion('grupos'), leerColeccion('piezas')]);
-  const grupo = grupos.find((g) => g.id === grupoId);
-  if (!grupo) return res.status(404).json({ error: 'Grupo no encontrado' });
+  const gruposElegidos = grupoIds.map((id) => grupos.find((g) => g.id === id)).filter(Boolean);
+  if (gruposElegidos.length !== grupoIds.length) return res.status(404).json({ error: 'Grupo no encontrado' });
 
   let piezasDelGrupo;
   try {
-    piezasDelGrupo = resolverPiezasDeGrupo(grupo, piezas);
+    piezasDelGrupo = resolverPiezasDeGrupos(gruposElegidos, piezas);
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }

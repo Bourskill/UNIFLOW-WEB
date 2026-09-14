@@ -159,15 +159,29 @@
  */
 
 /**
- * Producto: unión de un grupo (piezas reales), un diseño y el Anclaje
- * (dónde va cada nombre/número/logo y con qué tamaño, gradando por talla)
- * -- todo editado en una sola pantalla (`paginas/Productos.jsx`), no en dos
- * pasos separados.
+ * Producto: unión de uno o más grupos (piezas reales), un diseño y el
+ * Anclaje (dónde va cada nombre/número/logo y con qué tamaño, gradando por
+ * talla) -- todo editado en una sola pantalla (`paginas/Productos.jsx`), no
+ * en dos pasos separados.
+ *
+ * `grupoIds` (Entrega 2, productos multi-prenda -- "kit": camiseta + short
+ * + medias en un solo armado) reemplaza al viejo `grupoId` singular. Los
+ * Productos guardados ANTES de esta entrega solo tienen `grupoId` -- nunca
+ * se migró data, así que todo lector real normaliza con
+ * `producto.grupoIds || [producto.grupoId]` (ver motor/resolverPedido.js).
+ * Con más de un grupo, el rol de cada pieza se namespacea internamente
+ * como `grupoId::rol` (dominio/resolverGrupo.js·resolverPiezasDeGrupos) --
+ * necesario porque dos prendas distintas pueden compartir un nombre de rol
+ * por casualidad (dos "Delantero"), y el resto del motor de anclaje usa ese
+ * nombre como clave plana. Con UN solo grupo (el caso de siempre) el rol
+ * queda crudo, sin namespace, IDÉNTICO a como lo grabó cualquier Producto
+ * ya guardado -- por eso ese caso nunca namespacea.
  *
  * @typedef {Object} Producto
  * @property {string} id
  * @property {string} nombre
- * @property {string} grupoId
+ * @property {string} [grupoId]    LEGACY -- un producto de una sola prenda, de antes de grupoIds
+ * @property {string[]} [grupoIds] uno o más grupos combinados -- ver el comentario de arriba
  * @property {string} disenoId
  * @property {Anclaje} anclaje
  * @property {{activo: boolean, colorHex: string, grosorCm: number}} [bordeContraste]
@@ -178,6 +192,26 @@
  *   pieza = sigue la versión ACTUAL de esa pieza (comportamiento de
  *   siempre). Se llena por decisión explícita del usuario cuando una pieza
  *   que este producto usa se actualiza en Biblioteca -- nunca automático.
+ */
+
+/**
+ * Diseño: el arte real de una prenda (o de un kit combinado), una imagen
+ * por pieza -- se reusa entre varios Productos de la misma prenda/kit
+ * (ej. el mismo diseño para varios clientes de un mismo equipo).
+ *
+ * `grupoIds` sigue el mismo namespacing que Producto.grupoIds: con más de
+ * un grupo, las claves de `imagenesPorPieza` son `grupoId::rol`; con uno
+ * solo, el rol queda crudo. Un Diseño solo es elegible para un Producto si
+ * sus `grupoIds` coinciden EXACTO con los del producto (mismo conjunto,
+ * mismo kit) -- un diseño armado para "camiseta + short" no le sirve a un
+ * producto de solo "camiseta".
+ *
+ * @typedef {Object} Diseno
+ * @property {string} id
+ * @property {string} nombre
+ * @property {string} [grupoId]     LEGACY, igual que Producto.grupoId
+ * @property {string[]} [grupoIds]  ver el comentario de arriba
+ * @property {Record<string, string>} imagenesPorPieza  rol (o grupoId::rol) -> URL de Storage
  */
 
 /**
@@ -193,7 +227,8 @@
  * @typedef {Object} Plantilla
  * @property {string} id
  * @property {string} nombre
- * @property {string} grupoId
+ * @property {string} [grupoId]     LEGACY, igual que Producto.grupoId
+ * @property {string[]} [grupoIds]  ver el comentario en Producto
  * @property {Anclaje} anclaje
  * @property {{activo: boolean, colorHex: string, grosorCm: number}} [bordeContraste]
  * @property {string} creadoEn   ISO 8601

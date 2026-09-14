@@ -14,7 +14,7 @@ import {
   subirArchivo,
 } from '../api.js';
 import { ordenarTallasNatural } from '../constantes.js';
-import { Boton, Campo, Input, Select, Tarjeta, Aviso, Ayuda } from '../componentes/ui.jsx';
+import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
 import { InputNumero } from '../componentes/InputNumero.jsx';
 import { PanelDock } from '../componentes/PanelDock.jsx';
 import { LienzoAnclaje, COLOR } from '../componentes/LienzoAnclaje.jsx';
@@ -101,6 +101,16 @@ function tipoCortoDeZona(z) {
   return 'Nombre';
 }
 
+// Un Diseño solo es elegible para un producto si combina EXACTO las mismas
+// prendas (mismo conjunto de grupoIds, sin importar el orden) -- un diseño
+// armado para "camiseta + short" no le sirve a un producto de solo
+// "camiseta", ni a uno de "camiseta + medias".
+function mismoConjunto(a, b) {
+  if (a.length !== b.length) return false;
+  const setB = new Set(b);
+  return a.every((x) => setB.has(x));
+}
+
 // Mismo color que usan los candidatos en el lienzo (LienzoAnclaje·COLOR) --
 // que el texto de "se pega a" sea del mismo color que el punto real en el
 // lienzo es lo que reemplaza a la lista desplegable: se entiende de un
@@ -123,7 +133,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   const [productos, setProductos] = useState([]);
   const [piezas, setPiezas] = useState([]);
   const [nombre, setNombre] = useState('');
-  const [grupoId, setGrupoId] = useState('');
+  // grupoIds: uno o más -- productos multi-prenda ("kit": camiseta + short
+  // + medias en un solo armado). Un solo elemento es el caso de siempre.
+  const [grupoIds, setGrupoIds] = useState([]);
   const [disenoId, setDisenoId] = useState('');
   const [anclaje, setAnclaje] = useState({ anclas: [], zonas: [] });
   const [piezaActiva, setPiezaActiva] = useState(null);
@@ -156,7 +168,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       setDisenos(ds);
       setProductos(ps);
       setPiezas(pzs);
-      if (gs.length > 0 && !grupoId) setGrupoId(gs[0].id);
+      if (gs.length > 0 && grupoIds.length === 0) setGrupoIds([gs[0].id]);
     } finally {
       setCargando(false);
     }
@@ -174,7 +186,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // reentra a Diseño más tarde sin haber elegido otra plantilla.
   useEffect(() => {
     if (!plantillaParaUsar) return;
-    setGrupoId(plantillaParaUsar.grupoId);
+    setGrupoIds(plantillaParaUsar.grupoIds || (plantillaParaUsar.grupoId ? [plantillaParaUsar.grupoId] : []));
     setAnclaje(plantillaParaUsar.anclaje || { anclas: [], zonas: [] });
     if (plantillaParaUsar.bordeContraste) setBordeContraste(plantillaParaUsar.bordeContraste);
     setDisenoId('');
@@ -185,47 +197,66 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plantillaParaUsar]);
 
-  const grupoSeleccionado = grupos.find((g) => g.id === grupoId);
-  const disenosDeEsteGrupo = disenos.filter((d) => d.grupoId === grupoId);
+  const gruposSeleccionados = grupoIds.map((id) => grupos.find((g) => g.id === id)).filter(Boolean);
+  // Namespacear la clave de pieza (grupoId::rol) SOLO con más de una prenda
+  // combinada -- con una sola, la clave sigue siendo el rol crudo, igual
+  // que siempre (mismo criterio que dominio/resolverGrupo.js·
+  // resolverPiezasDeGrupos, así el anclaje que arma este editor coincide
+  // exacto con cómo lo va a leer producción).
+  const namespacear = gruposSeleccionados.length > 1;
+  const piezasDisponibles = gruposSeleccionados.flatMap((g) =>
+    g.piezas.map((gp) => ({
+      clave: namespacear ? g.id + '::' + gp.rol : gp.rol,
+      rol: gp.rol,
+      grupoId: g.id,
+      grupoNombre: g.nombre,
+      piezaId: gp.piezaId,
+    }))
+  );
+  const disenosDeEstaCombinacion = disenos.filter((d) => mismoConjunto(d.grupoIds || (d.grupoId ? [d.grupoId] : []), grupoIds));
   const disenoSeleccionado = disenos.find((d) => d.id === disenoId);
 
-  function piezaDelRol(rol) {
-    const gp = grupoSeleccionado?.piezas.find((p) => p.rol === rol);
-    return gp && piezas.find((p) => p.id === gp.piezaId);
+  function piezaDeClave(clave) {
+    const pd = piezasDisponibles.find((x) => x.clave === clave);
+    return pd && piezas.find((p) => p.id === pd.piezaId);
   }
-  function tallaTrabajoDe(rol) {
-    return tallaTrabajoPorRol[rol] ?? tallaDeTrabajoPorDefecto(piezaDelRol(rol));
+  function tallaTrabajoDe(clave) {
+    return tallaTrabajoPorRol[clave] ?? tallaDeTrabajoPorDefecto(piezaDeClave(clave));
   }
 
-  // Elige la primera pieza sola cuando cambia el grupo (o al entrar).
+  // Elige la primera pieza sola cuando cambia la combinación de prendas (o al entrar).
   useEffect(() => {
-    if (!grupoSeleccionado) { setPiezaActiva(null); return; }
-    if (!grupoSeleccionado.piezas.some((p) => p.rol === piezaActiva)) {
-      setPiezaActiva(grupoSeleccionado.piezas[0]?.rol || null);
+    if (piezasDisponibles.length === 0) { setPiezaActiva(null); return; }
+    if (!piezasDisponibles.some((pd) => pd.clave === piezaActiva)) {
+      setPiezaActiva(piezasDisponibles[0].clave);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grupoId, grupoSeleccionado?.piezas.length]);
+  }, [JSON.stringify(grupoIds), piezasDisponibles.length]);
 
   // Resuelve el grafo entero contra la geometría real -- aritmética pura,
   // se pide de nuevo cada vez que algo cambia, nada se guarda para verlo.
   useEffect(() => {
-    if (!grupoId || !grupoSeleccionado) { setResuelto(null); return; }
+    if (grupoIds.length === 0 || piezasDisponibles.length === 0) { setResuelto(null); return; }
     const tallaPorRol = {};
-    for (const gp of grupoSeleccionado.piezas) {
-      const t = tallaTrabajoDe(gp.rol);
-      if (t) tallaPorRol[gp.rol] = t;
+    for (const pd of piezasDisponibles) {
+      const t = tallaTrabajoDe(pd.clave);
+      if (t) tallaPorRol[pd.clave] = t;
     }
     if (Object.keys(tallaPorRol).length === 0) { setResuelto(null); return; }
     let cancelado = false;
-    resolverAnclaje(grupoId, tallaPorRol, anclaje)
+    resolverAnclaje(grupoIds, tallaPorRol, anclaje)
       .then((r) => { if (!cancelado) setResuelto(r); })
       .catch((e) => { if (!cancelado) setResuelto({ errores: [e.message], avisos: [], sinResolver: [], lista: { anclas: [], zonas: [] } }); });
     return () => { cancelado = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grupoId, JSON.stringify(tallaTrabajoPorRol), JSON.stringify(anclaje), piezas.length]);
+  }, [JSON.stringify(grupoIds), JSON.stringify(tallaTrabajoPorRol), JSON.stringify(anclaje), piezas.length]);
 
-  function alCambiarGrupo(id) {
-    setGrupoId(id);
+  // Elegir/sacar una prenda de la combinación reinicia el anclaje en curso
+  // -- combinar otras prendas cambia qué claves existen (namespace incluido),
+  // así que cualquier ancla/zona ya armada quedaría apuntando a algo que ya
+  // no es lo mismo. Mismo criterio que ya tenía el selector simple de antes.
+  function alternarGrupo(id) {
+    setGrupoIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
     setAnclaje({ anclas: [], zonas: [] });
     setSeleccion(null);
     setModo(null);
@@ -240,7 +271,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setErrorDiseno(null);
     if (!nombreNuevoDiseno.trim()) { setErrorDiseno('Falta el nombre del diseño.'); return; }
     try {
-      const creado = await crearDiseno({ nombre: nombreNuevoDiseno, grupoId, imagenesPorPieza: imagenesNuevoDiseno });
+      const creado = await crearDiseno({ nombre: nombreNuevoDiseno, grupoIds, imagenesPorPieza: imagenesNuevoDiseno });
       setDisenos((prev) => [...prev, creado]);
       setDisenoId(creado.id);
       setCreandoDiseno(false);
@@ -353,7 +384,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
         if (tipo === 'zona' && dependenAnclas.length && resuelto && zonaBorrada) {
           const anclaOrigenX = anclas.find((a) => a.id === zonaBorrada.anclaX);
           const anclaOrigenY = anclas.find((a) => a.id === zonaBorrada.anclaY);
-          const geoPza = piezaActiva ? geometriaParaAnclaje(piezaDelRol(piezaActiva), tallaTrabajoDe(piezaActiva)) : null;
+          const geoPza = piezaActiva ? geometriaParaAnclaje(piezaDeClave(piezaActiva), tallaTrabajoDe(piezaActiva)) : null;
           const heredarEje = (ejeOrigen, idOrigen, puntoDependiente, cual) => {
             const puntoOrigen = resuelto.anclas[idOrigen];
             if (!ejeOrigen?.ref || !puntoOrigen) return null;
@@ -493,7 +524,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setAnclaje((prev) => {
       const zona = prev.zonas.find((z) => z.id === id);
       if (!zona) return prev;
-      const geoPza = geometriaParaAnclaje(piezaDelRol(zona.pieza), tallaTrabajoDe(zona.pieza));
+      const geoPza = geometriaParaAnclaje(piezaDeClave(zona.pieza), tallaTrabajoDe(zona.pieza));
       const anchoPza = geoPza?.pieza.ancho_cm || 0;
       const altoPza = geoPza?.pieza.alto_cm || 0;
       function mover(eje, deltaCm, basePza) {
@@ -515,9 +546,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   async function guardar(evento) {
     evento.preventDefault();
     setError(null);
-    if (!nombre.trim() || !grupoId) { setError('Falta el nombre del producto o la prenda.'); return; }
+    if (!nombre.trim() || grupoIds.length === 0) { setError('Falta el nombre del producto o la prenda.'); return; }
     try {
-      await crearProducto({ nombre, grupoId, disenoId: disenoId || null, anclaje, bordeContraste });
+      await crearProducto({ nombre, grupoIds, disenoId: disenoId || null, anclaje, bordeContraste });
       setNombre('');
       setAnclaje({ anclas: [], zonas: [] });
       setSeleccion(null);
@@ -534,7 +565,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     try {
       await crearPlantilla({
         nombre: nombrePlantilla.trim(),
-        grupoId,
+        grupoIds,
         anclaje: anclajeSinContenido(anclaje),
         bordeContraste,
       });
@@ -542,7 +573,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     } catch (e) { setError(e.message); }
   }
 
-  const piezaObj = piezaActiva ? piezaDelRol(piezaActiva) : null;
+  const piezaObj = piezaActiva ? piezaDeClave(piezaActiva) : null;
   const tallaTrabajo = piezaActiva ? tallaTrabajoDe(piezaActiva) : null;
   const geoActiva = piezaObj && tallaTrabajo ? geometriaParaAnclaje(piezaObj, tallaTrabajo) : null;
   const tallasDePieza = ordenarTallasNatural(Object.keys(piezaObj?.dimensionesPorTalla || {}));
@@ -586,15 +617,31 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
         <p className="text-sm text-muted-foreground">Creá primero una prenda (Moldería → Prendas).</p>
       ) : (
         <Tarjeta as="form" onSubmit={guardar} className="flex flex-col gap-4">
-          <div className="grid max-w-3xl grid-cols-2 gap-4">
-            <Campo etiqueta="Nombre del producto">
-              <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Camiseta titular" />
-            </Campo>
-            <Campo etiqueta="Prenda">
-              <Select value={grupoId} onChange={(e) => alCambiarGrupo(e.target.value)}>
-                {grupos.map((g) => <option key={g.id} value={g.id}>{g.nombre}</option>)}
-              </Select>
-            </Campo>
+          <Campo etiqueta="Nombre del producto" className="max-w-3xl">
+            <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Camiseta titular" />
+          </Campo>
+
+          <div className="max-w-3xl">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground">Prendas</span>
+              <Ayuda>
+                Un producto puede juntar varias prendas en un solo armado (ej. camiseta + short +
+                medias, como un kit). Elegí una para el caso de siempre, o varias para un kit --
+                las piezas de cada prenda quedan divididas más abajo, y las tallas disponibles son
+                las que tienen en común TODAS las prendas elegidas.
+              </Ayuda>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {grupos.map((g) => {
+                const activo = grupoIds.includes(g.id);
+                return (
+                  <label key={g.id} className="cursor-pointer">
+                    <input type="checkbox" className="peer sr-only" checked={activo} onChange={() => alternarGrupo(g.id)} />
+                    <Chip tono={activo ? 'activo' : 'neutro'}>{g.nombre}</Chip>
+                  </label>
+                );
+              })}
+            </div>
           </div>
 
           <div className="max-w-3xl">
@@ -609,7 +656,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
             <div className="flex flex-wrap items-center gap-2">
               <Select className="max-w-xs" value={disenoId} onChange={(e) => setDisenoId(e.target.value)}>
                 <option value="">— Sin diseño —</option>
-                {disenosDeEsteGrupo.map((d) => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+                {disenosDeEstaCombinacion.map((d) => <option key={d.id} value={d.id}>{d.nombre}</option>)}
               </Select>
               {disenoId && <Boton variante="fantasma" tamano="sm" type="button" onClick={eliminarDisenoActual}>Eliminar este diseño</Boton>}
               <Boton variante="fantasma" tamano="sm" type="button" onClick={() => setCreandoDiseno((v) => !v)}>
@@ -622,9 +669,10 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                   <Input value={nombreNuevoDiseno} onChange={(e) => setNombreNuevoDiseno(e.target.value)} placeholder="Kit titular 2026" />
                 </Campo>
                 <div className="flex flex-wrap gap-3">
-                  {grupoSeleccionado?.piezas.map((gp) => (
-                    <SlotImagenDiseno key={gp.rol} rol={gp.rol} url={imagenesNuevoDiseno[gp.rol]}
-                      onElegir={(rol, url) => setImagenesNuevoDiseno((prev) => ({ ...prev, [rol]: url }))} />
+                  {piezasDisponibles.map((pd) => (
+                    <SlotImagenDiseno key={pd.clave} rol={pd.clave} etiqueta={namespacear ? pd.grupoNombre + ' · ' + pd.rol : pd.rol}
+                      url={imagenesNuevoDiseno[pd.clave]}
+                      onElegir={(clave, url) => setImagenesNuevoDiseno((prev) => ({ ...prev, [clave]: url }))} />
                   ))}
                 </div>
                 {errorDiseno && <Aviso tono="error">{errorDiseno}</Aviso>}
@@ -643,18 +691,30 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 Si ese punto se mueve en otra talla, la zona va detrás.
               </Ayuda>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {grupoSeleccionado?.piezas.map((gp) => {
-                const n = contarEnPieza(gp.rol);
-                return (
-                  <button key={gp.rol} type="button" onClick={() => { setPiezaActiva(gp.rol); setSeleccion(null); setModo(null); }}
-                    className={'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ' +
-                      (gp.rol === piezaActiva ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface text-muted-foreground hover:border-primary')}>
-                    {gp.rol}
-                    {n > 0 && <span className="rounded-full bg-primary/20 px-1.5 text-[10px]">{n}</span>}
-                  </button>
-                );
-              })}
+            {/* Con más de una prenda combinada, las piezas quedan divididas
+                por prenda (encabezado chico con su nombre) -- pedido
+                explícito, para no mezclar roles de distintas prendas en una
+                sola fila sin distinción. */}
+            <div className="flex flex-col gap-2">
+              {gruposSeleccionados.map((g) => (
+                <div key={g.id} className="flex flex-wrap items-center gap-2">
+                  {namespacear && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-faint-foreground">{g.nombre}</span>
+                  )}
+                  {g.piezas.map((gp) => {
+                    const clave = namespacear ? g.id + '::' + gp.rol : gp.rol;
+                    const n = contarEnPieza(clave);
+                    return (
+                      <button key={clave} type="button" onClick={() => { setPiezaActiva(clave); setSeleccion(null); setModo(null); }}
+                        className={'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ' +
+                          (clave === piezaActiva ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface text-muted-foreground hover:border-primary')}>
+                        {gp.rol}
+                        {n > 0 && <span className="rounded-full bg-primary/20 px-1.5 text-[10px]">{n}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -663,11 +723,18 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
               {/* ============ 2. LIENZO ============ */}
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground"><span className="mr-1 text-primary">2</span>Lienzo</h3>
-                {piezaObj && (
-                  <span className="text-xs text-faint-foreground">
-                    {piezaActiva} · {geoActiva ? (geoActiva.pieza.ancho_cm + ' × ' + geoActiva.pieza.alto_cm + ' cm') : ''}
-                  </span>
-                )}
+                {piezaObj && (() => {
+                  // Nunca la clave cruda (puede traer el id de un grupo
+                  // namespaceado, grupoId::rol) -- siempre el rol legible,
+                  // con la prenda dueña adelante si hay más de una combinada.
+                  const pd = piezasDisponibles.find((x) => x.clave === piezaActiva);
+                  const etiqueta = pd ? (namespacear ? pd.grupoNombre + ' · ' + pd.rol : pd.rol) : piezaActiva;
+                  return (
+                    <span className="text-xs text-faint-foreground">
+                      {etiqueta} · {geoActiva ? (geoActiva.pieza.ancho_cm + ' × ' + geoActiva.pieza.alto_cm + ' cm') : ''}
+                    </span>
+                  );
+                })()}
                 <span className="text-xs text-faint-foreground">· molde de referencia:</span>
                 <Select className="max-w-[100px]" value={tallaTrabajo || ''}
                   onChange={(e) => setTallaTrabajoPorRol((prev) => ({ ...prev, [piezaActiva]: e.target.value }))}>
@@ -787,7 +854,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
             <Boton variante="primario" type="submit">Guardar producto</Boton>
             <Boton
               variante="fantasma" type="button"
-              disabled={!grupoId || anclaje.zonas.length === 0}
+              disabled={grupoIds.length === 0 || anclaje.zonas.length === 0}
               onClick={guardarComoPlantilla}
               title={anclaje.zonas.length === 0 ? 'Armá al menos una zona primero' : undefined}
             >
@@ -804,17 +871,21 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
           <p className="text-sm text-muted-foreground">Todavía no hay ninguno.</p>
         ) : (
           <div className="flex max-w-2xl flex-col gap-2">
-            {productos.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
-                <div className="flex-1">
-                  <span className="font-medium">{p.nombre}</span>{' '}
-                  <span className="text-muted-foreground">
-                    — {disenos.find((d) => d.id === p.disenoId)?.nombre || 'sin diseño'} · {p.anclaje?.zonas?.length || 0} zona(s)
-                  </span>
+            {productos.map((p) => {
+              const idsPrendas = p.grupoIds || (p.grupoId ? [p.grupoId] : []);
+              const nombresPrendas = idsPrendas.map((id) => grupos.find((g) => g.id === id)?.nombre).filter(Boolean).join(' + ');
+              return (
+                <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
+                  <div className="flex-1">
+                    <span className="font-medium">{p.nombre}</span>{' '}
+                    <span className="text-muted-foreground">
+                      — {nombresPrendas || 'prenda eliminada'} · {disenos.find((d) => d.id === p.disenoId)?.nombre || 'sin diseño'} · {p.anclaje?.zonas?.length || 0} zona(s)
+                    </span>
+                  </div>
+                  <Boton variante="fantasma" tamano="sm" onClick={() => borrar(p.id)}>Eliminar</Boton>
                 </div>
-                <Boton variante="fantasma" tamano="sm" onClick={() => borrar(p.id)}>Eliminar</Boton>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

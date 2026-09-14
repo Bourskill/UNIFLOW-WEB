@@ -17,7 +17,13 @@ function archivoADataUrl(archivo) {
 // imagen en sí — ver almacen.js sobre por qué eso tronaba con "statement
 // timeout". Compartido entre el editor de Producto y cualquier otro lugar
 // que necesite subir el arte de una pieza.
-export function SlotImagenDiseno({ rol, url, onElegir }) {
+// `rol` es la clave real (puede venir namespaceada grupoId::rol en un kit
+// multi-prenda -- Productos.jsx) que se le devuelve a onElegir y se usa
+// como pista de nombre al subir el archivo. `etiqueta` (opcional, por
+// defecto el propio rol) es lo que se le muestra al usuario -- nunca un id
+// de grupo en crudo.
+export function SlotImagenDiseno({ rol, etiqueta, url, onElegir }) {
+  const etiquetaVisible = etiqueta || rol;
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState(null);
 
@@ -47,7 +53,7 @@ export function SlotImagenDiseno({ rol, url, onElegir }) {
   });
 
   return (
-    <Campo etiqueta={'Imagen para "' + rol + '"'}>
+    <Campo etiqueta={'Imagen para "' + etiquetaVisible + '"'}>
       <div
         {...getRootProps()}
         className={
@@ -59,7 +65,7 @@ export function SlotImagenDiseno({ rol, url, onElegir }) {
         {subiendo ? 'Subiendo…' : url ? 'Reemplazar' : 'Arrastrar o elegir archivo'}
       </div>
       {error && <Aviso tono="error">{error}</Aviso>}
-      {url && <img className="mt-2 max-h-20 max-w-20 rounded-md border border-border" src={url} alt={rol} />}
+      {url && <img className="mt-2 max-h-20 max-w-20 rounded-md border border-border" src={url} alt={etiquetaVisible} />}
     </Campo>
   );
 }

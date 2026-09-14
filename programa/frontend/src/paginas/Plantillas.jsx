@@ -65,28 +65,33 @@ export function Plantillas({ recargarSenal, onUsarPlantilla }) {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {plantillas.map((p) => {
-            const prenda = grupos.find((g) => g.id === p.grupoId);
+            // grupoIds (kit multi-prenda) o el viejo grupoId singular.
+            const idsPrendas = p.grupoIds || (p.grupoId ? [p.grupoId] : []);
+            const prendas = idsPrendas.map((id) => grupos.find((g) => g.id === id)).filter(Boolean);
+            const faltaAlguna = prendas.length !== idsPrendas.length;
             const cantidadZonas = p.anclaje?.zonas?.length || 0;
             return (
               <Tarjeta key={p.id} className="flex flex-col gap-3">
                 <div>
                   <div className="font-medium">{p.nombre}</div>
                   <div className="text-xs text-muted-foreground">
-                    {prenda ? prenda.nombre : 'prenda eliminada de la biblioteca'}
+                    {prendas.length > 0 ? prendas.map((g) => g.nombre).join(' + ') : 'prenda eliminada de la biblioteca'}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   <Chip>{cantidadZonas} zona{cantidadZonas === 1 ? '' : 's'}</Chip>
                 </div>
                 <div className="flex gap-2">
-                  <Boton variante="secundario" tamano="sm" disabled={!prenda} onClick={() => onUsarPlantilla(p)}>
+                  <Boton variante="secundario" tamano="sm" disabled={faltaAlguna} onClick={() => onUsarPlantilla(p)}>
                     Usar esta plantilla
                   </Boton>
                   <Boton variante="fantasma" tamano="sm" onClick={() => borrar(p.id)}>Eliminar</Boton>
                 </div>
-                {!prenda && (
+                {faltaAlguna && (
                   <p className="text-xs text-danger">
-                    La prenda que usaba esta plantilla ya no existe — no se puede usar hasta elegir otra.
+                    {idsPrendas.length > 1
+                      ? 'Al menos una de las prendas de este kit ya no existe en la biblioteca — no se puede usar hasta rearmarla.'
+                      : 'La prenda que usaba esta plantilla ya no existe — no se puede usar hasta elegir otra.'}
                   </p>
                 )}
               </Tarjeta>
