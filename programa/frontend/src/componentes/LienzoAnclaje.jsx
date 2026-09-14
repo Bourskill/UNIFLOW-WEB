@@ -111,17 +111,23 @@ export function candidatosDe(geo, zonasDeEstaPieza, zonaEditandoId, leyenda) {
   const out = [];
   const rel = (x, y) => ({ rx: r1(x / W), ry: r1(y / H) });
 
-  for (const z of zonasDeEstaPieza || []) {
-    const caja = { x: z.x, y: z.y, ancho: z.ancho, alto: z.alto };
-    const origenZona = z.origen || 'centro';
-    const parteOrigen = PARTE_DESDE_ORIGEN[origenZona] || origenZona;
-    for (const [parte, fx, fy, etiqueta] of PARTES_CAJA) {
-      out.push({
-        clase: 'zona', prioridad: 0, etiqueta: 'Zona ' + z.id + ' · ' + etiqueta,
-        x: caja.x + caja.ancho * fx, y: caja.y + caja.alto * fy,
-        ref: { tipo: 'zona', zona: z.id, parte },
-        origenActual: z.id === zonaEditandoId && parte === parteOrigen,
-      });
+  // Gateado por el mismo toggle "zona" de la leyenda -- son los puntos que
+  // sirven para pegar OTRA ancla a esta zona, así que cuentan como el mismo
+  // "cuadrito" que ese toggle promete ocultar (ver el pedido de previsualizar
+  // el diseño sin ellos de por medio).
+  if (leyenda.zonas !== false) {
+    for (const z of zonasDeEstaPieza || []) {
+      const caja = { x: z.x, y: z.y, ancho: z.ancho, alto: z.alto };
+      const origenZona = z.origen || 'centro';
+      const parteOrigen = PARTE_DESDE_ORIGEN[origenZona] || origenZona;
+      for (const [parte, fx, fy, etiqueta] of PARTES_CAJA) {
+        out.push({
+          clase: 'zona', prioridad: 0, etiqueta: 'Zona ' + z.id + ' · ' + etiqueta,
+          x: caja.x + caja.ancho * fx, y: caja.y + caja.alto * fy,
+          ref: { tipo: 'zona', zona: z.id, parte },
+          origenActual: z.id === zonaEditandoId && parte === parteOrigen,
+        });
+      }
     }
   }
 
@@ -255,22 +261,33 @@ const ZonaEnLienzo = memo(function ZonaEnLienzo({
     ? medidaLogoAjustada({ cruz: enCruz, lado: z.ancho, ancho: z.ancho, alto: z.alto, natural })
     : null;
 
-  // El toggle "zona" del panel oculta el marco/cuadrito (rect, cruz, texto)
-  // para previsualizar el diseño real, pero NUNCA el contenido de verdad
-  // (el logo ya colocado) -- ocultar un logo real junto con su marco haría
-  // exactamente lo que el pedido no quería: perder de vista cómo queda el
-  // diseño. Una zona de texto no tiene contenido real que mostrar todavía
-  // (el nombre/número se escribe recién en producción), así que oculta
-  // entera.
+  // El toggle "zona" del panel oculta el marco/cuadrito (rect, cruz) para
+  // previsualizar el diseño real, pero NUNCA el contenido de verdad -- el
+  // logo ya colocado, o el nombre/número/texto fijo ya escrito -- ocultar
+  // eso junto con su marco haría exactamente lo que el pedido no quería:
+  // perder de vista cómo queda el diseño real. Si una zona de texto
+  // TODAVÍA no tiene un valor de ejemplo cargado, no hay contenido real que
+  // conservar -- se oculta entera, igual que un logo sin archivo elegido.
+  const contenidoTexto = !esLogo ? (z.campoPedido === 'fijo' ? z.valorFijo : z.valorEjemplo) : null;
   if (!mostrarMarco) {
-    if (esLogo && z.logoRuta && medida) {
-      return (
-        <g transform={transformZona} onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }}>
-          <image href={z.logoRuta} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
-        </g>
-      );
+    if (esLogo) {
+      if (z.logoRuta && medida) {
+        return (
+          <g transform={transformZona} onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }}>
+            <image href={z.logoRuta} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
+          </g>
+        );
+      }
+      return null;
     }
-    return null;
+    if (!contenidoTexto) return null;
+    return (
+      <g transform={transformZona} onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }} style={{ cursor: 'pointer' }}>
+        <text x={z.cx} y={z.cy + F * 0.35} textAnchor="middle" fontSize={F} fill="#e6e9f0" stroke="#0d0f14" strokeWidth={F / 6} paintOrder="stroke">
+          {contenidoTexto}
+        </text>
+      </g>
+    );
   }
 
   return (
@@ -368,7 +385,7 @@ const AnclasCapa = memo(function AnclasCapa({ anclasResueltas, anclaSeleccionada
 
 export function LienzoAnclaje({
   geo, anclasResueltas, zonasResueltas, anclaSeleccionadaId, zonaSeleccionadaId,
-  onSeleccionarAncla, onSeleccionarZona, onDeseleccionar,
+  onSeleccionarAncla, onSeleccionarZona,
   leyenda, modo, onElegirCandidato, onArrastrarZona, senalServidor,
   imagenUrl, borde,
 }) {
@@ -533,7 +550,10 @@ export function LienzoAnclaje({
   }, [modo, puntoEnCm]);
 
   function alClickearSvg(ev) {
-    if (!modo) { onDeseleccionar(); return; }
+    // Clicar el vacío del lienzo YA NO cierra la zona/ancla que se está
+    // editando -- pedido explícito: "si yo quiero salirme presiono el
+    // nombre de la zona y ya" (ver el toggle-select en Productos.jsx).
+    if (!modo) return;
     const p = puntoEnCm(ev);
     if (!p) return;
     let mejor = null, mejorD = -1;
@@ -623,7 +643,12 @@ export function LienzoAnclaje({
         })}
 
         <CandidatosCapa cands={cands} modo={modo} onElegirCandidato={onElegirCandidato} R={R} />
-        <AnclasCapa anclasResueltas={anclasResueltas} anclaSeleccionadaId={anclaSeleccionadaId} onSeleccionarAncla={onSeleccionarAncla} R={R} />
+        {/* Misma lógica que los candidatos de zona más arriba: las cruces de
+            ancla son plumbing de las zonas, no parte del diseño -- el toggle
+            "zona" las oculta junto con el resto del "cuadrito". */}
+        {leyenda.zonas !== false && (
+          <AnclasCapa anclasResueltas={anclasResueltas} anclaSeleccionadaId={anclaSeleccionadaId} onSeleccionarAncla={onSeleccionarAncla} R={R} />
+        )}
       </svg>
     </div>
   );

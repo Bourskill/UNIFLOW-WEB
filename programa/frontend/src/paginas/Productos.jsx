@@ -537,7 +537,12 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   const anclasResueltasDeEstaPieza = (resuelto?.lista.anclas || []).filter((a) => a.pieza === piezaActiva);
   const zonasDeEstaPiezaConDatos = zonasDeEstaPieza.map((z) => {
     const cruda = anclaje.zonas.find((zz) => zz.id === z.id);
-    return { ...z, etiqueta: cruda ? etiquetaZona(cruda) : z.id, campoPedido: cruda?.campoPedido, rotacion: cruda?.rotacion || 0 };
+    return {
+      ...z, etiqueta: cruda ? etiquetaZona(cruda) : z.id, campoPedido: cruda?.campoPedido, rotacion: cruda?.rotacion || 0,
+      // El lienzo los necesita para poder mostrar el contenido real (no un
+      // marcador genérico) cuando el toggle "zona" oculta el cuadrito.
+      valorFijo: cruda?.valorFijo, valorEjemplo: cruda?.valorEjemplo,
+    };
   });
 
   const seleccionado = seleccion ? nodoDe(seleccion.tipo, seleccion.id) : null;
@@ -616,37 +621,45 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
           </div>
 
           <div className="max-w-3xl">
-            <div className="mb-2 flex items-center gap-2">
-              <label className="flex items-center gap-2 text-sm text-foreground">
-                <input type="checkbox" checked={bordeContraste.activo}
-                  onChange={(e) => setBordeContraste((prev) => ({ ...prev, activo: e.target.checked }))}
-                  className="h-4 w-4 rounded accent-primary" />
-                Contorno para láser (borde de contraste sobre el diseño)
-              </label>
-              <Ayuda>
-                El mismo contorno sirve para dos cosas: se ve en el editor y en el PDF encima del
-                diseño recortado (para no perder de vista los piquetes) y es el que se corta de
-                verdad. Desplazamiento: cuánto se empuja hacia AFUERA del molde real antes de
-                cortar (compensa el grosor del corte del láser -- 0.1cm es un valor típico). Grosor:
-                el ancho de la línea, real de producción.
-              </Ayuda>
-            </div>
-            {bordeContraste.activo && (
-              <div className="flex flex-wrap items-end gap-4 rounded-xl border border-border bg-surface-muted p-3.5">
-                <Campo etiqueta="Color">
-                  <input type="color" className="h-9 w-9 cursor-pointer rounded-lg border border-border bg-transparent p-0.5" value={bordeContraste.colorHex}
-                    onChange={(e) => setBordeContraste((prev) => ({ ...prev, colorHex: e.target.value }))} />
-                </Campo>
-                <Campo etiqueta="Desplazamiento (cm)">
-                  <InputNumero className="w-24" step={0.1} min={0} value={bordeContraste.desplazamientoCm ?? 0}
-                    onChange={(n) => setBordeContraste((prev) => ({ ...prev, desplazamientoCm: n }))} />
-                </Campo>
-                <Campo etiqueta="Grosor (cm)">
-                  <InputNumero className="w-24" step={0.1} min={0.01} value={bordeContraste.grosorCm}
-                    onChange={(n) => setBordeContraste((prev) => ({ ...prev, grosorCm: n }))} />
-                </Campo>
+            <div className={
+              'flex flex-col gap-3 rounded-xl border p-3.5 transition-colors ' +
+              (bordeContraste.activo ? 'border-primary/30 bg-primary-soft/40' : 'border-border bg-surface-muted')
+            }>
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button" role="switch" aria-checked={bordeContraste.activo}
+                  onClick={() => setBordeContraste((prev) => ({ ...prev, activo: !prev.activo }))}
+                  className={'relative h-5 w-9 flex-none rounded-full transition-colors ' + (bordeContraste.activo ? 'bg-primary' : 'bg-surface border border-border')}
+                >
+                  <span className={'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ' + (bordeContraste.activo ? 'translate-x-[18px]' : 'translate-x-0.5')} />
+                </button>
+                <span className="text-sm font-medium text-foreground">Contorno para láser</span>
+                <Ayuda>
+                  El mismo contorno sirve para dos cosas: se ve en el editor y en el PDF encima del
+                  diseño recortado (para no perder de vista los piquetes) y es el que se corta de
+                  verdad. Desplazamiento: cuánto se empuja hacia AFUERA del molde real antes de
+                  cortar (compensa el grosor del corte del láser -- 0.1cm es un valor típico). Grosor:
+                  el ancho de la línea, real de producción.
+                </Ayuda>
               </div>
-            )}
+              {bordeContraste.activo && (
+                <div className="flex flex-wrap items-center gap-5 border-t border-border/60 pt-3">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input type="color" className="h-9 w-9 cursor-pointer rounded-lg border border-border bg-transparent p-0.5" value={bordeContraste.colorHex}
+                      onChange={(e) => setBordeContraste((prev) => ({ ...prev, colorHex: e.target.value }))} />
+                    <span className="text-xs text-muted-foreground">Color</span>
+                  </label>
+                  <Campo etiqueta="Desplazamiento (cm)" className="w-32">
+                    <InputNumero step={0.1} min={0} value={bordeContraste.desplazamientoCm ?? 0}
+                      onChange={(n) => setBordeContraste((prev) => ({ ...prev, desplazamientoCm: n }))} />
+                  </Campo>
+                  <Campo etiqueta="Grosor (cm)" className="w-28">
+                    <InputNumero step={0.1} min={0.01} value={bordeContraste.grosorCm}
+                      onChange={(n) => setBordeContraste((prev) => ({ ...prev, grosorCm: n }))} />
+                  </Campo>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* ============ 1. PIEZA ============ */}
@@ -707,9 +720,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 zonasResueltas={zonasDeEstaPiezaConDatos}
                 anclaSeleccionadaId={seleccion?.tipo === 'ancla' ? seleccion.id : null}
                 zonaSeleccionadaId={seleccion?.tipo === 'zona' ? seleccion.id : null}
-                onSeleccionarAncla={(id) => setSeleccion({ tipo: 'ancla', id })}
-                onSeleccionarZona={(id) => setSeleccion({ tipo: 'zona', id })}
-                onDeseleccionar={() => setSeleccion(null)}
+                onSeleccionarAncla={(id) => setSeleccion((s) => (s?.tipo === 'ancla' && s.id === id ? null : { tipo: 'ancla', id }))}
+                onSeleccionarZona={(id) => setSeleccion((s) => (s?.tipo === 'zona' && s.id === id ? null : { tipo: 'zona', id }))}
                 leyenda={leyenda}
                 modo={modo}
                 onElegirCandidato={elegirCandidato}
@@ -785,7 +797,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
           {(colapsado) => colapsado ? null : (
             <div className="flex flex-col gap-3 p-3">
               <Boton
-                variante={modo === 'zona' ? 'primario' : 'secundario'}
+                variante={modo === 'zona' ? 'primario' : 'acento'}
                 type="button"
                 className="w-full justify-center gap-1.5 py-2.5 text-sm font-semibold"
                 onClick={() => setModo((m) => (m === 'zona' ? null : 'zona'))}
@@ -800,7 +812,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 ) : (
                   <div className="flex flex-wrap gap-1.5">
                     {anclaje.zonas.filter((z) => z.pieza === piezaActiva).map((z) => (
-                      <button key={z.id} type="button" onClick={() => setSeleccion({ tipo: 'zona', id: z.id })}
+                      <button key={z.id} type="button" onClick={() => setSeleccion((s) => (s?.id === z.id ? null : { tipo: 'zona', id: z.id }))}
                         className={'group flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors ' +
                           (seleccion?.id === z.id ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface text-muted-foreground hover:border-primary')}>
                         {(z.nombre || z.id) + ' · ' + tipoCortoDeZona(z)}
@@ -1176,10 +1188,13 @@ function PanelZona({ zona, anclasDisponibles, anclasResueltas, onRenombrar, onAc
         </div>
       </div>
 
-      <div className="flex items-center gap-2 border-t border-border pt-3">
-        <span className="text-xs text-muted-foreground">Color</span>
-        <input type="color" className="h-8 w-8 rounded border border-border" value={zona.colorHex} onChange={(e) => onActualizar({ colorHex: e.target.value })} />
-      </div>
+      {zona.tipo !== 'logo' && (
+        <div className="flex items-center gap-2 border-t border-border pt-3">
+          <span className="text-xs text-muted-foreground">Color del texto</span>
+          <input type="color" className="h-8 w-8 rounded border border-border" value={zona.colorHex} onChange={(e) => onActualizar({ colorHex: e.target.value })} />
+          <Ayuda>Con qué color se imprime este nombre/número/texto de verdad, en el PDF final (sublimación).</Ayuda>
+        </div>
+      )}
     </div>
   );
 }

@@ -73,19 +73,25 @@ export function PanelDock({
   const bordeLado = lado === 'derecha' ? 'border-l' : 'border-r';
   const chevronContraer = lado === 'derecha' ? 'derecha' : 'izquierda';
   const chevronExpandir = lado === 'derecha' ? 'izquierda' : 'derecha';
+  // La pastillita de contraer/expandir vive SOBRE el borde (mitad adentro,
+  // mitad afuera), no en una fila propia adentro del panel -- el feedback
+  // fue explícito: "no me gustaron los botones... ocupan espacio adentro de
+  // los paneles de manera innecesaria". Al ser `absolute`, no le quita ni un
+  // píxel de alto al contenido.
+  const claseTab = lado === 'derecha' ? 'left-0 -translate-x-1/2' : 'right-0 translate-x-1/2';
 
   if (colapsado) {
     return (
-      <div className={'flex h-full flex-none flex-col items-center border-border bg-surface py-3 ' + bordeLado} style={{ width: anchoColapsado }}>
+      <div className={'relative flex h-full flex-none flex-col items-center border-border bg-surface pt-8 ' + bordeLado} style={{ width: anchoColapsado }}>
         <button
           type="button"
           onClick={() => setColapsado(false)}
           title="Expandir panel"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
+          className={'absolute top-3 z-10 flex h-8 w-4 items-center justify-center rounded-full border border-border bg-surface text-muted-foreground shadow-sm transition-colors hover:border-primary hover:text-primary ' + claseTab}
         >
           <Chevron hacia={chevronExpandir} />
         </button>
-        <div className="mt-2 min-h-0 flex-1 overflow-hidden">
+        <div className="min-h-0 flex-1 overflow-hidden">
           {children(true)}
         </div>
       </div>
@@ -101,16 +107,14 @@ export function PanelDock({
           (lado === 'derecha' ? '-left-1' : '-right-1')
         }
       />
-      <div className="flex flex-none items-center justify-end border-b border-border px-2 py-1.5">
-        <button
-          type="button"
-          onClick={() => setColapsado(true)}
-          title="Contraer panel"
-          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
-        >
-          <Chevron hacia={chevronContraer} />
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => setColapsado(true)}
+        title="Contraer panel"
+        className={'absolute top-3 z-20 flex h-8 w-4 items-center justify-center rounded-full border border-border bg-surface text-muted-foreground shadow-sm transition-colors hover:border-primary hover:text-primary ' + claseTab}
+      >
+        <Chevron hacia={chevronContraer} />
+      </button>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {children(false)}
       </div>

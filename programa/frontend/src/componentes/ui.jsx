@@ -5,6 +5,9 @@
 const ESTILOS_BOTON = {
   primario: 'bg-primary text-primary-foreground hover:brightness-110 border-transparent',
   secundario: 'bg-surface text-foreground hover:bg-surface-muted border-border',
+  // Con color de por sí, sin esperar a estar "activo" -- para una acción
+  // que merece protagonismo (ej. "+ Nueva zona") pero todavía no está en uso.
+  acento: 'bg-primary-soft text-primary border-primary/30 hover:bg-primary/20',
   fantasma: 'bg-transparent text-muted-foreground hover:bg-surface-muted border-transparent',
   peligro: 'bg-danger text-background hover:brightness-110 border-transparent',
 };
