@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { Formulario } from './paginas/Formulario.jsx';
 import { Prendas } from './paginas/Prendas.jsx';
 import { Piezas } from './paginas/Piezas.jsx';
@@ -8,6 +8,19 @@ import { Historial } from './paginas/Historial.jsx';
 import { Icono } from './componentes/Icono.jsx';
 import { EstadoServidor } from './componentes/EstadoServidor.jsx';
 import { SubTabs } from './componentes/SubTabs.jsx';
+
+// Memoizados: aunque un apartado ya visitado se queda montado (oculto con
+// `hidden`, ver más abajo), sin esto igual volvía a RENDERIZARSE entero --
+// no a recargar datos, pero sí a rehacer todo su trabajo de render -- cada
+// vez que cambiaba CUALQUIER estado de App (ej. entrar a OTRO apartado
+// distinto), porque React re-renderiza todos los descendientes por
+// defecto salvo que se le diga explícitamente que no hace falta.
+const ProductosMemo = memo(Productos);
+const PiezasMemo = memo(Piezas);
+const PrendasMemo = memo(Prendas);
+const FormularioMemo = memo(Formulario);
+const PedidosMemo = memo(Pedidos);
+const HistorialMemo = memo(Historial);
 
 // Tres apartados en el nav (no seis): pantallas relacionadas viven como
 // sub-pestañas DENTRO de un mismo apartado (estilo Google Drive), no como
@@ -28,7 +41,11 @@ function App() {
   // tráfico simultáneo).
   const [visitadas, setVisitadas] = useState(() => new Set(['piezas']));
   const [recargarSenal, setRecargarSenal] = useState(0);
-  const marcarCambio = () => setRecargarSenal((n) => n + 1);
+  // useCallback a propósito: onCambio se pasa como prop a componentes
+  // memoizados (ver arriba) -- si esta función fuera una closure nueva en
+  // cada render de App, el memo no serviría de nada (todos los apartados
+  // volverían a renderizar en cada cambio de estado de App, memo o no).
+  const marcarCambio = useCallback(() => setRecargarSenal((n) => n + 1), []);
   const pestanaActual = PESTANAS.find((p) => p.id === pestana);
 
   function ir(id) {
@@ -73,9 +90,9 @@ function App() {
             <div hidden={pestana !== 'piezas'} className="h-full">
               <SubTabs
                 tabs={[
-                  { id: 'subir', etiqueta: 'Subir piezas', contenido: <Formulario onCambio={marcarCambio} /> },
-                  { id: 'prendas', etiqueta: 'Prendas', contenido: <Prendas recargarSenal={recargarSenal} /> },
-                  { id: 'biblioteca', etiqueta: 'Biblioteca', contenido: <Piezas recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
+                  { id: 'subir', etiqueta: 'Subir piezas', contenido: <FormularioMemo onCambio={marcarCambio} /> },
+                  { id: 'prendas', etiqueta: 'Prendas', contenido: <PrendasMemo recargarSenal={recargarSenal} /> },
+                  { id: 'biblioteca', etiqueta: 'Biblioteca', contenido: <PiezasMemo recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
                 ]}
               />
             </div>
@@ -86,15 +103,15 @@ function App() {
                   usuario (antes Diseños y Productos eran dos pasos separados
                   que había que guardar por separado y volver a conectar por
                   nombre; ver Productos.jsx). */}
-              <Productos recargarSenal={recargarSenal} onCambio={marcarCambio} />
+              <ProductosMemo recargarSenal={recargarSenal} onCambio={marcarCambio} />
             </div>
           )}
           {visitadas.has('produccion') && (
             <div hidden={pestana !== 'produccion'} className="h-full">
               <SubTabs
                 tabs={[
-                  { id: 'nuevo', etiqueta: 'Nuevo pedido', contenido: <Pedidos recargarSenal={recargarSenal} /> },
-                  { id: 'historial', etiqueta: 'Historial', contenido: <Historial recargarSenal={recargarSenal} /> },
+                  { id: 'nuevo', etiqueta: 'Nuevo pedido', contenido: <PedidosMemo recargarSenal={recargarSenal} /> },
+                  { id: 'historial', etiqueta: 'Historial', contenido: <HistorialMemo recargarSenal={recargarSenal} /> },
                 ]}
               />
             </div>

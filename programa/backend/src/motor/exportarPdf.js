@@ -37,9 +37,13 @@ function anclaParaRotarDesdeCentro(cxPt, cyPt, wPt, hPt, grados) {
 // 1mm). Espejo exacto de offsetPoligono() en
 // frontend/src/componentes/LienzoAnclaje.jsx (mismo criterio: bisectriz de
 // las dos aristas de cada vértice, "afuera" decidido contra el centroide,
-// tope de miter en esquinas muy agudas) -- no se comparte el código entre
-// frontend y backend (runtimes distintos), pero la fórmula tiene que ser
-// idéntica para que el editor muestre lo mismo que se corta de verdad.
+// MITER CON LÍMITE -- ver el comentario grande de esa copia sobre por qué
+// un miter sin límite disparaba picos reales en los piquetes pegados,
+// vistos en la práctica, no solo en teoría) -- no se comparte el código
+// entre frontend y backend (runtimes distintos), pero la fórmula tiene que
+// ser idéntica para que el editor muestre lo mismo que se corta de verdad.
+const LIMITE_MITER = 4;
+
 export function offsetPoligono(vertices, distancia) {
   const n = vertices.length;
   if (n < 3 || !distancia) return vertices;
@@ -58,16 +62,25 @@ export function offsetPoligono(vertices, distancia) {
   const normales = [];
   for (let i = 0; i < n; i++) normales.push(normalDeArista(vertices[i], vertices[(i + 1) % n]));
 
-  return vertices.map((v, i) => {
+  const salida = [];
+  for (let i = 0; i < n; i++) {
+    const v = vertices[i];
     const nPrev = normales[(i - 1 + n) % n];
     const nNext = normales[i];
-    let bx = nPrev.x + nNext.x, by = nPrev.y + nNext.y;
+    const bx = nPrev.x + nNext.x, by = nPrev.y + nNext.y;
     const blen = Math.hypot(bx, by);
-    if (blen < 1e-6) { bx = nNext.x; by = nNext.y; } else { bx /= blen; by /= blen; }
-    const cosTheta = bx * nNext.x + by * nNext.y;
-    const factor = distancia / Math.max(cosTheta, 0.2);
-    return { x: v.x + bx * factor, y: v.y + by * factor };
-  });
+    const cosTheta = blen < 1e-6 ? 0 : (bx / blen) * nNext.x + (by / blen) * nNext.y;
+    const factorMiter = blen < 1e-6 ? Infinity : 1 / Math.max(cosTheta, 1e-6);
+
+    if (factorMiter <= LIMITE_MITER) {
+      const ux = bx / blen, uy = by / blen;
+      salida.push({ x: v.x + ux * distancia * factorMiter, y: v.y + uy * distancia * factorMiter });
+    } else {
+      salida.push({ x: v.x + nPrev.x * distancia, y: v.y + nPrev.y * distancia });
+      salida.push({ x: v.x + nNext.x * distancia, y: v.y + nNext.y * distancia });
+    }
+  }
+  return salida;
 }
 
 export async function generarPdfNesting(resultadoNesting) {

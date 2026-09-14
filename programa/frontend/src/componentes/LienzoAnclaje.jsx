@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 // Puerto FIEL del lienzo de Anclajes del panel de Illustrator
 // (programa/panel/js/main.js: dibujarLienzo/candidatosDe/sinMontonera) --
@@ -44,12 +44,26 @@ function r1(n) { return Math.round(n * 100) / 100; }
 // Empuja un polígono cerrado hacia AFUERA una distancia fija -- el
 // "desplazamiento" real del contorno para láser (compensa el grosor del
 // corte; ver claude/CLAUDE.md sobre PROCESAR MOLDES.jsx y su offset de
-// 1mm). Por cada vértice, mueve a lo largo de la bisectriz de sus dos
-// aristas (mismo criterio que un "miter join" de trazo): así el borde
-// desplazado queda a la distancia pedida de CADA arista, no solo de los
-// vértices. "Hacia afuera" se decide comparando contra el centroide, en
-// vez de depender del sentido de giro del polígono (más simple y sin
-// riesgo de invertirlo por error).
+// 1mm). "Hacia afuera" se decide comparando contra el centroide, en vez de
+// depender del sentido de giro del polígono (más simple y sin riesgo de
+// invertirlo por error).
+//
+// MITER CON LÍMITE, IGUAL QUE stroke-linejoin DE UN TRAZO SVG/canvas: en la
+// mayoría de los vértices, mover por la bisectriz de las dos aristas (un
+// "miter") deja el borde desplazado a la distancia pedida de CADA arista,
+// no solo del vértice. Pero en una esquina muy aguda -- un piquete pegado
+// (una "aguja", ver geometriaSalientes.js) es exactamente eso, dos aristas
+// casi opuestas -- el miter se dispara: cuanto más cerrada la V, más lejos
+// tiene que irse el vértice para seguir a la misma distancia perpendicular
+// de las dos aristas a la vez. Sin límite, un piquete real dispara un pico
+// que se sale del molde entero (visto en la práctica, no solo en teoría).
+// Con el límite superado, se BISELA en vez de picar: dos puntos (uno por
+// cada arista, sin promediar) conectados por un segmento recto, como hace
+// cualquier motor de trazo real -- el contorno queda MÁS FIEL al molde
+// (nunca se aleja más de `distancia` de ninguna arista), a costa de un
+// bisel de un par de décimas de mm en vez de una punta perfecta ahí.
+const LIMITE_MITER = 4;
+
 function offsetPoligono(vertices, distancia) {
   const n = vertices.length;
   if (n < 3 || !distancia) return vertices;
@@ -68,18 +82,26 @@ function offsetPoligono(vertices, distancia) {
   const normales = [];
   for (let i = 0; i < n; i++) normales.push(normalDeArista(vertices[i], vertices[(i + 1) % n]));
 
-  return vertices.map((v, i) => {
+  const salida = [];
+  for (let i = 0; i < n; i++) {
+    const v = vertices[i];
     const nPrev = normales[(i - 1 + n) % n];
     const nNext = normales[i];
     let bx = nPrev.x + nNext.x, by = nPrev.y + nNext.y;
     const blen = Math.hypot(bx, by);
-    if (blen < 1e-6) { bx = nNext.x; by = nNext.y; } else { bx /= blen; by /= blen; }
-    const cosTheta = bx * nNext.x + by * nNext.y;
-    // Tope en esquinas muy agudas (un piquete pegado, por ejemplo): sin
-    // esto el "miter" se dispara hacia el infinito en una V muy cerrada.
-    const factor = distancia / Math.max(cosTheta, 0.2);
-    return { x: v.x + bx * factor, y: v.y + by * factor };
-  });
+    const cosTheta = blen < 1e-6 ? 0 : (bx / blen) * nNext.x + (by / blen) * nNext.y;
+    const factorMiter = blen < 1e-6 ? Infinity : 1 / Math.max(cosTheta, 1e-6);
+
+    if (factorMiter <= LIMITE_MITER) {
+      const ux = bx / blen, uy = by / blen;
+      salida.push({ x: v.x + ux * distancia * factorMiter, y: v.y + uy * distancia * factorMiter });
+    } else {
+      // Bisel: el punto desplazado de CADA arista por separado, sin picar.
+      salida.push({ x: v.x + nPrev.x * distancia, y: v.y + nPrev.y * distancia });
+      salida.push({ x: v.x + nNext.x * distancia, y: v.y + nNext.y * distancia });
+    }
+  }
+  return salida;
 }
 
 // Los candidatos que de verdad se pueden reencontrar en otra talla: nunca
@@ -172,6 +194,163 @@ const COLOR = {
   ancla: '#4c8dff', zonaRect: '#4c8dff', zonaFuera: '#f87171',
 };
 
+// El tamaño REAL en píxeles del archivo de un logo -- lo único que permite
+// calcular el mismo encaje "contain" que host.jsx/exportarPdf.js (sin esto,
+// la vista previa solo puede APROXIMAR metiendo la imagen en un cuadrado, y
+// esa aproximación es justo lo que no respetaba los límites reales de la
+// cruz: un logo ancho podía dibujarse más grande de lo que el molde de
+// verdad permite). Se carga una vez por URL; mientras carga, no se dibuja
+// nada todavía (el marco de la cruz/rectángulo sigue mostrando el límite).
+function useTamanoNaturalDeImagen(url) {
+  const [tam, setTam] = useState(null);
+  useEffect(() => {
+    if (!url) { setTam(null); return undefined; }
+    let cancelado = false;
+    const img = new window.Image();
+    img.onload = () => { if (!cancelado) setTam({ w: img.naturalWidth, h: img.naturalHeight }); };
+    img.onerror = () => { if (!cancelado) setTam(null); };
+    img.src = url;
+    return () => { cancelado = true; };
+  }, [url]);
+  return tam;
+}
+
+// Mismo cálculo que colocarLogoEnZonaCruz()/colocarLogoEnZonaSimple() de
+// host.jsx (y exportarPdf.js, que es quien de verdad produce el PDF):
+// "contain", nunca deformar. Con cruz, el logo puede exceder el cuadrado
+// central "lado" por UN solo eje (el brazo, RATIO_BRAZO veces más largo) --
+// se prueba el encaje contra los dos brazos y se usa el que da más tamaño.
+function medidaLogoAjustada({ cruz, lado, ancho, alto, natural }) {
+  if (!natural || !natural.w || !natural.h) return null;
+  const { w: pw, h: ph } = natural;
+  let escala;
+  if (cruz) {
+    const brazo = lado * RATIO_BRAZO;
+    const escalaVertical = Math.min(lado / pw, brazo / ph);
+    const escalaHorizontal = Math.min(brazo / pw, lado / ph);
+    escala = Math.max(escalaVertical, escalaHorizontal);
+  } else {
+    escala = Math.min(ancho / pw, alto / ph);
+  }
+  return { w: pw * escala, h: ph * escala };
+}
+
+// Una zona, memoizada: durante un arrastre, la ÚNICA zona cuyas props
+// cambian de verdad cuadro a cuadro es la que se está arrastrando -- todas
+// las demás (y sus candidatos/anclas, ver más abajo) reciben exactamente
+// los mismos props que ya tenían, así que React.memo las salta enteras en
+// vez de volver a generar y reconciliar su JSX en cada mousemove. Esa
+// reconciliación de más (no el arrastre en sí) era la otra causa real de
+// que se sintiera con delay.
+const ZonaEnLienzo = memo(function ZonaEnLienzo({
+  zona: z, seleccionada, arrastrando, modo, W, H, R, F, mostrarSola,
+  onSeleccionarZona, iniciarArrastreZona,
+}) {
+  const fuera = z.x < 0 || z.y < 0 || z.x + z.ancho > W + 0.01 || z.y + z.alto > H + 0.01;
+  const esLogo = z.tipo === 'logo';
+  const enCruz = esLogo && z.cruz !== false;
+  // Girar (web-only, no viene del puerto): pivota sobre el CENTRO real de
+  // la zona (z.cx/z.cy, que sí resuelve el motor), no sobre la esquina --
+  // así el punto de referencia no se corre al girar.
+  const transformZona = z.rotacion ? 'rotate(' + z.rotacion + ' ' + z.cx + ' ' + z.cy + ')' : undefined;
+  const natural = useTamanoNaturalDeImagen(esLogo ? z.logoRuta : null);
+  const medida = esLogo && z.logoRuta
+    ? medidaLogoAjustada({ cruz: enCruz, lado: z.ancho, ancho: z.ancho, alto: z.alto, natural })
+    : null;
+
+  return (
+    <g transform={transformZona}
+      onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }}
+      onMouseDown={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); iniciarArrastreZona(z.id, e); }}
+      style={{ cursor: modo ? 'pointer' : (arrastrando ? 'grabbing' : 'grab') }}>
+      {enCruz ? (
+        // Cruz: dos brazos que se cruzan en el cuadrado central de lado
+        // z.ancho (=== z.alto con cruz activa) -- mismo dibujo que
+        // crearZonaCruz() de host.jsx, para que el límite real de dónde
+        // puede caber el logo se vea, no solo se explique.
+        (() => {
+          const lado = z.ancho, brazo = lado * RATIO_BRAZO;
+          const stroke = fuera ? COLOR.zonaFuera : COLOR.zonaRect;
+          const sw = seleccionada ? R * 0.5 : R * 0.28;
+          return (
+            <>
+              <rect x={z.cx - lado / 2} y={z.cy - brazo / 2} width={lado} height={brazo} fill="rgba(76,141,255,0.1)" stroke={stroke} strokeWidth={sw} vectorEffect="non-scaling-stroke" />
+              <rect x={z.cx - brazo / 2} y={z.cy - lado / 2} width={brazo} height={lado} fill="rgba(76,141,255,0.1)" stroke={stroke} strokeWidth={sw} vectorEffect="non-scaling-stroke" />
+              {/* El tamaño real del archivo (natural) recién se conoce
+                  cuando termina de cargar la imagen -- hasta entonces se ve
+                  el marco de la cruz solo, nunca un cuadrado de más. */}
+              {medida && (
+                <image href={z.logoRuta} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
+              )}
+            </>
+          );
+        })()
+      ) : (
+        <rect
+          x={z.x} y={z.y} width={z.ancho} height={z.alto}
+          fill={fuera ? 'rgba(248,113,113,0.15)' : 'rgba(76,141,255,0.18)'}
+          stroke={fuera ? COLOR.zonaFuera : COLOR.zonaRect}
+          strokeWidth={seleccionada ? R * 0.5 : R * 0.28}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+      {esLogo && z.logoRuta && !enCruz && medida && (
+        <image href={z.logoRuta} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
+      )}
+      {(seleccionada || mostrarSola) && (!esLogo || !z.logoRuta) && (
+        <text x={z.cx} y={z.cy + F * 0.35} textAnchor="middle" fontSize={F} fill="#e6e9f0" stroke="#0d0f14" strokeWidth={F / 6} paintOrder="stroke">
+          {esLogo ? 'LOGO' : z.etiqueta}
+        </text>
+      )}
+    </g>
+  );
+});
+
+// Candidatos y anclas, memoizados por el mismo motivo que ZonaEnLienzo: sus
+// props (cands/anclasResueltas) no cambian durante un arrastre puramente
+// posicional, así que React.memo los salta enteros en cada mousemove.
+const CandidatosCapa = memo(function CandidatosCapa({ cands, modo, onElegirCandidato, R }) {
+  return cands.map((c, i) => (
+    <g key={i} onClick={(e) => { e.stopPropagation(); onElegirCandidato(c); }} style={{ cursor: modo ? 'pointer' : 'default' }}>
+      {c.clase === 'caja' ? (
+        <rect x={c.x - R} y={c.y - R} width={R * 2} height={R * 2} fill={COLOR.caja} stroke="#0d0f14" strokeWidth={R * 0.15} />
+      ) : c.clase === 'extremo' ? (
+        <polygon
+          points={`${c.x},${c.y - R * 1.4} ${c.x + R * 1.4},${c.y} ${c.x},${c.y + R * 1.4} ${c.x - R * 1.4},${c.y}`}
+          fill={COLOR.extremo} stroke="#0d0f14" strokeWidth={R * 0.15}
+        />
+      ) : c.clase === 'vertice' ? (
+        <circle cx={c.x} cy={c.y} r={R * 0.8} fill="none" stroke={COLOR.vertice} strokeWidth={R * 0.25} />
+      ) : c.clase === 'zona' ? (
+        <circle cx={c.x} cy={c.y} r={R * 1.1} fill={c.origenActual ? COLOR.zonaOrigen : COLOR.zona} stroke="#0d0f14" strokeWidth={R * 0.15} />
+      ) : (
+        <circle cx={c.x} cy={c.y} r={R * 1.5} fill={COLOR.piquete} stroke="#0d0f14" strokeWidth={R * 0.15} />
+      )}
+      <title>{c.etiqueta} ({c.x}, {c.y} cm)</title>
+    </g>
+  ));
+});
+
+const AnclasCapa = memo(function AnclasCapa({ anclasResueltas, anclaSeleccionadaId, onSeleccionarAncla, R }) {
+  return anclasResueltas.map((a) => {
+    const elegida = a.id === anclaSeleccionadaId;
+    const r2c = R * 2;
+    return (
+      <g
+        key={a.id}
+        onClick={(e) => { e.stopPropagation(); onSeleccionarAncla(a.id); }}
+        style={{ cursor: 'pointer' }}
+      >
+        <circle cx={a.x} cy={a.y} r={r2c * 2.2} fill="transparent" />
+        <circle cx={a.x} cy={a.y} r={r2c} fill="none" stroke={COLOR.ancla} strokeWidth={elegida ? R * 0.5 : R * 0.3} vectorEffect="non-scaling-stroke" />
+        <line x1={a.x - r2c * 2} y1={a.y} x2={a.x + r2c * 2} y2={a.y} stroke={COLOR.ancla} strokeWidth={elegida ? R * 0.5 : R * 0.3} vectorEffect="non-scaling-stroke" />
+        <line x1={a.x} y1={a.y - r2c * 2} x2={a.x} y2={a.y + r2c * 2} stroke={COLOR.ancla} strokeWidth={elegida ? R * 0.5 : R * 0.3} vectorEffect="non-scaling-stroke" />
+        <title>{a.id} — X desde {a.desdeX}, Y desde {a.desdeY}</title>
+      </g>
+    );
+  });
+});
+
 export function LienzoAnclaje({
   geo, anclasResueltas, zonasResueltas, anclaSeleccionadaId, zonaSeleccionadaId,
   onSeleccionarAncla, onSeleccionarZona, onDeseleccionar,
@@ -208,7 +387,10 @@ export function LienzoAnclaje({
     () => (geo ? candidatosDe(geo, zonasResueltas, zonaSeleccionadaId, leyenda) : []),
     [geo, zonasResueltas, zonaSeleccionadaId, leyenda]
   );
-  const puntos = geo ? geo.vertices.map((v) => v.x + ',' + v.y).join(' ') : '';
+  const puntos = useMemo(
+    () => (geo ? geo.vertices.map((v) => v.x + ',' + v.y).join(' ') : ''),
+    [geo]
+  );
   // Memoizado por el mismo motivo que cands -- no recalcular el offset
   // (aunque sea O(n), no O(n²)) en cada mousemove de un arrastre que no
   // tiene nada que ver con este borde.
@@ -218,7 +400,7 @@ export function LienzoAnclaje({
       : puntos
   ), [geo, borde?.activo, borde?.desplazamientoCm, puntos]);
 
-  function puntoEnCm(ev) {
+  const puntoEnCm = useCallback((ev) => {
     const svg = svgRef.current;
     try {
       const pt = svg.createSVGPoint();
@@ -228,26 +410,22 @@ export function LienzoAnclaje({
       const r = pt.matrixTransform(m2.inverse());
       return { x: r1(r.x), y: r1(r.y) };
     } catch { return null; }
-  }
-
-  function puntoConMatrizCacheada(ev) {
-    const svg = svgRef.current;
-    const matriz = matrizArrastreRef.current;
-    if (!svg || !matriz) return null;
-    try {
-      const pt = svg.createSVGPoint();
-      pt.x = ev.clientX; pt.y = ev.clientY;
-      const r = pt.matrixTransform(matriz);
-      return { x: r1(r.x), y: r1(r.y) };
-    } catch { return null; }
-  }
+  }, []);
 
   useEffect(() => {
-    if (!arrastre) return;
+    if (!arrastre) return undefined;
     function alMover(ev) {
-      const p = puntoConMatrizCacheada(ev);
+      const svg = svgRef.current;
+      const matriz = matrizArrastreRef.current;
       const actual = arrastreRef.current;
-      if (!p || !actual) return;
+      if (!svg || !matriz || !actual) return;
+      let p;
+      try {
+        const pt = svg.createSVGPoint();
+        pt.x = ev.clientX; pt.y = ev.clientY;
+        const r = pt.matrixTransform(matriz);
+        p = { x: r1(r.x), y: r1(r.y) };
+      } catch { return; }
       const nuevo = { ...actual, delta: { x: r1(p.x - actual.inicio.x), y: r1(p.y - actual.inicio.y) } };
       arrastreRef.current = nuevo;
       setArrastre(nuevo);
@@ -270,7 +448,12 @@ export function LienzoAnclaje({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arrastre?.id]);
 
-  function iniciarArrastreZona(id, ev) {
+  // Estable entre renders (solo cambia si `modo` cambia): es un prop de
+  // ZonaEnLienzo (memoizado), así que si esta función fuera una closure
+  // nueva en cada render de LienzoAnclaje, React.memo dejaría de servir de
+  // nada -- todas las zonas volverían a reconciliarse en cada mousemove
+  // igual que antes.
+  const iniciarArrastreZona = useCallback((id, ev) => {
     if (modo) return; // en modo crear/recolocar/cruzar, el clic es para elegir un candidato
     const svg = svgRef.current;
     const ctm = svg?.getScreenCTM();
@@ -281,7 +464,7 @@ export function LienzoAnclaje({
     const inicial = { id, inicio: p, delta: { x: 0, y: 0 } };
     arrastreRef.current = inicial;
     setArrastre(inicial);
-  }
+  }, [modo, puntoEnCm]);
 
   function alClickearSvg(ev) {
     if (!modo) { onDeseleccionar(); return; }
@@ -319,131 +502,61 @@ export function LienzoAnclaje({
       >
         <rect x={0} y={0} width={W} height={H} fill="none" stroke="#2b303d" strokeWidth={R * 0.4} />
 
-        {imagenUrl ? (
+        {imagenUrl && (
           <>
             {/* El diseño se recorta a la forma REAL del molde (máscara SVG),
                 no a un rectángulo -- mismo pedido de la pasada anterior,
                 ahora en el lienzo fiel de Illustrator. */}
             <clipPath id={idRecorte}><polygon points={puntos} /></clipPath>
             <image href={imagenUrl} x={0} y={0} width={W} height={H} clipPath={'url(#' + idRecorte + ')'} preserveAspectRatio="xMidYMid slice" />
-            <polygon
-              points={borde?.activo ? puntosBorde : puntos} fill="none"
-              stroke={borde?.activo ? borde.colorHex : '#4c8dff'}
-              strokeWidth={borde?.activo ? Math.max((borde.grosorCm || 0.03), R * 0.25) : R * 0.3}
-              opacity={borde?.activo ? 1 : 0.5}
-              vectorEffect="non-scaling-stroke"
-            />
           </>
-        ) : (
+        )}
+        {!imagenUrl && (
           <polygon points={puntos} fill="rgba(76,141,255,0.06)" stroke="#4c8dff" strokeWidth={R * 0.5} vectorEffect="non-scaling-stroke" />
+        )}
+        {/* El contorno para láser es independiente de que haya diseño o no --
+            es el corte real, no un adorno del arte. Antes vivía adentro del
+            "if (imagenUrl)" y desaparecía sin diseño elegido. */}
+        {borde?.activo ? (
+          <polygon
+            points={puntosBorde} fill="none"
+            stroke={borde.colorHex}
+            strokeWidth={Math.max((borde.grosorCm || 0.03), R * 0.25)}
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : imagenUrl && (
+          <polygon points={puntos} fill="none" stroke="#4c8dff" strokeWidth={R * 0.3} opacity={0.5} vectorEffect="non-scaling-stroke" />
         )}
 
         {zonasResueltas.map((zOriginal) => {
-          const enArrastre = arrastre && arrastre.id === zOriginal.id;
+          const arrastrando = arrastre && arrastre.id === zOriginal.id;
           // Mientras se arrastra, el delta es puramente visual (no toca
           // anclaje.zonas hasta soltar) -- se suma acá para que la zona siga
           // al puntero, y en TODO lo que dependa de su posición (fuera de
-          // pieza, la cruz del logo, dónde pivota "Girar").
-          const z = enArrastre
+          // pieza, la cruz del logo, dónde pivota "Girar"). Para cualquier
+          // OTRA zona (el caso común mientras se arrastra), `zona` sigue
+          // siendo la MISMA referencia que ya tenía -> React.memo la salta.
+          const zona = arrastrando
             ? { ...zOriginal, x: zOriginal.x + arrastre.delta.x, y: zOriginal.y + arrastre.delta.y,
                 cx: zOriginal.cx + arrastre.delta.x, cy: zOriginal.cy + arrastre.delta.y }
             : zOriginal;
-          const fuera = z.x < 0 || z.y < 0 || z.x + z.ancho > W + 0.01 || z.y + z.alto > H + 0.01;
-          const elegida = z.id === zonaSeleccionadaId;
-          const esLogo = z.tipo === 'logo';
-          // Girar (web-only, no viene del puerto): pivota sobre el CENTRO
-          // real de la zona (z.cx/z.cy, que sí resuelve el motor), no sobre
-          // la esquina -- así el punto de referencia no se corre al girar.
-          const transformZona = z.rotacion ? 'rotate(' + z.rotacion + ' ' + z.cx + ' ' + z.cy + ')' : undefined;
           return (
-            <g key={z.id} transform={transformZona}
-              onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }}
-              onMouseDown={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); iniciarArrastreZona(z.id, e); }}
-              style={{ cursor: modo ? 'pointer' : (enArrastre ? 'grabbing' : 'grab') }}>
-              {esLogo && z.cruz !== false ? (
-                // Cruz: dos brazos que se cruzan en el cuadrado central de
-                // lado z.ancho (=== z.alto con cruz activa) -- mismo dibujo
-                // que crearZonaCruz() de host.jsx, para que el límite real
-                // de dónde puede caber el logo se vea, no solo se explique.
-                (() => {
-                  const lado = z.ancho, brazo = lado * RATIO_BRAZO;
-                  const stroke = fuera ? COLOR.zonaFuera : COLOR.zonaRect;
-                  const sw = elegida ? R * 0.5 : R * 0.28;
-                  return (
-                    <>
-                      <rect x={z.cx - lado / 2} y={z.cy - brazo / 2} width={lado} height={brazo} fill="rgba(76,141,255,0.1)" stroke={stroke} strokeWidth={sw} vectorEffect="non-scaling-stroke" />
-                      <rect x={z.cx - brazo / 2} y={z.cy - lado / 2} width={brazo} height={lado} fill="rgba(76,141,255,0.1)" stroke={stroke} strokeWidth={sw} vectorEffect="non-scaling-stroke" />
-                      {z.logoRuta && (
-                        // Aproximación de vista previa: encaja "contain"
-                        // dentro del cuadrado que contiene a los dos brazos
-                        // (brazo×brazo) -- el ajuste EXACTO (que sí prueba
-                        // los dos brazos por separado, como host.jsx) se
-                        // calcula recién en el PDF de producción
-                        // (exportarPdf.js), donde ya se conoce el tamaño
-                        // real del archivo.
-                        <image href={z.logoRuta} x={z.cx - brazo / 2} y={z.cy - brazo / 2} width={brazo} height={brazo} preserveAspectRatio="xMidYMid meet" />
-                      )}
-                    </>
-                  );
-                })()
-              ) : (
-                <rect
-                  x={z.x} y={z.y} width={z.ancho} height={z.alto}
-                  fill={fuera ? 'rgba(248,113,113,0.15)' : 'rgba(76,141,255,0.18)'}
-                  stroke={fuera ? COLOR.zonaFuera : COLOR.zonaRect}
-                  strokeWidth={elegida ? R * 0.5 : R * 0.28}
-                  vectorEffect="non-scaling-stroke"
-                />
-              )}
-              {esLogo && z.logoRuta && z.cruz === false && (
-                <image href={z.logoRuta} x={z.x} y={z.y} width={z.ancho} height={z.alto} preserveAspectRatio="xMidYMid meet" />
-              )}
-              {(elegida || zonasResueltas.length <= 1) && (!esLogo || !z.logoRuta) && (
-                <text x={z.cx} y={z.cy + F * 0.35} textAnchor="middle" fontSize={F} fill="#e6e9f0" stroke="#0d0f14" strokeWidth={F / 6} paintOrder="stroke">
-                  {esLogo ? 'LOGO' : z.etiqueta}
-                </text>
-              )}
-            </g>
+            <ZonaEnLienzo
+              key={zona.id}
+              zona={zona}
+              seleccionada={zona.id === zonaSeleccionadaId}
+              arrastrando={arrastrando}
+              modo={modo}
+              W={W} H={H} R={R} F={F}
+              mostrarSola={zonasResueltas.length <= 1}
+              onSeleccionarZona={onSeleccionarZona}
+              iniciarArrastreZona={iniciarArrastreZona}
+            />
           );
         })}
 
-        {cands.map((c, i) => (
-          <g key={i} onClick={(e) => { e.stopPropagation(); onElegirCandidato(c); }} style={{ cursor: modo ? 'pointer' : 'default' }}>
-            {c.clase === 'caja' ? (
-              <rect x={c.x - R} y={c.y - R} width={R * 2} height={R * 2} fill={COLOR.caja} stroke="#0d0f14" strokeWidth={R * 0.15} />
-            ) : c.clase === 'extremo' ? (
-              <polygon
-                points={`${c.x},${c.y - R * 1.4} ${c.x + R * 1.4},${c.y} ${c.x},${c.y + R * 1.4} ${c.x - R * 1.4},${c.y}`}
-                fill={COLOR.extremo} stroke="#0d0f14" strokeWidth={R * 0.15}
-              />
-            ) : c.clase === 'vertice' ? (
-              <circle cx={c.x} cy={c.y} r={R * 0.8} fill="none" stroke={COLOR.vertice} strokeWidth={R * 0.25} />
-            ) : c.clase === 'zona' ? (
-              <circle cx={c.x} cy={c.y} r={R * 1.1} fill={c.origenActual ? COLOR.zonaOrigen : COLOR.zona} stroke="#0d0f14" strokeWidth={R * 0.15} />
-            ) : (
-              <circle cx={c.x} cy={c.y} r={R * 1.5} fill={COLOR.piquete} stroke="#0d0f14" strokeWidth={R * 0.15} />
-            )}
-            <title>{c.etiqueta} ({c.x}, {c.y} cm)</title>
-          </g>
-        ))}
-
-        {anclasResueltas.map((a) => {
-          const elegida = a.id === anclaSeleccionadaId;
-          const r2c = R * 2;
-          return (
-            <g
-              key={a.id}
-              onClick={(e) => { e.stopPropagation(); onSeleccionarAncla(a.id); }}
-              style={{ cursor: 'pointer' }}
-            >
-              <circle cx={a.x} cy={a.y} r={r2c * 2.2} fill="transparent" />
-              <circle cx={a.x} cy={a.y} r={r2c} fill="none" stroke={COLOR.ancla} strokeWidth={elegida ? R * 0.5 : R * 0.3} vectorEffect="non-scaling-stroke" />
-              <line x1={a.x - r2c * 2} y1={a.y} x2={a.x + r2c * 2} y2={a.y} stroke={COLOR.ancla} strokeWidth={elegida ? R * 0.5 : R * 0.3} vectorEffect="non-scaling-stroke" />
-              <line x1={a.x} y1={a.y - r2c * 2} x2={a.x} y2={a.y + r2c * 2} stroke={COLOR.ancla} strokeWidth={elegida ? R * 0.5 : R * 0.3} vectorEffect="non-scaling-stroke" />
-              <title>{a.id} — X desde {a.desdeX}, Y desde {a.desdeY}</title>
-            </g>
-          );
-        })}
+        <CandidatosCapa cands={cands} modo={modo} onElegirCandidato={onElegirCandidato} R={R} />
+        <AnclasCapa anclasResueltas={anclasResueltas} anclaSeleccionadaId={anclaSeleccionadaId} onSeleccionarAncla={onSeleccionarAncla} R={R} />
       </svg>
     </div>
   );
