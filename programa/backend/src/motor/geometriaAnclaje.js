@@ -7,21 +7,20 @@
 // nueva, solo se movió al backend para que el motor de anclaje (que corre
 // del lado del servidor, para producción real) la use igual que el canvas.
 //
-// `piquetes` sale de `geometriaPorTalla[talla].piquetesMm` (Pasada 19: los
-// importadores DXF/PDF ahora separan, por capa/talla, el trazo más largo
-// -- el contorno real -- de cualquier otro trazo de menos de 2.5cm reales,
-// ver geometriaComun.js·contornoYPiquetesDeTrazos) -- mismo tratamiento de
-// coordenadas que los vértices (trasladar, invertir Y, mm->cm), aplicado a
-// su CENTRO.
+// `piquetes` sale de `geometriaPorTalla[talla].piquetesMm` (pasada 19:
+// piquetes SUELTOS, trazos aparte; pasada 20: sumados los PEGADOS,
+// recortados en el propio contorno -- ver geometriaComun.js·
+// contornoYPiquetesDeTrazos y geometriaSalientes.js) -- mismo tratamiento
+// de coordenadas que los vértices (trasladar, invertir Y, mm->cm), aplicado
+// a su CENTRO. `salientes` sale de `salientesMm` (pasada 20, geometriaSalientes.js
+// ·puntosNotablesDe -- esquinas por vértice + "vueltas" del contorno
+// muestreadas con ventana real en mm).
 //
-// `salientes` (los "giros" del contorno -- esquinas, picos) SIGUE sin
-// calcularse: a diferencia de un piquete (un trazo aparte, con posición
-// propia) o un extremo (un simple min/max), un saliente pide analizar la
-// CURVATURA del contorno para encontrar dónde "da la vuelta" -- un
-// algoritmo real, no una consulta sobre datos que ya se tienen, y por eso
-// se dejó fuera de esta pasada (ver claude/ESTADO-ACTUAL.md). referencias.js
-// ya está preparado para esto: una referencia de tipo "saliente" sin datos
-// falla con un mensaje claro, no revienta -- regla 6 del motor.
+// Los dos suman `rx`/`ry` (posición relativa 0-1 en la pieza): es lo que
+// permite reencontrar el mismo rasgo en otra talla si cambia la cuenta
+// (referencias.js·emparejarPorPosicion) -- sin esto, cualquier candidato de
+// la talla contra la que se resuelve tenía rx/ry=0, así que "el más
+// cercano" a la posición guardada en el ancla salía casi al azar.
 //
 // `extremos` (los 4 puntos más alto/bajo/izq/der del contorno REAL, no de
 // la caja) SÍ se calcula acá: a diferencia de piquetes/salientes, es un
@@ -40,6 +39,8 @@ function calcularExtremos(vertices) {
   return { arriba, abajo, izquierda, derecha };
 }
 
+function round3(n) { return Math.round(n * 1000) / 1000; }
+
 export function geometriaParaAnclaje(pieza, talla) {
   const dim = pieza.dimensionesPorTalla?.[talla];
   const geo = pieza.geometriaPorTalla?.[talla];
@@ -55,12 +56,29 @@ export function geometriaParaAnclaje(pieza, talla) {
     y: (maxY - y) / 10,
   }));
 
-  const piquetes = (geo.piquetesMm || []).map((p) => ({
-    x: (p.xMm - minX) / 10,
-    y: (maxY - p.yMm) / 10,
-    ancho_cm: p.anchoMm / 10,
-    alto_cm: p.altoMm / 10,
-  }));
+  // rx/ry (posición relativa 0-1 dentro de la pieza) son lo que permite
+  // reencontrar un piquete/saliente en otra talla si cambia la cuenta --
+  // ver referencias.js·emparejarPorPosicion. Sin esto, cualquier ancla
+  // puesta sobre un piquete que sobreviviera a un cambio de cuenta se
+  // reemparejaba con rx/ry=0 para TODOS los candidatos por igual (el
+  // "más cercano" salía casi al azar) -- un bug real, no solo un dato que
+  // faltaba: candidatosDe() (frontend) ya guardaba el rx/ry real en el
+  // ancla desde que se crea, pero la geometría de la OTRA talla, contra la
+  // que se compara al resolver, nunca lo tuvo.
+  const piquetes = (geo.piquetesMm || []).map((p) => {
+    const x = (p.xMm - minX) / 10;
+    const y = (maxY - p.yMm) / 10;
+    return {
+      x, y, ancho_cm: p.anchoMm / 10, alto_cm: p.altoMm / 10,
+      rx: round3(x / dim.anchoCm), ry: round3(y / dim.altoCm),
+    };
+  });
+
+  const salientes = (geo.salientesMm || []).map((s) => {
+    const x = (s.xMm - minX) / 10;
+    const y = (maxY - s.yMm) / 10;
+    return { x, y, esquina: !!s.esquina, rx: round3(x / dim.anchoCm), ry: round3(y / dim.altoCm) };
+  });
 
   return {
     nombre: pieza.nombre,
@@ -68,6 +86,7 @@ export function geometriaParaAnclaje(pieza, talla) {
     vertices,
     extremos: calcularExtremos(vertices),
     piquetes,
+    salientes,
   };
 }
 

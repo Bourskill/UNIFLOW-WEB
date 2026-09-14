@@ -75,7 +75,13 @@ function aplicarMatriz(m, x, y) {
 // Tessela una curva cúbica de Bézier (P0 ya está en el buffer como punto
 // anterior) en N puntos intermedios + el punto final, en el espacio del
 // PATH (todavía sin transformar por el CTM -- eso se aplica afuera).
-function tessellarCurva(p0, x1, y1, x2, y2, x3, y3, segmentos = 12) {
+//
+// 48, no 12: geometriaSalientes.js·vueltasDeMuestreo busca "vueltas" del
+// contorno con una ventana de ~2% del tamaño de la pieza -- con solo 12
+// segmentos, una curva real (radio de garment típico) quedaba
+// sub-muestreada para esa ventana y una vuelta suave podía no detectarse
+// nunca (mismo ajuste hecho del lado DXF, ver importarDxf.js).
+function tessellarCurva(p0, x1, y1, x2, y2, x3, y3, segmentos = 48) {
   const puntos = [];
   for (let i = 1; i <= segmentos; i++) {
     const t = i / segmentos;

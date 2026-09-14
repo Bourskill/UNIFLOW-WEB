@@ -34,11 +34,23 @@ const UNIDAD_INSUNITS_A_MM = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000 };
 // le asignó capa, no porque de verdad se llame así.
 const CAPAS_RESERVADAS = new Set(['0', 'DEFPOINTS']);
 
+// Cuántos pasos por cuarto de vuelta. 8 (el original) alcanza para el
+// contorno/bounding-box, pero geometriaSalientes.js·vueltasDeMuestreo
+// busca "vueltas" del contorno con una ventana de ~2% del tamaño de la
+// pieza -- con un radio real de garment (10-30cm), 8 pasos/cuarto daba
+// segmentos de ~2-4cm, MÁS LARGOS que esa ventana: la curva quedaba
+// "sub-muestreada" para ese algoritmo y una vuelta suave (punta de hombro,
+// fondo de sisa) podía no verse nunca. Portar solo el algoritmo sin
+// corregir esto habría dejado el mismo problema real que ya tenía
+// "extremos" -- probado con una prueba sintética (prueba-salientes.js) que
+// falla en 8 y pasa en 48 antes de subir este número.
+const SEGMENTOS_POR_CUARTO_VUELTA = 48;
+
 // Tessela el arco de una LWPOLYLINE/POLYLINE entre dos vértices con bulge.
 // bulge = tan(theta/4), theta > 0 significa arco antihorario de p1 a p2
 // (convención DXF). Fórmula verificada a mano con casos conocidos (ej.
 // bulge=1 = semicírculo) antes de usarla acá -- ver commit de esta pasada.
-function tessellarBulge(p1, p2, bulge, segmentosPorCuartoVuelta = 8) {
+function tessellarBulge(p1, p2, bulge, segmentosPorCuartoVuelta = SEGMENTOS_POR_CUARTO_VUELTA) {
   const theta = 4 * Math.atan(bulge);
   const dx = p2[0] - p1[0];
   const dy = p2[1] - p1[1];
@@ -65,7 +77,7 @@ function tessellarBulge(p1, p2, bulge, segmentosPorCuartoVuelta = 8) {
   return puntos;
 }
 
-function tessellarArco(centro, radio, anguloInicio, anguloFin, segmentosPorCuartoVuelta = 8) {
+function tessellarArco(centro, radio, anguloInicio, anguloFin, segmentosPorCuartoVuelta = SEGMENTOS_POR_CUARTO_VUELTA) {
   const barrido = anguloFin - anguloInicio;
   const pasos = Math.max(3, Math.round((segmentosPorCuartoVuelta * Math.abs(barrido)) / (Math.PI / 2)));
   const puntos = [];

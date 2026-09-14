@@ -28,10 +28,14 @@
  *   poligonoMm: [number, number][],
  *   boundingBoxMm: { anchoMm: number, altoMm: number },
  *   piquetesMm?: { xMm: number, yMm: number, anchoMm: number, altoMm: number }[],
+ *   salientesMm?: { xMm: number, yMm: number, esquina: boolean }[],
  *   validadoPorUsuario: boolean
- * }>} geometriaPorTalla  piquetesMm: trazos sueltos de menos de 2.5cm reales
- *   detectados en la misma capa que el contorno (geometriaComun.js·
- *   contornoYPiquetesDeTrazos) -- por su CENTRO, no por su esquina
+ * }>} geometriaPorTalla  piquetesMm: trazos sueltos DE MENOS de 2.5cm reales
+ *   en la misma capa que el contorno + muescas PEGADAS al propio contorno
+ *   (geometriaComun.js·contornoYPiquetesDeTrazos, geometriaSalientes.js·
+ *   piquetesPegadosDe) -- por su CENTRO, no por su esquina. salientesMm: los
+ *   "giros" del contorno -- esquinas y vueltas suaves (geometriaSalientes.js·
+ *   puntosNotablesDe)
  * @property {Record<string, {anchoCm: number, altoCm: number}>} dimensionesPorTalla  derivado de geometriaPorTalla, en cm
  */
 

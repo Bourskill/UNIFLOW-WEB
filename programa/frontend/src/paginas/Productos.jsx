@@ -402,6 +402,35 @@ export function Productos({ recargarSenal, onCambio }) {
     }));
   }
 
+  // Arrastrar una zona sobre el lienzo (LienzoAnclaje·onArrastrarZona) --
+  // pedido explícito del usuario, además de "Mover X/Y" a mano: mismo
+  // resultado (suma al offset), solo que a ojo. La relación con el ancla
+  // no cambia -- sigue siendo "offset", no una posición absoluta nueva. En
+  // cm (modo fijo) redondea a 1 decimal, como pidió; en % de la pieza
+  // (modo proporcional) redondea a la décima de punto porcentual.
+  function moverZona(id, dxCm, dyCm) {
+    setAnclaje((prev) => {
+      const zona = prev.zonas.find((z) => z.id === id);
+      if (!zona) return prev;
+      const geoPza = geometriaParaAnclaje(piezaDelRol(zona.pieza), tallaTrabajoDe(zona.pieza));
+      const anchoPza = geoPza?.pieza.ancho_cm || 0;
+      const altoPza = geoPza?.pieza.alto_cm || 0;
+      function mover(eje, deltaCm, basePza) {
+        if (eje.modo === 'proporcional') {
+          const deltaFrac = basePza ? deltaCm / basePza : 0;
+          return { ...eje, valor: Math.round((eje.valor + deltaFrac) * 1000) / 1000 };
+        }
+        return { ...eje, valor: Math.round((eje.valor + deltaCm) * 10) / 10 };
+      }
+      return {
+        ...prev,
+        zonas: prev.zonas.map((z) => (z.id === id
+          ? { ...z, offset: { x: mover(z.offset.x, dxCm, anchoPza), y: mover(z.offset.y, dyCm, altoPza) } }
+          : z)),
+      };
+    });
+  }
+
   async function guardar(evento) {
     evento.preventDefault();
     setError(null);
@@ -598,6 +627,7 @@ export function Productos({ recargarSenal, onCambio }) {
                   leyenda={leyenda}
                   modo={modo}
                   onElegirCandidato={elegirCandidato}
+                  onArrastrarZona={moverZona}
                   imagenUrl={disenoSeleccionado?.imagenesPorPieza?.[piezaActiva]}
                   borde={bordeContraste}
                 />

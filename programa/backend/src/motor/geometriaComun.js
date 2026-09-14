@@ -8,6 +8,8 @@
 // propia de marca. El nombre que trae el archivo ES la talla, tal cual; solo
 // se descarta si está vacío (una forma sin nombre no puede ser una talla).
 
+import { piquetesPegadosDe, puntosNotablesDe } from './geometriaSalientes.js';
+
 export function normalizarTalla(nombre) {
   const limpio = (nombre || '').trim();
   return limpio || null;
@@ -97,25 +99,44 @@ export function contornoYPiquetesDeTrazos(trazos, mmPorUnidad) {
   let contorno = conMedidas[0];
   for (const t of conMedidas) if (t.areaCajaMm2 > contorno.areaCajaMm2) contorno = t;
 
+  // Piquetes SUELTOS (trazos aparte, en la misma capa) y PEGADOS
+  // (recortados en el propio contorno, sin ser un trazo aparte -- ver
+  // geometriaSalientes.js) van a la MISMA lista, deduplicados por si un
+  // mismo piquete real quedó dibujado dos veces (un trazo suelto justo
+  // encima de la muesca que ya tiene el contorno) -- mismo criterio que
+  // host.jsx (yaPuesto, grilla de 0.5mm).
   const piquetesMm = [];
+  const yaPuesto = new Set();
+  function clave(xMm, yMm) { return Math.round(xMm / 0.5) + '|' + Math.round(yMm / 0.5); }
+  function agregarPiquete(p) {
+    const c = clave(p.xMm, p.yMm);
+    if (yaPuesto.has(c)) return;
+    yaPuesto.add(c);
+    piquetesMm.push(p);
+  }
+
   for (const t of conMedidas) {
     if (t === contorno || t.largoCm >= PIQUETE_LARGO_MAX_CM) continue;
     const xs = t.puntosMm.map((p) => p[0]);
     const ys = t.puntosMm.map((p) => p[1]);
     const minX = Math.min(...xs), maxX = Math.max(...xs);
     const minY = Math.min(...ys), maxY = Math.max(...ys);
-    piquetesMm.push({ xMm: (minX + maxX) / 2, yMm: (minY + maxY) / 2, anchoMm: maxX - minX, altoMm: maxY - minY });
+    agregarPiquete({ xMm: (minX + maxX) / 2, yMm: (minY + maxY) / 2, anchoMm: maxX - minX, altoMm: maxY - minY });
   }
+  for (const p of piquetesPegadosDe(contorno.puntosMm)) agregarPiquete(p);
 
   const xs = contorno.puntosMm.map((p) => p[0]);
   const ys = contorno.puntosMm.map((p) => p[1]);
+  const anchoMm = Math.max(...xs) - Math.min(...xs);
+  const altoMm = Math.max(...ys) - Math.min(...ys);
+
   return {
     poligonoMm: contorno.puntosMm,
-    boundingBoxMm: {
-      anchoMm: Math.max(...xs) - Math.min(...xs),
-      altoMm: Math.max(...ys) - Math.min(...ys),
-    },
+    boundingBoxMm: { anchoMm, altoMm },
     piquetesMm,
+    // Los "giros" del contorno -- esquinas, picos -- para anclar más allá
+    // de un piquete (punta de hombro, fondo de sisa). Ver geometriaSalientes.js.
+    salientesMm: puntosNotablesDe(contorno.puntosMm, anchoMm, altoMm),
   };
 }
 

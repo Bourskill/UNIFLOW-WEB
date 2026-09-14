@@ -1,4 +1,4 @@
-import { useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 // Puerto FIEL del lienzo de Anclajes del panel de Illustrator
 // (programa/panel/js/main.js: dibujarLienzo/candidatosDe/sinMontonera) --
@@ -134,11 +134,24 @@ const COLOR = {
 export function LienzoAnclaje({
   geo, anclasResueltas, zonasResueltas, anclaSeleccionadaId, zonaSeleccionadaId,
   onSeleccionarAncla, onSeleccionarZona, onDeseleccionar,
-  leyenda, modo, onElegirCandidato,
+  leyenda, modo, onElegirCandidato, onArrastrarZona,
   imagenUrl, borde,
 }) {
   const svgRef = useRef(null);
   const idRecorte = 'recorte-' + useId().replace(/[^a-zA-Z0-9]/g, '');
+  // Arrastrar una zona sobre el molde (además de "Mover X/Y" en el panel,
+  // no en vez de -- pedido explícito del usuario: posicionar a ojo y
+  // corregir el decimal a mano si hace falta). Es puramente visual hasta
+  // soltar: onArrastrarZona (Productos.jsx·moverZona) recién ahí suma el
+  // delta al offset real, en cm redondeados a 1 decimal.
+  const [arrastre, setArrastre] = useState(null); // { id, inicio: {x,y}, delta: {x,y} }
+  // Espejo del estado en un ref: alSoltar necesita el delta MÁS RECIENTE
+  // (no el de cuando arrancó el efecto), pero llamar a onArrastrarZona
+  // (efecto real: cambia anclaje.zonas en Productos.jsx) DENTRO de un
+  // actualizador de setState es impuro -- React StrictMode lo detecta
+  // llamándolo dos veces en desarrollo, y el offset terminaba duplicado.
+  // El ref evita necesitar el actualizador para leer el valor vigente.
+  const arrastreRef = useRef(null);
 
   if (!geo) {
     return (
@@ -165,6 +178,42 @@ export function LienzoAnclaje({
       const r = pt.matrixTransform(m2.inverse());
       return { x: r1(r.x), y: r1(r.y) };
     } catch { return null; }
+  }
+
+  useEffect(() => {
+    if (!arrastre) return;
+    function alMover(ev) {
+      const p = puntoEnCm(ev);
+      const actual = arrastreRef.current;
+      if (!p || !actual) return;
+      const nuevo = { ...actual, delta: { x: r1(p.x - actual.inicio.x), y: r1(p.y - actual.inicio.y) } };
+      arrastreRef.current = nuevo;
+      setArrastre(nuevo);
+    }
+    function alSoltar() {
+      const final = arrastreRef.current;
+      arrastreRef.current = null;
+      setArrastre(null);
+      if (final && (Math.abs(final.delta.x) >= 0.05 || Math.abs(final.delta.y) >= 0.05)) {
+        onArrastrarZona?.(final.id, final.delta.x, final.delta.y);
+      }
+    }
+    window.addEventListener('mousemove', alMover);
+    window.addEventListener('mouseup', alSoltar);
+    return () => {
+      window.removeEventListener('mousemove', alMover);
+      window.removeEventListener('mouseup', alSoltar);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arrastre?.id]);
+
+  function iniciarArrastreZona(id, ev) {
+    if (modo) return; // en modo crear/recolocar/cruzar, el clic es para elegir un candidato
+    const p = puntoEnCm(ev);
+    if (!p) return;
+    const inicial = { id, inicio: p, delta: { x: 0, y: 0 } };
+    arrastreRef.current = inicial;
+    setArrastre(inicial);
   }
 
   function alClickearSvg(ev) {
@@ -209,7 +258,16 @@ export function LienzoAnclaje({
           <polygon points={puntos} fill="rgba(76,141,255,0.06)" stroke="#4c8dff" strokeWidth={R * 0.5} vectorEffect="non-scaling-stroke" />
         )}
 
-        {zonasResueltas.map((z) => {
+        {zonasResueltas.map((zOriginal) => {
+          const enArrastre = arrastre && arrastre.id === zOriginal.id;
+          // Mientras se arrastra, el delta es puramente visual (no toca
+          // anclaje.zonas hasta soltar) -- se suma acá para que la zona siga
+          // al puntero, y en TODO lo que dependa de su posición (fuera de
+          // pieza, la cruz del logo, dónde pivota "Girar").
+          const z = enArrastre
+            ? { ...zOriginal, x: zOriginal.x + arrastre.delta.x, y: zOriginal.y + arrastre.delta.y,
+                cx: zOriginal.cx + arrastre.delta.x, cy: zOriginal.cy + arrastre.delta.y }
+            : zOriginal;
           const fuera = z.x < 0 || z.y < 0 || z.x + z.ancho > W + 0.01 || z.y + z.alto > H + 0.01;
           const elegida = z.id === zonaSeleccionadaId;
           const esLogo = z.tipo === 'logo';
@@ -218,7 +276,10 @@ export function LienzoAnclaje({
           // la esquina -- así el punto de referencia no se corre al girar.
           const transformZona = z.rotacion ? 'rotate(' + z.rotacion + ' ' + z.cx + ' ' + z.cy + ')' : undefined;
           return (
-            <g key={z.id} transform={transformZona} onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }} style={{ cursor: 'pointer' }}>
+            <g key={z.id} transform={transformZona}
+              onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }}
+              onMouseDown={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); iniciarArrastreZona(z.id, e); }}
+              style={{ cursor: modo ? 'pointer' : (enArrastre ? 'grabbing' : 'grab') }}>
               {esLogo && z.cruz !== false ? (
                 // Cruz: dos brazos que se cruzan en el cuadrado central de
                 // lado z.ancho (=== z.alto con cruz activa) -- mismo dibujo

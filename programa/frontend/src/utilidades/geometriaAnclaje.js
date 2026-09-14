@@ -18,6 +18,8 @@ function calcularExtremos(vertices) {
   return { arriba, abajo, izquierda, derecha };
 }
 
+function round3(n) { return Math.round(n * 1000) / 1000; }
+
 export function geometriaParaAnclaje(pieza, talla) {
   const dim = pieza?.dimensionesPorTalla?.[talla];
   const geo = pieza?.geometriaPorTalla?.[talla];
@@ -33,12 +35,23 @@ export function geometriaParaAnclaje(pieza, talla) {
     y: (maxY - y) / 10,
   }));
 
-  const piquetes = (geo.piquetesMm || []).map((p) => ({
-    x: (p.xMm - minX) / 10,
-    y: (maxY - p.yMm) / 10,
-    ancho_cm: p.anchoMm / 10,
-    alto_cm: p.altoMm / 10,
-  }));
+  // rx/ry (posición relativa 0-1) -- espejo del backend
+  // (motor/geometriaAnclaje.js), mismo motivo: sin esto, reencontrar un
+  // piquete/saliente en otra talla con distinta cuenta salía casi al azar.
+  const piquetes = (geo.piquetesMm || []).map((p) => {
+    const x = (p.xMm - minX) / 10;
+    const y = (maxY - p.yMm) / 10;
+    return {
+      x, y, ancho_cm: p.anchoMm / 10, alto_cm: p.altoMm / 10,
+      rx: round3(x / dim.anchoCm), ry: round3(y / dim.altoCm),
+    };
+  });
+
+  const salientes = (geo.salientesMm || []).map((s) => {
+    const x = (s.xMm - minX) / 10;
+    const y = (maxY - s.yMm) / 10;
+    return { x, y, esquina: !!s.esquina, rx: round3(x / dim.anchoCm), ry: round3(y / dim.altoCm) };
+  });
 
   return {
     nombre: pieza.nombre,
@@ -46,6 +59,7 @@ export function geometriaParaAnclaje(pieza, talla) {
     vertices,
     extremos: calcularExtremos(vertices),
     piquetes,
+    salientes,
   };
 }
 
