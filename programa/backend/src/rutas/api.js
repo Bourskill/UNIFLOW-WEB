@@ -4,7 +4,7 @@ import { leerColeccion, leerRegistro, crearRegistro, actualizarRegistro, borrarR
 import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
-import { resolverPiezasDePedido } from '../motor/resolverPedido.js';
+import { resolverPiezasDePedido, tallaRealDePieza } from '../motor/resolverPedido.js';
 import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
 import { geometriaDelGrupo } from '../motor/geometriaAnclaje.js';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
@@ -215,7 +215,7 @@ router.post('/piezas', async (req, res) => {
 });
 
 router.put('/piezas/:id', async (req, res) => {
-  const { nombre, categoria, angulosPermitidos, tela } = req.body;
+  const { nombre, categoria, angulosPermitidos, tela, tallaUnica } = req.body;
   const pieza = await leerRegistro('piezas', req.params.id);
   if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
 
@@ -223,6 +223,13 @@ router.put('/piezas/:id', async (req, res) => {
   if (categoria !== undefined) pieza.categoria = categoria;
   if (angulosPermitidos !== undefined) pieza.angulosPermitidos = angulosPermitidos;
   if (tela !== undefined) pieza.tela = tela;
+  // Marca explícita del usuario -- nunca se infiere solo de "tiene una sola
+  // talla cargada" (motor/resolverPedido.js·tallaRealDePieza): una pieza a
+  // mitad de cargar sus tallas (PUT /piezas/:id/tallas/:talla de a una)
+  // también tiene una sola talla en ese momento sin ser "talla única" de
+  // verdad -- sin este campo explícito, producción no podría distinguir los
+  // dos casos y arriesgaría usar la talla equivocada en silencio.
+  if (tallaUnica !== undefined) pieza.tallaUnica = !!tallaUnica;
   await actualizarRegistro('piezas', req.params.id, pieza);
   res.json(pieza);
 });
@@ -523,7 +530,11 @@ router.post('/nesting/desde-grupo', async (req, res) => {
     const cantidad = Number(linea.cantidad) || 0;
     for (let copia = 0; copia < cantidad; copia++) {
       for (const pieza of piezasDelGrupo) {
-        const dimension = pieza.dimensionesPorTalla?.[linea.talla];
+        // Mismo criterio que motor/resolverPedido.js -- una pieza marcada
+        // tallaUnica usa su única geometría sin importar qué talla se pida
+        // acá; el resto sigue exigiendo la talla exacta, sin inventar nada.
+        const tallaReal = tallaRealDePieza(pieza, linea.talla);
+        const dimension = pieza.dimensionesPorTalla?.[tallaReal];
         if (!dimension) {
           return res.status(400).json({
             error: 'La pieza "' + pieza.nombre + '" no tiene dimensión cargada para la talla ' +

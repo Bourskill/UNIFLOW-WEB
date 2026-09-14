@@ -18,15 +18,21 @@ import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 
 // Piezas "talla única" (no escalan -- la misma moldería sirve para
 // cualquier talla del pedido, ej. una vela/refuerzo que es igual en S que
-// en XL): tienen un solo valor cargado en dimensionesPorTalla, bajo
-// cualquier nombre (ver motor/geometriaComun.js -- la talla es el nombre de
-// capa tal cual, nunca se valida contra una lista). Si la talla que pide el
-// pedido no está entre las suyas pero es la ÚNICA que tiene, se usa esa
-// igual -- nunca se INVENTA una talla que no está cargada: si la pieza
-// tiene VARIAS tallas y ninguna coincide con la pedida, eso sigue siendo un
-// error real (falta cargar esa talla), no un caso de "talla única".
-function tallaRealDePieza(pieza, tallaPedida) {
+// en XL): usan su única geometría cargada sin importar qué talla pida el
+// pedido, bajo cualquier nombre de talla (ver motor/geometriaComun.js -- la
+// talla es el nombre de capa tal cual, nunca se valida contra una lista).
+//
+// OJO -- esto SOLO se activa con `pieza.tallaUnica === true`, una marca
+// EXPLÍCITA del usuario (checkbox en Piezas.jsx). NO alcanza con mirar
+// "tiene una sola talla cargada": una pieza a mitad de cargar sus tallas
+// (PUT /piezas/:id/tallas/:talla, de a una por vez) TAMBIÉN tiene una sola
+// talla en ese momento sin ser talla única de verdad -- inferirlo solo por
+// la cuenta hubiera podido sustituir en silencio una talla real que
+// simplemente todavía no se terminó de cargar, exactamente el error que
+// este proyecto trata como el único sin vuelta atrás.
+export function tallaRealDePieza(pieza, tallaPedida) {
   if (pieza.dimensionesPorTalla?.[tallaPedida]) return tallaPedida;
+  if (!pieza.tallaUnica) return tallaPedida; // no marcada -- nunca inventar, que falle explícito más abajo
   const tallasDisponibles = Object.keys(pieza.dimensionesPorTalla || {});
   return tallasDisponibles.length === 1 ? tallasDisponibles[0] : tallaPedida;
 }

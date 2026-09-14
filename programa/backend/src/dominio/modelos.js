@@ -39,6 +39,12 @@
  * @property {Record<string, {anchoCm: number, altoCm: number}>} dimensionesPorTalla  derivado de geometriaPorTalla, en cm
  * @property {number} version                          empieza en 1, sube cada vez que cambia la geometría
  * @property {VersionPieza[]} versiones                 historial COMPLETO (incluida la actual, versiones[length-1])
+ * @property {boolean} [tallaUnica]                     marca EXPLÍCITA del usuario (checkbox en Piezas.jsx) --
+ *   nunca se infiere de "tiene una sola talla cargada": una pieza a mitad de
+ *   cargar sus tallas (PUT /piezas/:id/tallas/:talla de a una) también tiene
+ *   una sola talla en ese momento sin ser talla única de verdad. Solo con
+ *   esto en true, motor/resolverPedido.js·tallaRealDePieza usa la única
+ *   geometría cargada para cualquier talla que pida un pedido.
  */
 
 /**

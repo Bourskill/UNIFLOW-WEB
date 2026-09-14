@@ -42,6 +42,10 @@ export function resolverPiezasDeGrupo(grupo, piezas, versionesPiezas) {
       tela: pieza.tela,
       dimensionesPorTalla,
       geometriaPorTalla,
+      // Clasificación de la pieza en sí (biblioteca), no de una versión
+      // puntual -- se propaga tal cual, pin de versión o no (ver
+      // motor/resolverPedido.js·tallaRealDePieza).
+      tallaUnica: !!pieza.tallaUnica,
     };
   });
 }

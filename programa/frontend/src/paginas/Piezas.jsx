@@ -210,6 +210,7 @@ function FilaPieza({ pieza, usadaEn, productosQueLaUsan, onCambio, onBorrar }) {
   const [categoria, setCategoria] = useState(pieza.categoria || '');
   const [tela, setTela] = useState(pieza.tela || '');
   const [presetAngulos, setPresetAngulos] = useState(presetDe(pieza.angulosPermitidos));
+  const [tallaUnica, setTallaUnica] = useState(!!pieza.tallaUnica);
   const [reprocesando, setReprocesando] = useState(false);
   const [resultadoReproceso, setResultadoReproceso] = useState(null);
   const [mostrandoVersiones, setMostrandoVersiones] = useState(false);
@@ -221,7 +222,7 @@ function FilaPieza({ pieza, usadaEn, productosQueLaUsan, onCambio, onBorrar }) {
 
   async function guardar() {
     const preset = PRESETS_ANGULOS.find((p) => p.id === presetAngulos);
-    await editarPieza(pieza.id, { categoria: categoria || null, tela: tela || null, angulosPermitidos: preset.valores });
+    await editarPieza(pieza.id, { categoria: categoria || null, tela: tela || null, angulosPermitidos: preset.valores, tallaUnica });
     setEditando(false);
     onCambio();
   }
@@ -263,6 +264,7 @@ function FilaPieza({ pieza, usadaEn, productosQueLaUsan, onCambio, onBorrar }) {
             {pieza.categoria && <Chip>{pieza.categoria}</Chip>}
             {pieza.tela && <span className="text-xs text-faint-foreground">· {pieza.tela}</span>}
             <Chip>v{pieza.version || 1}</Chip>
+            {pieza.tallaUnica && <Chip tono="activo">talla única</Chip>}
           </div>
           <div className="mt-1 flex flex-wrap gap-1">
             {tallas.length === 0 ? (
@@ -348,6 +350,17 @@ function FilaPieza({ pieza, usadaEn, productosQueLaUsan, onCambio, onBorrar }) {
               {PRESETS_ANGULOS.map((p) => <option key={p.id} value={p.id}>{p.etiqueta}</option>)}
             </Select>
           </Campo>
+          <label className="mb-2 flex items-center gap-1.5 text-sm text-foreground">
+            <input type="checkbox" className="h-4 w-4 rounded accent-primary" checked={tallaUnica} onChange={(e) => setTallaUnica(e.target.checked)} />
+            Talla única (no escala)
+          </label>
+          <Ayuda>
+            Marcá esto SOLO si esta pieza de verdad es igual en cualquier talla de la prenda (ej.
+            una vela o un refuerzo que no cambia de tamaño). Con esto activado, un pedido en
+            cualquier talla usa la única geometría cargada sin pedirla exacta. Sin marcar, si a la
+            pieza todavía le falta cargar alguna talla, producción sigue avisando explícito en vez
+            de usar la talla equivocada por error.
+          </Ayuda>
           <Boton variante="primario" tamano="sm" onClick={guardar}>Guardar cambios</Boton>
         </div>
       )}
