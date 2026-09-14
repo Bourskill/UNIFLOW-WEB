@@ -52,15 +52,25 @@ export function Pedidos({ recargarSenal }) {
   const [resultado, setResultado] = useState(null);
   const [cargando, setCargando] = useState(false);
   const [errorGenerar, setErrorGenerar] = useState(null);
+  // Ver el comentario igual en Piezas.jsx -- distinto de `cargando` de
+  // arriba (ese es el de "generando el nesting", ya existía). Sin esto, la
+  // primera visita mostraba "Creá primero un producto (Diseño → Productos)"
+  // mientras el fetch inicial seguía en vuelo, aunque ya hubiera productos.
+  const [cargandoInicial, setCargandoInicial] = useState(true);
 
   async function recargar() {
-    const [ps, gs, pzs, peds] = await Promise.all([listarProductos(), listarGrupos(), listarPiezas(), listarPedidos()]);
-    setProductos(ps);
-    setGrupos(gs);
-    setPiezas(pzs);
-    setPedidos(peds);
-    if (ps.length > 0 && lineas.length === 0) {
-      setLineas([lineaVacia(ps[0].id, tallasDelProducto(ps[0].id, ps, gs, pzs)[0])]);
+    setCargandoInicial(true);
+    try {
+      const [ps, gs, pzs, peds] = await Promise.all([listarProductos(), listarGrupos(), listarPiezas(), listarPedidos()]);
+      setProductos(ps);
+      setGrupos(gs);
+      setPiezas(pzs);
+      setPedidos(peds);
+      if (ps.length > 0 && lineas.length === 0) {
+        setLineas([lineaVacia(ps[0].id, tallasDelProducto(ps[0].id, ps, gs, pzs)[0])]);
+      }
+    } finally {
+      setCargandoInicial(false);
     }
   }
 
@@ -155,7 +165,9 @@ export function Pedidos({ recargarSenal }) {
         </p>
       </div>
 
-      {productos.length === 0 ? (
+      {cargandoInicial ? (
+        <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : productos.length === 0 ? (
         <p className="text-sm text-muted-foreground">Creá primero un producto (Diseño → Productos).</p>
       ) : (
         <Tarjeta as="form" onSubmit={guardar} className="flex max-w-2xl flex-col gap-4">

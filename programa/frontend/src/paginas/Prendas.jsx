@@ -94,11 +94,20 @@ export function Prendas({ recargarSenal }) {
   const [grupos, setGrupos] = useState([]);
   const [piezas, setPiezas] = useState([]);
   const [seleccionado, setSeleccionado] = useState(null);
+  // Ver el comentario igual en Piezas.jsx: sin esto, la primera visita
+  // muestra "Todavía no hay ninguna prenda armada" mientras el fetch sigue
+  // en vuelo -- indistinguible de que de verdad no haya ninguna.
+  const [cargando, setCargando] = useState(true);
 
   async function recargar() {
-    const [gs, ps] = await Promise.all([listarGrupos(), listarPiezas()]);
-    setGrupos(gs);
-    setPiezas(ps);
+    setCargando(true);
+    try {
+      const [gs, ps] = await Promise.all([listarGrupos(), listarPiezas()]);
+      setGrupos(gs);
+      setPiezas(ps);
+    } finally {
+      setCargando(false);
+    }
   }
 
   useEffect(() => {
@@ -132,7 +141,9 @@ export function Prendas({ recargarSenal }) {
         </p>
       </div>
 
-      {grupos.length === 0 ? (
+      {cargando ? (
+        <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : grupos.length === 0 ? (
         <p className="text-sm text-muted-foreground">Todavía no hay ninguna prenda armada.</p>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

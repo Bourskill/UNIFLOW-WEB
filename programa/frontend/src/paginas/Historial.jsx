@@ -72,9 +72,18 @@ function FilaGeneracion({ generacion, onReponer }) {
 // más accionable de la investigación de referencia (Sublimifyer).
 export function Historial({ recargarSenal }) {
   const [generaciones, setGeneraciones] = useState([]);
+  // Ver el comentario igual en Piezas.jsx -- sin esto, la primera visita
+  // muestra "Todavía no se generó ningún lote" mientras el fetch sigue en
+  // vuelo, indistinguible de que de verdad no haya ninguno.
+  const [cargando, setCargando] = useState(true);
 
   async function recargar() {
-    setGeneraciones(await listarGeneraciones());
+    setCargando(true);
+    try {
+      setGeneraciones(await listarGeneraciones());
+    } finally {
+      setCargando(false);
+    }
   }
 
   useEffect(() => {
@@ -97,7 +106,9 @@ export function Historial({ recargarSenal }) {
         </p>
       </div>
 
-      {generaciones.length === 0 ? (
+      {cargando ? (
+        <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : generaciones.length === 0 ? (
         <p className="text-sm text-muted-foreground">Todavía no se generó ningún lote.</p>
       ) : (
         <div className="flex max-w-2xl flex-col gap-3">

@@ -125,11 +125,24 @@ export function Piezas({ recargarSenal, onCambio }) {
   const [grupos, setGrupos] = useState([]);
   const [filtroCategoria, setFiltroCategoria] = useState('');
   const [busqueda, setBusqueda] = useState('');
+  // Sin esto, la PRIMERA vez que se visita esta pestaña en la sesión (o
+  // después de cualquier reload de página, que resetea qué apartados ya se
+  // visitaron -- ver App.jsx) el "Todavía no hay ninguna" de más abajo
+  // salía mientras el fetch todavía estaba en vuelo -- indistinguible de un
+  // vacío real, y el usuario lo vivía como "se demora en cargar/actualizar
+  // el apartado" (más aún si el backend gratis estaba dormido, hasta un
+  // minuto para despertar).
+  const [cargando, setCargando] = useState(true);
 
   async function recargar() {
-    const [ps, gs] = await Promise.all([listarPiezas(), listarGrupos()]);
-    setPiezas(ps);
-    setGrupos(gs);
+    setCargando(true);
+    try {
+      const [ps, gs] = await Promise.all([listarPiezas(), listarGrupos()]);
+      setPiezas(ps);
+      setGrupos(gs);
+    } finally {
+      setCargando(false);
+    }
   }
 
   useEffect(() => {
@@ -196,7 +209,9 @@ export function Piezas({ recargarSenal, onCambio }) {
         </div>
       )}
 
-      {piezasFiltradas.length === 0 ? (
+      {cargando ? (
+        <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : piezasFiltradas.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {piezas.length === 0 ? 'Todavía no hay ninguna — subí una en "Subir piezas".' : 'Ninguna coincide con el filtro.'}
         </p>

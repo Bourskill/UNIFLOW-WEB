@@ -5,6 +5,14 @@
 // del contorno para láser (compensa el grosor del corte). Espejo exacto de
 // la misma función en frontend/src/componentes/LienzoAnclaje.jsx: se
 // prueba acá la fórmula una vez, no dos.
+//
+// Desde que offsetPoligono pasó a usar clipper-lib (offsetting real de
+// polígono, no un miter/bisel por vértice -- ver el comentario grande
+// junto a la función), el ORDEN y hasta la CANTIDAD de puntos de salida
+// pueden no corresponderse 1 a 1 con la entrada (Clipper puede reordenar,
+// invertir el sentido de giro, o fusionar vértices). Por eso estas pruebas
+// comprueban propiedades GEOMÉTRICAS (caja, área, distancia al centroide),
+// nunca "el punto i de salida es el punto i de entrada, desplazado".
 
 import { offsetPoligono } from '../src/motor/exportarPdf.js';
 
@@ -14,6 +22,10 @@ function comprobar(desc, cond, detalle) {
   else { fallos++; console.log('  ✗ ' + desc + (detalle ? '\n      ' + detalle : '')); }
 }
 function casi(a, b, tol = 0.01) { return Math.abs(a - b) <= tol; }
+function cajaDe(puntos) {
+  const xs = puntos.map((p) => p.x), ys = puntos.map((p) => p.y);
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+}
 
 console.log('\n--- Sin desplazamiento (0), el polígono no cambia ---');
 {
@@ -22,80 +34,79 @@ console.log('\n--- Sin desplazamiento (0), el polígono no cambia ---');
   comprobar('Distancia 0 devuelve los mismos puntos', r === cuadrado);
 }
 
-console.log('\n--- Un cuadrado desplazado 1cm hacia afuera crece exactamente 1cm por lado ---');
+console.log('\n--- Un cuadrado desplazado 1cm hacia afuera crece EXACTAMENTE 1cm por lado ---');
 {
   const cuadrado = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
   const r = offsetPoligono(cuadrado, 1);
-  // En un cuadrado, cada esquina se mueve en diagonal -- pero el resultado
-  // debe seguir siendo un cuadrado, ahora de 12x12 centrado en el mismo
-  // centro (0..10 -> -1..11).
-  const xs = r.map((p) => p.x), ys = r.map((p) => p.y);
-  comprobar('El nuevo ancho es 12 (10 + 1 por lado)', casi(Math.max(...xs) - Math.min(...xs), 12));
-  comprobar('El nuevo alto es 12', casi(Math.max(...ys) - Math.min(...ys), 12));
-  comprobar('Sigue centrado en el mismo centro (5,5)', casi((Math.max(...xs) + Math.min(...xs)) / 2, 5) && casi((Math.max(...ys) + Math.min(...ys)) / 2, 5));
+  const caja = cajaDe(r);
+  comprobar('minX/minY bajaron exactamente 1', casi(caja.minX, -1) && casi(caja.minY, -1), JSON.stringify(caja));
+  comprobar('maxX/maxY subieron exactamente 1', casi(caja.maxX, 11) && casi(caja.maxY, 11), JSON.stringify(caja));
+  comprobar('Sigue siendo un cuadrado de 4 vértices (esquinas afiladas, jtMiter)', r.length === 4, 'salieron ' + r.length);
 }
 
 console.log('\n--- El offset es hacia AFUERA del centroide, nunca hacia adentro ---');
 {
-  // Un pentágono suave (sin esquinas agudas: cada vértice sale como UN solo
-  // punto, sin bisel) -- así el índice de salida sigue siendo el mismo que
-  // el de entrada, y se puede comparar 1 a 1 contra el original.
   const poligono = [{ x: 0, y: 0 }, { x: 8, y: 1 }, { x: 10, y: 6 }, { x: 4, y: 9 }, { x: -2, y: 4 }];
   const cx = poligono.reduce((s, v) => s + v.x, 0) / poligono.length;
   const cy = poligono.reduce((s, v) => s + v.y, 0) / poligono.length;
   const r = offsetPoligono(poligono, 0.5);
-  comprobar('Ningún vértice biseló (salió el mismo número de puntos)', r.length === poligono.length, 'salieron ' + r.length);
-  const todosMasLejos = poligono.every((v, i) => {
-    const dOriginal = Math.hypot(v.x - cx, v.y - cy);
-    const dNuevo = Math.hypot(r[i].x - cx, r[i].y - cy);
-    return dNuevo > dOriginal;
+  // Sin asumir correspondencia de índice: cada punto de salida tiene que
+  // quedar MÁS LEJOS del centroide que el vértice de entrada más cercano a
+  // él (si el offset fuera hacia adentro, o nulo, esto fallaría).
+  const todosMasLejos = r.every((p) => {
+    const dNuevo = Math.hypot(p.x - cx, p.y - cy);
+    const masCercano = Math.min(...poligono.map((v) => Math.hypot(v.x - cx, v.y - cy)));
+    return dNuevo > masCercano - 0.001;
   });
-  comprobar('Los 5 vértices quedan más lejos del centroide tras el offset', todosMasLejos);
+  comprobar('Ningún punto de salida quedó más cerca del centroide que el original', todosMasLejos, JSON.stringify(r));
+  const areaDe = (pts) => {
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) { const p1 = pts[i], p2 = pts[(i + 1) % pts.length]; a += p1.x * p2.y - p2.x * p1.y; }
+    return Math.abs(a) / 2;
+  };
+  comprobar('El área creció (offset hacia afuera, no un no-op)', areaDe(r) > areaDe(poligono));
 }
 
-console.log('\n--- Una esquina muy aguda (piquete pegado tipo "aguja") BISELA en vez de picar ---');
+console.log('\n--- Un piquete pegado tipo "aguja" ya NO deforma el molde con un offset chico ---');
 {
-  // Mismo tipo de forma que geometriaSalientes.js detecta como aguja: dos
-  // aristas casi opuestas. Antes (miter sin límite) esto disparaba un pico
-  // que se salía del molde entero -- justo el bug real reportado ("hay
-  // trazos que se disparan y desbordan"). Ahora tiene que biselar: la
-  // punta original desaparece, la reemplazan DOS puntos, y NINGUNO de los
-  // dos se aleja más que `distancia` de su arista.
+  // El bug real reportado: "se deforma mucho, no es fiel al molde". Antes
+  // (miter por vértice) esto podía disparar o distorsionar la caja; con
+  // offsetting real de polígono (unión booleana, ver clipper-lib), la caja
+  // tiene que crecer EXACTAMENTE `distancia` por lado, ni más ni menos --
+  // igual que crecería un rectángulo liso.
   const poligono = [
     { x: 0, y: 0 }, { x: 48, y: 0 }, { x: 50, y: 10 }, { x: 52, y: 0 },
     { x: 100, y: 0 }, { x: 100, y: 80 }, { x: 0, y: 80 },
   ];
   const distancia = 0.1;
   const r = offsetPoligono(poligono, distancia);
-  comprobar('Salió UN punto más que el original (una esquina biseló)', r.length === poligono.length + 1, 'salieron ' + r.length);
-  // Los dos puntos del bisel quedan cerca de la punta original (48,0)-(50,10)-(52,0),
-  // nunca a una distancia absurda como daría un miter sin límite.
-  const puntaOriginal = poligono[2];
-  const cercaDeLaPunta = r.filter((p) => Math.hypot(p.x - puntaOriginal.x, p.y - puntaOriginal.y) < distancia * 2);
-  comprobar('Los dos puntos del bisel quedan cerca de la punta original, no disparados', cercaDeLaPunta.length === 2, JSON.stringify(r));
+  const caja = cajaDe(r);
+  comprobar('La caja creció EXACTAMENTE 0.1cm por lado, sin picos ni deformación',
+    casi(caja.minX, -distancia) && casi(caja.maxX, 100 + distancia) &&
+    casi(caja.minY, -distancia) && casi(caja.maxY, 80 + distancia),
+    JSON.stringify(caja));
 }
 
-console.log('\n--- El mismo piquete, con un desplazamiento GRANDE, sigue sin desbordar el molde ---');
+console.log('\n--- El mismo piquete, con un desplazamiento GRANDE, "traga" la muesca en vez de dispararla ---');
 {
-  // El caso real que motivó el fix: con miter sin límite, un desplazamiento
-  // de varios cm sobre un piquete agudo real disparaba el pico varios cm
-  // fuera del molde. Con bisel, el punto desplazado nunca se aleja más de
-  // `distancia` de la arista más cercana -- se verifica indirectamente
-  // comprobando que ningún punto de salida quede a más de `distancia` +
-  // margen de la caja del polígono ORIGINAL ensanchada por `distancia`.
+  // Con un desplazamiento (3cm) mucho mayor que el ancho de la muesca
+  // (4mm), las dos paredes de la aguja quedan cubiertas por el offset de
+  // las aristas vecinas -- un offset de polígono real hace desaparecer la
+  // muesca del contorno resultante (correcto: no puede sobrevivir), en vez
+  // de disparar un pico de varios cm como hacía el miter por vértice sin
+  // límite real.
   const poligono = [
     { x: 0, y: 0 }, { x: 48, y: 0 }, { x: 50, y: 10 }, { x: 52, y: 0 },
     { x: 100, y: 0 }, { x: 100, y: 80 }, { x: 0, y: 80 },
   ];
   const distancia = 3;
   const r = offsetPoligono(poligono, distancia);
-  const xs = poligono.map((p) => p.x), ys = poligono.map((p) => p.y);
-  const cajaMax = {
-    minX: Math.min(...xs) - distancia * 1.5, maxX: Math.max(...xs) + distancia * 1.5,
-    minY: Math.min(...ys) - distancia * 1.5, maxY: Math.max(...ys) + distancia * 1.5,
-  };
-  const dentroDeLaCaja = r.every((p) => p.x >= cajaMax.minX && p.x <= cajaMax.maxX && p.y >= cajaMax.minY && p.y <= cajaMax.maxY);
-  comprobar('Con 3cm de desplazamiento, ningún punto se dispara fuera de una caja razonable', dentroDeLaCaja, JSON.stringify(r));
+  const caja = cajaDe(r);
+  comprobar('La caja creció EXACTAMENTE 3cm por lado',
+    casi(caja.minX, -distancia) && casi(caja.maxX, 100 + distancia) &&
+    casi(caja.minY, -distancia) && casi(caja.maxY, 80 + distancia),
+    JSON.stringify(caja));
+  comprobar('La muesca desapareció del resultado (queda un rectángulo simple, 4 vértices)', r.length === 4, 'salieron ' + r.length + ': ' + JSON.stringify(r));
 }
 
 console.log('\n' + pasadas + ' pasadas · ' + fallos + ' fallidas\n');

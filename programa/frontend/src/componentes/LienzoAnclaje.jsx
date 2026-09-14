@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import ClipperLib from 'clipper-lib';
 
 // Puerto FIEL del lienzo de Anclajes del panel de Illustrator
 // (programa/panel/js/main.js: dibujarLienzo/candidatosDe/sinMontonera) --
@@ -30,78 +31,74 @@ const PARTE_DESDE_ORIGEN = {
   centroArriba: 'arriba', centroAbajo: 'abajo', centroIzq: 'izquierda', centroDer: 'derecha',
 };
 
-// Mismo RATIO_BRAZO que host.jsx (colocarLogoEnZonaCruz/crearZonaCruz,
-// programa/panel/jsx/host.jsx): una zona de logo "en cruz" no es un cuadro
-// único, es una cruz de dos brazos (uno para logos anchos, otro para
-// altos) que se cruzan en el cuadrado central de lado "lado" -- acá
-// z.ancho === z.alto === "lado" cuando cruz está activa (resolverZona ya
-// lo resuelve así, motor/anclaje/resolver.js). 4cm×2.5cm = 1.6 es la
-// proporción real que ya traía el usuario, no un número inventado.
-const RATIO_BRAZO = 4 / 2.5;
+// A propósito YA NO es el mismo valor que host.jsx (colocarLogoEnZonaCruz/
+// crearZonaCruz, programa/panel/jsx/host.jsx sigue en 4/2.5) -- una zona de
+// logo "en cruz" no es un cuadro único, es una cruz de dos brazos (uno
+// para logos anchos, otro para altos) que se cruzan en el cuadrado central
+// de lado "lado" -- acá z.ancho === z.alto === "lado" cuando cruz está
+// activa (resolverZona ya lo resuelve así, motor/anclaje/resolver.js).
+// Reducido a pedido a 4cm×2cm = 2 (el cuadrado central baja de 2.5cm a
+// 2cm de lado, el brazo se mantiene en 4cm).
+const RATIO_BRAZO = 4 / 2;
 
 function r1(n) { return Math.round(n * 100) / 100; }
 
 // Empuja un polígono cerrado hacia AFUERA una distancia fija -- el
 // "desplazamiento" real del contorno para láser (compensa el grosor del
 // corte; ver claude/CLAUDE.md sobre PROCESAR MOLDES.jsx y su offset de
-// 1mm). "Hacia afuera" se decide comparando contra el centroide, en vez de
-// depender del sentido de giro del polígono (más simple y sin riesgo de
-// invertirlo por error).
+// 1mm).
 //
-// MITER CON LÍMITE, IGUAL QUE stroke-linejoin DE UN TRAZO SVG/canvas: en la
-// mayoría de los vértices, mover por la bisectriz de las dos aristas (un
-// "miter") deja el borde desplazado a la distancia pedida de CADA arista,
-// no solo del vértice. Pero en una esquina muy aguda -- un piquete pegado
-// (una "aguja", ver geometriaSalientes.js) es exactamente eso, dos aristas
-// casi opuestas -- el miter se dispara: cuanto más cerrada la V, más lejos
-// tiene que irse el vértice para seguir a la misma distancia perpendicular
-// de las dos aristas a la vez. Sin límite, un piquete real dispara un pico
-// que se sale del molde entero (visto en la práctica, no solo en teoría).
-// Con el límite superado, se BISELA en vez de picar: dos puntos (uno por
-// cada arista, sin promediar) conectados por un segmento recto, como hace
-// cualquier motor de trazo real -- el contorno queda MÁS FIEL al molde
-// (nunca se aleja más de `distancia` de ninguna arista), a costa de un
-// bisel de un par de décimas de mm en vez de una punta perfecta ahí.
-const LIMITE_MITER = 4;
+// LA VERSIÓN ANTERIOR (miter por vértice + bisel) era, en el fondo, un
+// stroke-linejoin -- resuelve el ángulo de UN vértice a la vez, pero un
+// piquete pegado angosto es un problema de TOPOLOGÍA DEL CONTORNO ENTERO:
+// al empujar las dos paredes de una muesca angosta hacia afuera, esas dos
+// paredes se cruzan entre sí más allá del vértice -- nada de lo que se
+// haga vértice por vértice puede detectar ni deshacer un cruce que ocurre
+// ENTRE vértices no adyacentes. El usuario lo notó de inmediato contra
+// piezas reales: "se deforma mucho, no es fiel al molde".
+//
+// Eso es lo que Illustrator hace de verdad: construye una franja por cada
+// arista y calcula la UNIÓN BOOLEANA de todas -- ahí se resuelven los
+// cruces, con aritmética de intersección real. clipper-lib (puerto JS puro
+// del Clipper 6 de Angus Johnson, misma librería que exportarPdf.js) hace
+// exactamente eso -- confirmado leyendo su código fuente instalado antes
+// de confiar en él (ClipperOffset.Execute() llama a DoOffset() y DESPUÉS a
+// un Clipper.Execute(ctUnion, ...) real sobre el resultado).
+//
+// Probado a mano contra un piquete tipo aguja (ver geometriaSalientes.js):
+// con jtMiter, 0.1cm de desplazamiento da una caja EXACTAMENTE 0.1cm más
+// grande por lado (sin picos), y 3cm "traga" la muesca angosta en vez de
+// dispararla -- el mismo comportamiento de un offset de polígono real.
+const ESCALA_CLIPPER = 10000; // 1 unidad Clipper = 0.0001cm (1 micrón)
+
+function areaDePath(path) {
+  let area = 0;
+  for (let i = 0; i < path.length; i++) {
+    const a = path[i], b = path[(i + 1) % path.length];
+    area += a.X * b.Y - b.X * a.Y;
+  }
+  return Math.abs(area) / 2;
+}
 
 function offsetPoligono(vertices, distancia) {
-  const n = vertices.length;
-  if (n < 3 || !distancia) return vertices;
-  const cx = vertices.reduce((s, v) => s + v.x, 0) / n;
-  const cy = vertices.reduce((s, v) => s + v.y, 0) / n;
+  if (vertices.length < 3 || !distancia) return vertices;
+  const path = vertices.map((v) => ({ X: Math.round(v.x * ESCALA_CLIPPER), Y: Math.round(v.y * ESCALA_CLIPPER) }));
 
-  function normalDeArista(a, b) {
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const largo = Math.hypot(dx, dy) || 1;
-    const n1 = { x: -dy / largo, y: dx / largo };
-    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    const haciaAfuera = (mx - cx) * n1.x + (my - cy) * n1.y > 0;
-    return haciaAfuera ? n1 : { x: -n1.x, y: -n1.y };
-  }
+  const co = new ClipperLib.ClipperOffset();
+  co.AddPath(path, ClipperLib.JoinType.jtMiter, ClipperLib.EndType.etClosedPolygon);
+  const solucion = new ClipperLib.Paths();
+  co.Execute(solucion, distancia * ESCALA_CLIPPER);
+  if (!solucion.length) return vertices;
 
-  const normales = [];
-  for (let i = 0; i < n; i++) normales.push(normalDeArista(vertices[i], vertices[(i + 1) % n]));
-
-  const salida = [];
-  for (let i = 0; i < n; i++) {
-    const v = vertices[i];
-    const nPrev = normales[(i - 1 + n) % n];
-    const nNext = normales[i];
-    let bx = nPrev.x + nNext.x, by = nPrev.y + nNext.y;
-    const blen = Math.hypot(bx, by);
-    const cosTheta = blen < 1e-6 ? 0 : (bx / blen) * nNext.x + (by / blen) * nNext.y;
-    const factorMiter = blen < 1e-6 ? Infinity : 1 / Math.max(cosTheta, 1e-6);
-
-    if (factorMiter <= LIMITE_MITER) {
-      const ux = bx / blen, uy = by / blen;
-      salida.push({ x: v.x + ux * distancia * factorMiter, y: v.y + uy * distancia * factorMiter });
-    } else {
-      // Bisel: el punto desplazado de CADA arista por separado, sin picar.
-      salida.push({ x: v.x + nPrev.x * distancia, y: v.y + nPrev.y * distancia });
-      salida.push({ x: v.x + nNext.x * distancia, y: v.y + nNext.y * distancia });
+  let elegido = solucion[0];
+  if (solucion.length > 1) {
+    let mejorArea = areaDePath(elegido);
+    for (const candidato of solucion.slice(1)) {
+      const area = areaDePath(candidato);
+      if (area > mejorArea) { mejorArea = area; elegido = candidato; }
     }
   }
-  return salida;
+  return elegido.map((p) => ({ x: p.X / ESCALA_CLIPPER, y: p.Y / ESCALA_CLIPPER }));
 }
 
 // Los candidatos que de verdad se pueden reencontrar en otra talla: nunca
@@ -354,7 +351,7 @@ const AnclasCapa = memo(function AnclasCapa({ anclasResueltas, anclaSeleccionada
 export function LienzoAnclaje({
   geo, anclasResueltas, zonasResueltas, anclaSeleccionadaId, zonaSeleccionadaId,
   onSeleccionarAncla, onSeleccionarZona, onDeseleccionar,
-  leyenda, modo, onElegirCandidato, onArrastrarZona,
+  leyenda, modo, onElegirCandidato, onArrastrarZona, senalServidor,
   imagenUrl, borde,
 }) {
   const svgRef = useRef(null);
@@ -378,6 +375,11 @@ export function LienzoAnclaje({
   // posición/escala del SVG en pantalla no cambia mientras se arrastra, así
   // que la matriz se toma UNA vez al empezar y se reusa hasta soltar.
   const matrizArrastreRef = useRef(null);
+  // true entre mousedown y mouseup: mientras es true, `arrastre` se sigue
+  // actualizando con cada mousemove. Al soltar pasa a false, pero
+  // `arrastre` NO se limpia todavía -- ver el efecto de abajo sobre por
+  // qué (el motivo real de que soltar la zona no se sintiera instantáneo).
+  const arrastrandoRef = useRef(false);
 
   // Todos los hooks van ANTES de cualquier return condicionado a `geo` --
   // si `geo` pasa de null a un valor real (o al revés) sin desmontar este
@@ -431,12 +433,25 @@ export function LienzoAnclaje({
       setArrastre(nuevo);
     }
     function alSoltar() {
-      const final = arrastreRef.current;
-      arrastreRef.current = null;
+      // OJO -- acá estaba el motivo real de que "soltar" no se sintiera
+      // instantáneo: limpiar `arrastre` en este momento hace que la zona
+      // vuelva a pintarse con sus coordenadas VIEJAS (las de zonasResueltas,
+      // que todavía no sabe nada del nuevo offset) durante los ~100-500ms
+      // que tarda POST /anclaje/resolver en volver con la posición nueva --
+      // un salto "atrás, y después adelante" bien visible. La solución no es
+      // de renderizado: es no soltar el delta visual hasta que YA HAYA
+      // datos nuevos del servidor que lo reemplacen (ver el efecto de más
+      // abajo, que mira zonasResueltas).
+      window.removeEventListener('mousemove', alMover);
+      window.removeEventListener('mouseup', alSoltar);
+      arrastrandoRef.current = false;
       matrizArrastreRef.current = null;
-      setArrastre(null);
+      const final = arrastreRef.current;
       if (final && (Math.abs(final.delta.x) >= 0.05 || Math.abs(final.delta.y) >= 0.05)) {
         onArrastrarZona?.(final.id, final.delta.x, final.delta.y);
+      } else {
+        arrastreRef.current = null;
+        setArrastre(null);
       }
     }
     window.addEventListener('mousemove', alMover);
@@ -447,6 +462,38 @@ export function LienzoAnclaje({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arrastre?.id]);
+
+  // Suelta el "congelado" visual recién cuando llega una respuesta NUEVA
+  // de verdad del servidor (senalServidor = el objeto `resuelto` de
+  // Productos.jsx, que solo cambia de referencia dentro del .then() de
+  // POST /anclaje/resolver) -- así la transición es invisible (se sigue
+  // viendo la posición soltada todo el tiempo, sin saltos) en vez de
+  // depender de la latencia de red para sentirse bien.
+  //
+  // OJO: NO se puede usar `zonasResueltas` para esto (se probó y falló) --
+  // ese array se reconstruye en CADA render de Productos.jsx, incluido el
+  // render que dispara moverZona() ANTES de que la respuesta del servidor
+  // exista siquiera (mismo `resuelto` viejo, referencia de array nueva) --
+  // usarlo como señal soltaba el congelado de inmediato, reproduciendo
+  // exactamente el salto que se quería evitar. `senalServidor` (el propio
+  // `resuelto`) solo cambia cuando el `.then()` de la promesa realmente
+  // corre.
+  //
+  // `arrastrandoRef` evita soltarlo por error mientras ya hay un arrastre
+  // NUEVO en curso (la respuesta del anterior llegando tarde no debe pisar
+  // la vista previa del que se está arrastrando ahora). Caso borde no
+  // cubierto, a propósito por ser muy raro: dos arrastres seguidos donde la
+  // respuesta del SEGUNDO llega antes que la del primero (reordenamiento de
+  // red) -- soltaría el congelado del segundo un instante antes de tiempo.
+  const senalServidorAnteriorRef = useRef(senalServidor);
+  useEffect(() => {
+    const cambio = senalServidorAnteriorRef.current !== senalServidor;
+    senalServidorAnteriorRef.current = senalServidor;
+    if (cambio && !arrastrandoRef.current && arrastreRef.current) {
+      arrastreRef.current = null;
+      setArrastre(null);
+    }
+  }, [senalServidor]);
 
   // Estable entre renders (solo cambia si `modo` cambia): es un prop de
   // ZonaEnLienzo (memoizado), así que si esta función fuera una closure
@@ -461,6 +508,7 @@ export function LienzoAnclaje({
     matrizArrastreRef.current = ctm.inverse();
     const p = puntoEnCm(ev);
     if (!p) return;
+    arrastrandoRef.current = true;
     const inicial = { id, inicio: p, delta: { x: 0, y: 0 } };
     arrastreRef.current = inicial;
     setArrastre(inicial);

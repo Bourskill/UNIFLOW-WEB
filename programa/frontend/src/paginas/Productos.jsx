@@ -102,14 +102,25 @@ export function Productos({ recargarSenal, onCambio }) {
   const [nombreNuevoDiseno, setNombreNuevoDiseno] = useState('');
   const [imagenesNuevoDiseno, setImagenesNuevoDiseno] = useState({});
   const [errorDiseno, setErrorDiseno] = useState(null);
+  // Ver el comentario igual en Piezas.jsx -- acá el caso era el peor de
+  // los cinco: sin esto, la primera visita mostraba "Creá primero una
+  // prenda (Piezas → Prendas)" mientras el fetch seguía en vuelo, aunque
+  // el usuario YA tuviera prendas armadas -- le decía que le faltaba algo
+  // que en realidad ya tenía.
+  const [cargando, setCargando] = useState(true);
 
   async function recargar() {
-    const [gs, ds, ps, pzs] = await Promise.all([listarGrupos(), listarDisenos(), listarProductos(), listarPiezas()]);
-    setGrupos(gs);
-    setDisenos(ds);
-    setProductos(ps);
-    setPiezas(pzs);
-    if (gs.length > 0 && !grupoId) setGrupoId(gs[0].id);
+    setCargando(true);
+    try {
+      const [gs, ds, ps, pzs] = await Promise.all([listarGrupos(), listarDisenos(), listarProductos(), listarPiezas()]);
+      setGrupos(gs);
+      setDisenos(ds);
+      setProductos(ps);
+      setPiezas(pzs);
+      if (gs.length > 0 && !grupoId) setGrupoId(gs[0].id);
+    } finally {
+      setCargando(false);
+    }
   }
 
   useEffect(() => {
@@ -473,7 +484,9 @@ export function Productos({ recargarSenal, onCambio }) {
         </p>
       </div>
 
-      {grupos.length === 0 ? (
+      {cargando ? (
+        <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : grupos.length === 0 ? (
         <p className="text-sm text-muted-foreground">Creá primero una prenda (Piezas → Prendas).</p>
       ) : (
         <Tarjeta as="form" onSubmit={guardar} className="flex flex-col gap-4">
@@ -635,6 +648,7 @@ export function Productos({ recargarSenal, onCambio }) {
                   modo={modo}
                   onElegirCandidato={elegirCandidato}
                   onArrastrarZona={moverZona}
+                  senalServidor={resuelto}
                   imagenUrl={disenoSeleccionado?.imagenesPorPieza?.[piezaActiva]}
                   borde={bordeContraste}
                 />

@@ -7,16 +7,18 @@
 // personalización, ej. corte láser).
 
 import { PDFDocument, rgb, degrees, StandardFonts } from 'pdf-lib';
+import ClipperLib from 'clipper-lib';
 
 const CM_A_PUNTOS = 28.3465;
 
-// Mismo RATIO_BRAZO que host.jsx (colocarLogoEnZonaCruz, programa/panel/
-// jsx/host.jsx) -- una zona de logo "en cruz" no es un cuadrado único: es
-// una cruz de dos brazos (uno para logos anchos, otro para altos) que se
-// cruzan en el cuadrado central de lado "lado". 4cm×2.5cm = 1.6 es la
-// proporción real que ya traía el usuario de otro proyecto, no un número
-// inventado -- ver el comentario grande junto a esa función.
-const RATIO_BRAZO = 4 / 2.5;
+// A propósito YA NO es el mismo valor que host.jsx (colocarLogoEnZonaCruz,
+// programa/panel/jsx/host.jsx sigue en 4/2.5) -- una zona de logo "en cruz"
+// no es un cuadrado único: es una cruz de dos brazos (uno para logos
+// anchos, otro para altos) que se cruzan en el cuadrado central de lado
+// "lado". Reducido a pedido a 4cm×2cm = 2 (el cuadrado central baja de
+// 2.5cm a 2cm de lado, el brazo se mantiene en 4cm) -- ver el comentario
+// grande junto a esa función.
+const RATIO_BRAZO = 4 / 2;
 
 // pdf-lib rota una imagen/texto alrededor de su punto (x,y) -- el que se le
 // pasa a drawImage/drawText es la esquina, no el centro. Para que un logo
@@ -34,53 +36,74 @@ function anclaParaRotarDesdeCentro(cxPt, cyPt, wPt, hPt, grados) {
 // Empuja un polígono cerrado hacia AFUERA una distancia fija -- el
 // "desplazamiento" real del contorno para láser (compensa el grosor del
 // corte; ver claude/CLAUDE.md sobre PROCESAR MOLDES.jsx y su offset de
-// 1mm). Espejo exacto de offsetPoligono() en
-// frontend/src/componentes/LienzoAnclaje.jsx (mismo criterio: bisectriz de
-// las dos aristas de cada vértice, "afuera" decidido contra el centroide,
-// MITER CON LÍMITE -- ver el comentario grande de esa copia sobre por qué
-// un miter sin límite disparaba picos reales en los piquetes pegados,
-// vistos en la práctica, no solo en teoría) -- no se comparte el código
-// entre frontend y backend (runtimes distintos), pero la fórmula tiene que
-// ser idéntica para que el editor muestre lo mismo que se corta de verdad.
-const LIMITE_MITER = 4;
+// 1mm).
+//
+// LA VERSIÓN ANTERIOR (miter por vértice + bisel) era, en el fondo, un
+// stroke-linejoin -- resuelve el ángulo de UN vértice a la vez, pero un
+// piquete pegado angosto es un problema de TOPOLOGÍA DEL CONTORNO ENTERO:
+// al empujar las dos paredes de una muesca angosta hacia afuera, esas dos
+// paredes se cruzan entre sí más allá del vértice (un "bowtie" local) --
+// nada de lo que se haga vértice por vértice puede detectar ni deshacer un
+// cruce que ocurre ENTRE vértices no adyacentes. El usuario lo notó de
+// inmediato contra piezas reales: "se deforma mucho, no es fiel al molde".
+//
+// Eso es exactamente lo que hace Illustrator (y cualquier motor de corte
+// real): construye, por cada arista, una franja paralela a distancia
+// `delta`, y calcula la UNIÓN BOOLEANA de todas las franjas -- ahí es
+// donde los cruces se resuelven de verdad, con aritmética de intersección
+// real, no una fórmula por vértice. clipper-lib (puerto JS puro del
+// Clipper 6 de Angus Johnson) hace exactamente eso: ClipperOffset.Execute()
+// llama a DoOffset() y DESPUÉS a un Clipper.Execute(ctUnion, ...) real
+// sobre el resultado (ver node_modules/clipper-lib/clipper.js, función
+// ClipperOffset.prototype.Execute) -- confirmado leyendo el código fuente
+// instalado, no solo la documentación, antes de confiar en él.
+//
+// Probado a mano contra el piquete tipo aguja de nuestras propias pruebas
+// (prueba-offset-contorno.js): con jtMiter, un desplazamiento de 0.1cm da
+// una caja EXACTAMENTE 0.1cm más grande por lado que el original (sin
+// picos, sin deformación), y uno de 3cm directamente "traga" la muesca
+// angosta (correcto: una muesca de 4mm no puede sobrevivir un
+// desplazamiento de 3cm hacia afuera de sus dos paredes) -- exactamente el
+// comportamiento de un offset de polígono real, no una aproximación.
+//
+// Clipper trabaja con COORDENADAS ENTERAS escaladas (no admite floats) --
+// 10000 = 1 unidad Clipper por cada 0.0001cm (1 micrón), de sobra para
+// piezas de varios metros sin acercarse al límite seguro de enteros de JS.
+const ESCALA_CLIPPER = 10000;
+
+function areaDePath(path) {
+  let area = 0;
+  for (let i = 0; i < path.length; i++) {
+    const a = path[i], b = path[(i + 1) % path.length];
+    area += a.X * b.Y - b.X * a.Y;
+  }
+  return Math.abs(area) / 2;
+}
 
 export function offsetPoligono(vertices, distancia) {
-  const n = vertices.length;
-  if (n < 3 || !distancia) return vertices;
-  const cx = vertices.reduce((s, v) => s + v.x, 0) / n;
-  const cy = vertices.reduce((s, v) => s + v.y, 0) / n;
+  if (vertices.length < 3 || !distancia) return vertices;
+  const path = vertices.map((v) => ({ X: Math.round(v.x * ESCALA_CLIPPER), Y: Math.round(v.y * ESCALA_CLIPPER) }));
 
-  function normalDeArista(a, b) {
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const largo = Math.hypot(dx, dy) || 1;
-    const n1 = { x: -dy / largo, y: dx / largo };
-    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    const haciaAfuera = (mx - cx) * n1.x + (my - cy) * n1.y > 0;
-    return haciaAfuera ? n1 : { x: -n1.x, y: -n1.y };
-  }
+  const co = new ClipperLib.ClipperOffset();
+  co.AddPath(path, ClipperLib.JoinType.jtMiter, ClipperLib.EndType.etClosedPolygon);
+  const solucion = new ClipperLib.Paths();
+  co.Execute(solucion, distancia * ESCALA_CLIPPER);
+  if (!solucion.length) return vertices; // no debería pasar empujando hacia afuera, pero nunca devolver nada roto
 
-  const normales = [];
-  for (let i = 0; i < n; i++) normales.push(normalDeArista(vertices[i], vertices[(i + 1) % n]));
-
-  const salida = [];
-  for (let i = 0; i < n; i++) {
-    const v = vertices[i];
-    const nPrev = normales[(i - 1 + n) % n];
-    const nNext = normales[i];
-    const bx = nPrev.x + nNext.x, by = nPrev.y + nNext.y;
-    const blen = Math.hypot(bx, by);
-    const cosTheta = blen < 1e-6 ? 0 : (bx / blen) * nNext.x + (by / blen) * nNext.y;
-    const factorMiter = blen < 1e-6 ? Infinity : 1 / Math.max(cosTheta, 1e-6);
-
-    if (factorMiter <= LIMITE_MITER) {
-      const ux = bx / blen, uy = by / blen;
-      salida.push({ x: v.x + ux * distancia * factorMiter, y: v.y + uy * distancia * factorMiter });
-    } else {
-      salida.push({ x: v.x + nPrev.x * distancia, y: v.y + nPrev.y * distancia });
-      salida.push({ x: v.x + nNext.x * distancia, y: v.y + nNext.y * distancia });
+  // Un desplazamiento normal da UN solo contorno; si diera más de uno (caso
+  // extremo, no visto en la práctica), nos quedamos con el más grande --
+  // mismo criterio que ya usa el proyecto para elegir "el contorno real"
+  // entre varios candidatos (geometriaComun.js·contornoYPiquetesDeTrazos,
+  // por ÁREA).
+  let elegido = solucion[0];
+  if (solucion.length > 1) {
+    let mejorArea = areaDePath(elegido);
+    for (const candidato of solucion.slice(1)) {
+      const area = areaDePath(candidato);
+      if (area > mejorArea) { mejorArea = area; elegido = candidato; }
     }
   }
-  return salida;
+  return elegido.map((p) => ({ x: p.X / ESCALA_CLIPPER, y: p.Y / ESCALA_CLIPPER }));
 }
 
 export async function generarPdfNesting(resultadoNesting) {
