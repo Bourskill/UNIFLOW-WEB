@@ -31,6 +31,45 @@ function anclaParaRotarDesdeCentro(cxPt, cyPt, wPt, hPt, grados) {
   return { x: cxPt - rdx, y: cyPt - rdy };
 }
 
+// Empuja un polígono cerrado hacia AFUERA una distancia fija -- el
+// "desplazamiento" real del contorno para láser (compensa el grosor del
+// corte; ver claude/CLAUDE.md sobre PROCESAR MOLDES.jsx y su offset de
+// 1mm). Espejo exacto de offsetPoligono() en
+// frontend/src/componentes/LienzoAnclaje.jsx (mismo criterio: bisectriz de
+// las dos aristas de cada vértice, "afuera" decidido contra el centroide,
+// tope de miter en esquinas muy agudas) -- no se comparte el código entre
+// frontend y backend (runtimes distintos), pero la fórmula tiene que ser
+// idéntica para que el editor muestre lo mismo que se corta de verdad.
+export function offsetPoligono(vertices, distancia) {
+  const n = vertices.length;
+  if (n < 3 || !distancia) return vertices;
+  const cx = vertices.reduce((s, v) => s + v.x, 0) / n;
+  const cy = vertices.reduce((s, v) => s + v.y, 0) / n;
+
+  function normalDeArista(a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const largo = Math.hypot(dx, dy) || 1;
+    const n1 = { x: -dy / largo, y: dx / largo };
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const haciaAfuera = (mx - cx) * n1.x + (my - cy) * n1.y > 0;
+    return haciaAfuera ? n1 : { x: -n1.x, y: -n1.y };
+  }
+
+  const normales = [];
+  for (let i = 0; i < n; i++) normales.push(normalDeArista(vertices[i], vertices[(i + 1) % n]));
+
+  return vertices.map((v, i) => {
+    const nPrev = normales[(i - 1 + n) % n];
+    const nNext = normales[i];
+    let bx = nPrev.x + nNext.x, by = nPrev.y + nNext.y;
+    const blen = Math.hypot(bx, by);
+    if (blen < 1e-6) { bx = nNext.x; by = nNext.y; } else { bx /= blen; by /= blen; }
+    const cosTheta = bx * nNext.x + by * nNext.y;
+    const factor = distancia / Math.max(cosTheta, 0.2);
+    return { x: v.x + bx * factor, y: v.y + by * factor };
+  });
+}
+
 export async function generarPdfNesting(resultadoNesting) {
   const pdf = await PDFDocument.create();
   const fuente = await pdf.embedFont(StandardFonts.Helvetica);
@@ -52,14 +91,34 @@ export async function generarPdfNesting(resultadoNesting) {
       pagina.drawImage(imagen, { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt });
     }
 
-    pagina.drawRectangle({
-      x: xPt,
-      y: yPt,
-      width: anchoRectPt,
-      height: altoRectPt,
-      borderColor: rgb(0, 0, 0),
-      borderWidth: 0.75,
-    });
+    // Con contorno para láser configurado, ESE es el corte real -- dibujar
+    // además el rectángulo del bounding box pondría una segunda línea de
+    // corte falsa en el archivo. Sin él, se mantiene el rectángulo de
+    // siempre (referencia visual del nesting, nunca fue un corte real).
+    if (pieza.bordeContraste?.activo && pieza.contornoCm?.length >= 3) {
+      const desplazado = offsetPoligono(pieza.contornoCm, pieza.bordeContraste.desplazamientoCm || 0);
+      const color = hexARgb(pieza.bordeContraste.colorHex);
+      const grosorPt = Math.max(pieza.bordeContraste.grosorCm || 0.03, 0.01) * CM_A_PUNTOS;
+      const n = desplazado.length;
+      for (let i = 0; i < n; i++) {
+        const a = desplazado[i], b = desplazado[(i + 1) % n];
+        pagina.drawLine({
+          start: { x: xPt + a.x * CM_A_PUNTOS, y: yPt + altoRectPt - a.y * CM_A_PUNTOS },
+          end: { x: xPt + b.x * CM_A_PUNTOS, y: yPt + altoRectPt - b.y * CM_A_PUNTOS },
+          thickness: grosorPt,
+          color: rgb(color.r, color.g, color.b),
+        });
+      }
+    } else {
+      pagina.drawRectangle({
+        x: xPt,
+        y: yPt,
+        width: anchoRectPt,
+        height: altoRectPt,
+        borderColor: rgb(0, 0, 0),
+        borderWidth: 0.75,
+      });
+    }
 
     for (const texto of pieza.textos || []) {
       const tamanoPt = Math.max(texto.altoCm, 0.3) * CM_A_PUNTOS;

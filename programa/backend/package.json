@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "prueba": "node pruebas/prueba-anclaje.js && node pruebas/prueba-piquetes.js && node pruebas/prueba-salientes.js"
+    "prueba": "node pruebas/prueba-anclaje.js && node pruebas/prueba-piquetes.js && node pruebas/prueba-salientes.js && node pruebas/prueba-offset-contorno.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

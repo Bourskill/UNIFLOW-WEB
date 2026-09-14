@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 // Puerto FIEL del lienzo de Anclajes del panel de Illustrator
 // (programa/panel/js/main.js: dibujarLienzo/candidatosDe/sinMontonera) --
@@ -40,6 +40,47 @@ const PARTE_DESDE_ORIGEN = {
 const RATIO_BRAZO = 4 / 2.5;
 
 function r1(n) { return Math.round(n * 100) / 100; }
+
+// Empuja un polígono cerrado hacia AFUERA una distancia fija -- el
+// "desplazamiento" real del contorno para láser (compensa el grosor del
+// corte; ver claude/CLAUDE.md sobre PROCESAR MOLDES.jsx y su offset de
+// 1mm). Por cada vértice, mueve a lo largo de la bisectriz de sus dos
+// aristas (mismo criterio que un "miter join" de trazo): así el borde
+// desplazado queda a la distancia pedida de CADA arista, no solo de los
+// vértices. "Hacia afuera" se decide comparando contra el centroide, en
+// vez de depender del sentido de giro del polígono (más simple y sin
+// riesgo de invertirlo por error).
+function offsetPoligono(vertices, distancia) {
+  const n = vertices.length;
+  if (n < 3 || !distancia) return vertices;
+  const cx = vertices.reduce((s, v) => s + v.x, 0) / n;
+  const cy = vertices.reduce((s, v) => s + v.y, 0) / n;
+
+  function normalDeArista(a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const largo = Math.hypot(dx, dy) || 1;
+    const n1 = { x: -dy / largo, y: dx / largo };
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const haciaAfuera = (mx - cx) * n1.x + (my - cy) * n1.y > 0;
+    return haciaAfuera ? n1 : { x: -n1.x, y: -n1.y };
+  }
+
+  const normales = [];
+  for (let i = 0; i < n; i++) normales.push(normalDeArista(vertices[i], vertices[(i + 1) % n]));
+
+  return vertices.map((v, i) => {
+    const nPrev = normales[(i - 1 + n) % n];
+    const nNext = normales[i];
+    let bx = nPrev.x + nNext.x, by = nPrev.y + nNext.y;
+    const blen = Math.hypot(bx, by);
+    if (blen < 1e-6) { bx = nNext.x; by = nNext.y; } else { bx /= blen; by /= blen; }
+    const cosTheta = bx * nNext.x + by * nNext.y;
+    // Tope en esquinas muy agudas (un piquete pegado, por ejemplo): sin
+    // esto el "miter" se dispara hacia el infinito en una V muy cerrada.
+    const factor = distancia / Math.max(cosTheta, 0.2);
+    return { x: v.x + bx * factor, y: v.y + by * factor };
+  });
+}
 
 // Los candidatos que de verdad se pueden reencontrar en otra talla: nunca
 // se inventa uno. El orden en que se agregan es la prioridad al deduplicar
@@ -152,21 +193,30 @@ export function LienzoAnclaje({
   // llamándolo dos veces en desarrollo, y el offset terminaba duplicado.
   // El ref evita necesitar el actualizador para leer el valor vigente.
   const arrastreRef = useRef(null);
+  // getScreenCTM() fuerza al navegador a resolver el layout vigente --
+  // llamarlo en cada mousemove de un arrastre (junto con el setState de
+  // cada frame) es el otro motivo real de que se sintiera poco fluido. La
+  // posición/escala del SVG en pantalla no cambia mientras se arrastra, así
+  // que la matriz se toma UNA vez al empezar y se reusa hasta soltar.
+  const matrizArrastreRef = useRef(null);
 
-  if (!geo) {
-    return (
-      <div className="flex h-52 items-center justify-center rounded-lg border border-dashed border-border text-sm text-faint-foreground">
-        Elegí una pieza para verla.
-      </div>
-    );
-  }
-
-  const W = geo.pieza.ancho_cm, H = geo.pieza.alto_cm;
-  const m = Math.max(W, H) * 0.06;
-  const cands = candidatosDe(geo, zonasResueltas, zonaSeleccionadaId, leyenda);
-  const R = Math.max(W, H) / 90;
-  const F = Math.max(W, H) / 32;
-  const puntos = geo.vertices.map((v) => v.x + ',' + v.y).join(' ');
+  // Todos los hooks van ANTES de cualquier return condicionado a `geo` --
+  // si `geo` pasa de null a un valor real (o al revés) sin desmontar este
+  // componente, un hook después de un return temprano rompería el orden de
+  // hooks entre renders (regla de React, no un detalle de estilo).
+  const cands = useMemo(
+    () => (geo ? candidatosDe(geo, zonasResueltas, zonaSeleccionadaId, leyenda) : []),
+    [geo, zonasResueltas, zonaSeleccionadaId, leyenda]
+  );
+  const puntos = geo ? geo.vertices.map((v) => v.x + ',' + v.y).join(' ') : '';
+  // Memoizado por el mismo motivo que cands -- no recalcular el offset
+  // (aunque sea O(n), no O(n²)) en cada mousemove de un arrastre que no
+  // tiene nada que ver con este borde.
+  const puntosBorde = useMemo(() => (
+    geo && borde?.activo && borde.desplazamientoCm
+      ? offsetPoligono(geo.vertices, borde.desplazamientoCm).map((v) => v.x + ',' + v.y).join(' ')
+      : puntos
+  ), [geo, borde?.activo, borde?.desplazamientoCm, puntos]);
 
   function puntoEnCm(ev) {
     const svg = svgRef.current;
@@ -180,10 +230,22 @@ export function LienzoAnclaje({
     } catch { return null; }
   }
 
+  function puntoConMatrizCacheada(ev) {
+    const svg = svgRef.current;
+    const matriz = matrizArrastreRef.current;
+    if (!svg || !matriz) return null;
+    try {
+      const pt = svg.createSVGPoint();
+      pt.x = ev.clientX; pt.y = ev.clientY;
+      const r = pt.matrixTransform(matriz);
+      return { x: r1(r.x), y: r1(r.y) };
+    } catch { return null; }
+  }
+
   useEffect(() => {
     if (!arrastre) return;
     function alMover(ev) {
-      const p = puntoEnCm(ev);
+      const p = puntoConMatrizCacheada(ev);
       const actual = arrastreRef.current;
       if (!p || !actual) return;
       const nuevo = { ...actual, delta: { x: r1(p.x - actual.inicio.x), y: r1(p.y - actual.inicio.y) } };
@@ -193,6 +255,7 @@ export function LienzoAnclaje({
     function alSoltar() {
       const final = arrastreRef.current;
       arrastreRef.current = null;
+      matrizArrastreRef.current = null;
       setArrastre(null);
       if (final && (Math.abs(final.delta.x) >= 0.05 || Math.abs(final.delta.y) >= 0.05)) {
         onArrastrarZona?.(final.id, final.delta.x, final.delta.y);
@@ -209,6 +272,10 @@ export function LienzoAnclaje({
 
   function iniciarArrastreZona(id, ev) {
     if (modo) return; // en modo crear/recolocar/cruzar, el clic es para elegir un candidato
+    const svg = svgRef.current;
+    const ctm = svg?.getScreenCTM();
+    if (!ctm) return;
+    matrizArrastreRef.current = ctm.inverse();
     const p = puntoEnCm(ev);
     if (!p) return;
     const inicial = { id, inicio: p, delta: { x: 0, y: 0 } };
@@ -227,6 +294,19 @@ export function LienzoAnclaje({
     }
     if (mejor) onElegirCandidato(mejor, r1(mejorD));
   }
+
+  if (!geo) {
+    return (
+      <div className="flex h-52 items-center justify-center rounded-lg border border-dashed border-border text-sm text-faint-foreground">
+        Elegí una pieza para verla.
+      </div>
+    );
+  }
+
+  const W = geo.pieza.ancho_cm, H = geo.pieza.alto_cm;
+  const m = Math.max(W, H) * 0.06;
+  const R = Math.max(W, H) / 90;
+  const F = Math.max(W, H) / 32;
 
   return (
     <div className={'overflow-hidden rounded-lg border bg-surface-muted ' + (modo ? 'border-primary cursor-crosshair' : 'border-border')}>
@@ -247,7 +327,7 @@ export function LienzoAnclaje({
             <clipPath id={idRecorte}><polygon points={puntos} /></clipPath>
             <image href={imagenUrl} x={0} y={0} width={W} height={H} clipPath={'url(#' + idRecorte + ')'} preserveAspectRatio="xMidYMid slice" />
             <polygon
-              points={puntos} fill="none"
+              points={borde?.activo ? puntosBorde : puntos} fill="none"
               stroke={borde?.activo ? borde.colorHex : '#4c8dff'}
               strokeWidth={borde?.activo ? Math.max((borde.grosorCm || 0.03), R * 0.25) : R * 0.3}
               opacity={borde?.activo ? 1 : 0.5}

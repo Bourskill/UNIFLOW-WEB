@@ -18,7 +18,7 @@ import { LienzoAnclaje } from '../componentes/LienzoAnclaje.jsx';
 import { SlotImagenDiseno } from '../componentes/SlotImagenDiseno.jsx';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
 
-const BORDE_POR_DEFECTO = { activo: false, colorHex: '#ffffff', grosorCm: 0.03 };
+const BORDE_POR_DEFECTO = { activo: false, colorHex: '#ffffff', grosorCm: 0.03, desplazamientoCm: 0 };
 const LEYENDA_POR_DEFECTO = { piquetes: true, extremos: true, bordes: true, vertices: false };
 const ORIGENES_ZONA = [
   ['centro', 'el centro de la zona'], ['supIzq', 'su esquina de arriba a la izquierda'],
@@ -529,11 +529,14 @@ export function Productos({ recargarSenal, onCambio }) {
               <label className="flex items-center gap-2 text-sm text-foreground">
                 <input type="checkbox" checked={bordeContraste.activo}
                   onChange={(e) => setBordeContraste((prev) => ({ ...prev, activo: e.target.checked }))} />
-                Borde de contraste sobre el diseño
+                Contorno para láser (borde de contraste sobre el diseño)
               </label>
               <Ayuda>
-                Dibuja el contorno del molde encima del diseño recortado, en un color que
-                contraste, para no perder de vista los piquetes. Grosor real de producción.
+                El mismo contorno sirve para dos cosas: se ve en el editor y en el PDF encima del
+                diseño recortado (para no perder de vista los piquetes) y es el que se corta de
+                verdad. Desplazamiento: cuánto se empuja hacia AFUERA del molde real antes de
+                cortar (compensa el grosor del corte del láser -- 0.1cm es un valor típico). Grosor:
+                el ancho de la línea, real de producción.
               </Ayuda>
             </div>
             {bordeContraste.activo && (
@@ -541,6 +544,10 @@ export function Productos({ recargarSenal, onCambio }) {
                 <Campo etiqueta="Color">
                   <input type="color" className="h-9 w-9 rounded border border-border" value={bordeContraste.colorHex}
                     onChange={(e) => setBordeContraste((prev) => ({ ...prev, colorHex: e.target.value }))} />
+                </Campo>
+                <Campo etiqueta="Desplazamiento (cm)">
+                  <Input className="w-20" type="number" step="0.01" min="0" value={bordeContraste.desplazamientoCm ?? 0}
+                    onChange={(e) => setBordeContraste((prev) => ({ ...prev, desplazamientoCm: Number(e.target.value) }))} />
                 </Campo>
                 <Campo etiqueta="Grosor (cm)">
                   <Input className="w-20" type="number" step="0.01" min="0.01" value={bordeContraste.grosorCm}

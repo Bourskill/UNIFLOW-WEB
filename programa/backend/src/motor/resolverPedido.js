@@ -125,6 +125,13 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         imagenDataUrl: diseno?.imagenesPorPieza?.[pieza.nombre] || null,
         textos,
         imagenes,
+        // El contorno REAL de la pieza (no el rectángulo del bounding box)
+        // -- mismas coordenadas cm que ya usan zonas/textos (geometriaDelGrupo
+        // ya lo trae). Junto con bordeContraste, exportarPdf.js lo dibuja
+        // como el contorno de corte para láser, desplazado hacia afuera lo
+        // que pida el producto (compensación real de grosor de corte).
+        contornoCm: geometria[pieza.nombre]?.vertices || null,
+        bordeContraste: producto.bordeContraste || null,
       });
     }
   }
