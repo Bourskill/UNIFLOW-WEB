@@ -16,6 +16,21 @@ import { resolver as resolverAnclaje } from './anclaje/resolver.js';
 import { geometriaDelGrupo } from './geometriaAnclaje.js';
 import { resolverPiezasDeGrupo } from '../dominio/resolverGrupo.js';
 
+// Piezas "talla única" (no escalan -- la misma moldería sirve para
+// cualquier talla del pedido, ej. una vela/refuerzo que es igual en S que
+// en XL): tienen un solo valor cargado en dimensionesPorTalla, bajo
+// cualquier nombre (ver motor/geometriaComun.js -- la talla es el nombre de
+// capa tal cual, nunca se valida contra una lista). Si la talla que pide el
+// pedido no está entre las suyas pero es la ÚNICA que tiene, se usa esa
+// igual -- nunca se INVENTA una talla que no está cargada: si la pieza
+// tiene VARIAS tallas y ninguna coincide con la pedida, eso sigue siendo un
+// error real (falta cargar esa talla), no un caso de "talla única".
+function tallaRealDePieza(pieza, tallaPedida) {
+  if (pieza.dimensionesPorTalla?.[tallaPedida]) return tallaPedida;
+  const tallasDisponibles = Object.keys(pieza.dimensionesPorTalla || {});
+  return tallasDisponibles.length === 1 ? tallasDisponibles[0] : tallaPedida;
+}
+
 export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, disenos }) {
   const piezasParaAnidar = [];
   let contador = 0;
@@ -43,7 +58,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
     // mientras se arma el anclaje, producción siempre resuelve la prenda
     // completa a UNA sola talla real.
     const tallaPorRol = {};
-    for (const pieza of piezasDelGrupo) tallaPorRol[pieza.nombre] = linea.talla;
+    for (const pieza of piezasDelGrupo) tallaPorRol[pieza.nombre] = tallaRealDePieza(pieza, linea.talla);
     const geometria = geometriaDelGrupo(piezasDelGrupo, tallaPorRol);
 
     const anclajeVacio = { anclas: [], zonas: [] };
@@ -67,7 +82,11 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
     for (const pieza of piezasDelGrupo) {
       if (excluidas.has(pieza.nombre)) continue;
 
-      const dimension = pieza.dimensionesPorTalla?.[linea.talla];
+      // tallaPorRol[pieza.nombre] ya resolvió el caso "talla única" arriba
+      // -- para esa pieza puntual puede ser distinta de linea.talla a
+      // propósito, nunca al revés (nunca se inventa una talla que la pieza
+      // no tiene cargada).
+      const dimension = pieza.dimensionesPorTalla?.[tallaPorRol[pieza.nombre]];
       if (!dimension) {
         throw new Error(
           'La pieza "' + pieza.nombre + '" de "' + grupo.nombre +
