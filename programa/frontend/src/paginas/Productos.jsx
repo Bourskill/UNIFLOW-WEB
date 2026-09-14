@@ -620,48 +620,6 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
             )}
           </div>
 
-          <div className="max-w-3xl">
-            <div className={
-              'flex flex-col gap-3 rounded-xl border p-3.5 transition-colors ' +
-              (bordeContraste.activo ? 'border-primary/30 bg-primary-soft/40' : 'border-border bg-surface-muted')
-            }>
-              <div className="flex items-center gap-2.5">
-                <button
-                  type="button" role="switch" aria-checked={bordeContraste.activo}
-                  onClick={() => setBordeContraste((prev) => ({ ...prev, activo: !prev.activo }))}
-                  className={'relative h-5 w-9 flex-none rounded-full transition-colors ' + (bordeContraste.activo ? 'bg-primary' : 'bg-surface border border-border')}
-                >
-                  <span className={'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ' + (bordeContraste.activo ? 'translate-x-[18px]' : 'translate-x-0.5')} />
-                </button>
-                <span className="text-sm font-medium text-foreground">Contorno para láser</span>
-                <Ayuda>
-                  El mismo contorno sirve para dos cosas: se ve en el editor y en el PDF encima del
-                  diseño recortado (para no perder de vista los piquetes) y es el que se corta de
-                  verdad. Desplazamiento: cuánto se empuja hacia AFUERA del molde real antes de
-                  cortar (compensa el grosor del corte del láser -- 0.1cm es un valor típico). Grosor:
-                  el ancho de la línea, real de producción.
-                </Ayuda>
-              </div>
-              {bordeContraste.activo && (
-                <div className="flex flex-wrap items-center gap-5 border-t border-border/60 pt-3">
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <input type="color" className="h-9 w-9 cursor-pointer rounded-lg border border-border bg-transparent p-0.5" value={bordeContraste.colorHex}
-                      onChange={(e) => setBordeContraste((prev) => ({ ...prev, colorHex: e.target.value }))} />
-                    <span className="text-xs text-muted-foreground">Color</span>
-                  </label>
-                  <Campo etiqueta="Desplazamiento (cm)" className="w-32">
-                    <InputNumero step={0.1} min={0} value={bordeContraste.desplazamientoCm ?? 0}
-                      onChange={(n) => setBordeContraste((prev) => ({ ...prev, desplazamientoCm: n }))} />
-                  </Campo>
-                  <Campo etiqueta="Grosor (cm)" className="w-28">
-                    <InputNumero step={0.1} min={0.01} value={bordeContraste.grosorCm}
-                      onChange={(n) => setBordeContraste((prev) => ({ ...prev, grosorCm: n }))} />
-                  </Campo>
-                </div>
-              )}
-            </div>
-          </div>
-
           {/* ============ 1. PIEZA ============ */}
           <div>
             <div className="mb-2 flex items-center gap-2">
@@ -750,6 +708,57 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
               })()}
             </div>
           )}
+
+          {/* Contorno para láser -- pedido explícito varias veces: DEBAJO del
+              lienzo donde se editan las zonas, no arriba (antes vivía junto a
+              "Diseño", antes de siquiera elegir una pieza). */}
+          <div className="max-w-3xl">
+            <div className={
+              'flex flex-col gap-3 rounded-xl border p-3.5 transition-colors ' +
+              (bordeContraste.activo ? 'border-primary/30 bg-primary-soft/40' : 'border-border bg-surface-muted')
+            }>
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button" role="switch" aria-checked={bordeContraste.activo}
+                  onClick={() => setBordeContraste((prev) => ({ ...prev, activo: !prev.activo }))}
+                  className={'relative h-5 w-9 flex-none rounded-full transition-colors ' + (bordeContraste.activo ? 'bg-primary' : 'bg-surface border border-border')}
+                >
+                  {/* La perilla necesita `left` explícito -- sin él, el
+                      "static position" de un absolute sin offset horizontal
+                      cae bajo el text-align:center que el navegador le pone
+                      a <button> por defecto, y la perilla arrancaba pegada a
+                      la derecha aunque el estado fuera "apagado" (el bug
+                      real: "ese botón está malo"). */}
+                  <span className={'absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ' + (bordeContraste.activo ? 'translate-x-4' : 'translate-x-0')} />
+                </button>
+                <span className="text-sm font-medium text-foreground">Contorno para láser</span>
+                <Ayuda>
+                  El mismo contorno sirve para dos cosas: se ve en el editor y en el PDF encima del
+                  diseño recortado (para no perder de vista los piquetes) y es el que se corta de
+                  verdad. Desplazamiento: cuánto se empuja hacia AFUERA del molde real antes de
+                  cortar (compensa el grosor del corte del láser -- 0.1cm es un valor típico). Grosor:
+                  el ancho de la línea, real de producción.
+                </Ayuda>
+              </div>
+              {bordeContraste.activo && (
+                <div className="flex flex-wrap items-center gap-5 border-t border-border/60 pt-3">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input type="color" className="h-9 w-9 cursor-pointer rounded-lg border border-border bg-transparent p-0.5" value={bordeContraste.colorHex}
+                      onChange={(e) => setBordeContraste((prev) => ({ ...prev, colorHex: e.target.value }))} />
+                    <span className="text-xs text-muted-foreground">Color</span>
+                  </label>
+                  <Campo etiqueta="Desplazamiento (cm)" className="w-32">
+                    <InputNumero step={0.1} min={0} value={bordeContraste.desplazamientoCm ?? 0}
+                      onChange={(n) => setBordeContraste((prev) => ({ ...prev, desplazamientoCm: n }))} />
+                  </Campo>
+                  <Campo etiqueta="Grosor (cm)" className="w-28">
+                    <InputNumero step={0.1} min={0.01} value={bordeContraste.grosorCm}
+                      onChange={(n) => setBordeContraste((prev) => ({ ...prev, grosorCm: n }))} />
+                  </Campo>
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="flex items-center gap-2">
             <Boton variante="primario" type="submit">Guardar producto</Boton>
