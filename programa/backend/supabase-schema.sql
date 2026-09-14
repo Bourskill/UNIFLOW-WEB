@@ -48,7 +48,16 @@ create table if not exists generaciones (
   creado_en timestamptz not null default now()
 );
 
+-- Plantillas: configuración de zonas de un producto SIN contenido real
+-- (nombre/número/logo), para no rearmar el anclaje cada vez en prendas que
+-- se repiten mucho (ver dominio/modelos.js·Plantilla).
+create table if not exists plantillas (
+  id text primary key,
+  datos jsonb not null,
+  creado_en timestamptz not null default now()
+);
+
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on
-  piezas, grupos, disenos, productos, pedidos, generaciones
+  piezas, grupos, disenos, productos, pedidos, generaciones, plantillas
   to anon, authenticated;

@@ -81,6 +81,33 @@ function crudSimple(nombreColeccion) {
 crudSimple('disenos');
 crudSimple('productos');
 crudSimple('pedidos');
+crudSimple('plantillas');
+
+// Empuja una nueva VersionPieza (ver dominio/modelos.js) y la vuelve la
+// actual -- se usa en los tres caminos que de verdad cambian geometría
+// (reemplazar una talla, reprocesar, reemplazar el archivo entero). Nunca
+// pisa `geometriaPorTalla` en el lugar: la vieja queda en `versiones` para
+// que un Producto ya guardado pueda seguir fijado a ella (Producto.
+// versionesPiezas) aunque Biblioteca ya haya avanzado a la nueva.
+function agregarVersion(pieza, { geometriaPorTalla, dimensionesPorTalla, archivoOriginal, formatoOriginal, motivo }) {
+  const version = (pieza.version || 0) + 1;
+  const entrada = {
+    version,
+    geometriaPorTalla,
+    dimensionesPorTalla,
+    archivoOriginal: archivoOriginal ?? pieza.archivoOriginal ?? null,
+    formatoOriginal: formatoOriginal ?? pieza.formatoOriginal ?? null,
+    creadoEn: new Date().toISOString(),
+    motivo: motivo || null,
+  };
+  pieza.version = version;
+  pieza.versiones = [...(pieza.versiones || []), entrada];
+  pieza.geometriaPorTalla = geometriaPorTalla;
+  pieza.dimensionesPorTalla = dimensionesPorTalla;
+  if (archivoOriginal !== undefined) pieza.archivoOriginal = archivoOriginal;
+  if (formatoOriginal !== undefined) pieza.formatoOriginal = formatoOriginal;
+  return pieza;
+}
 
 // --- Piezas (biblioteca) ---------------------------------------------------
 // Acá se sube la moldería real: por PIEZA, UN solo archivo con todas sus
@@ -176,6 +203,12 @@ router.post('/piezas', async (req, res) => {
     formatoOriginal: formatoOriginal || null,
     geometriaPorTalla,
     dimensionesPorTalla,
+    version: 1,
+    versiones: [{
+      version: 1, geometriaPorTalla, dimensionesPorTalla,
+      archivoOriginal: archivoOriginal || null, formatoOriginal: formatoOriginal || null,
+      creadoEn: new Date().toISOString(), motivo: 'Creada',
+    }],
   };
   await crearRegistro('piezas', registro);
   res.status(201).json(registro);
@@ -201,8 +234,9 @@ router.delete('/piezas/:id', async (req, res) => {
 
 // Agrega/reemplaza la geometría de UNA talla puntual de una pieza ya
 // existente — para completar una talla que faltaba o corregir una, sin
-// resubir todo el rango de nuevo. v0: reemplaza directo, sin historial de
-// versiones (simplificación documentada en ESTADO-ACTUAL.md).
+// resubir todo el rango de nuevo. Versiona la pieza ENTERA (todas las
+// tallas, no solo la tocada): un Producto fijado a una versión vieja tiene
+// que poder seguir viendo TODAS sus piezas como estaban, no una mezcla.
 router.put('/piezas/:id/tallas/:talla', async (req, res) => {
   const { boundingBoxMm } = req.body;
   if (!boundingBoxMm) return res.status(400).json({ error: 'Falta la geometría resuelta' });
@@ -210,11 +244,12 @@ router.put('/piezas/:id/tallas/:talla', async (req, res) => {
   const pieza = await leerRegistro('piezas', req.params.id);
   if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
 
-  pieza.geometriaPorTalla[req.params.talla] = req.body;
-  pieza.dimensionesPorTalla[req.params.talla] = {
-    anchoCm: round2(boundingBoxMm.anchoMm / 10),
-    altoCm: round2(boundingBoxMm.altoMm / 10),
+  const geometriaPorTalla = { ...pieza.geometriaPorTalla, [req.params.talla]: req.body };
+  const dimensionesPorTalla = {
+    ...pieza.dimensionesPorTalla,
+    [req.params.talla]: { anchoCm: round2(boundingBoxMm.anchoMm / 10), altoCm: round2(boundingBoxMm.altoMm / 10) },
   };
+  agregarVersion(pieza, { geometriaPorTalla, dimensionesPorTalla, motivo: 'Talla ' + req.params.talla + ' corregida' });
   await actualizarRegistro('piezas', req.params.id, pieza);
   res.json(pieza);
 });
@@ -317,15 +352,68 @@ router.post('/piezas/:id/reprocesar', async (req, res) => {
     });
   }
 
+  const geometriaPorTalla = { ...pieza.geometriaPorTalla };
+  const dimensionesPorTalla = { ...pieza.dimensionesPorTalla };
   for (const [talla, geo] of Object.entries(resuelto.geometriasPorTalla)) {
-    pieza.geometriaPorTalla[talla] = geo;
+    geometriaPorTalla[talla] = geo;
+    dimensionesPorTalla[talla] = {
+      anchoCm: round2(geo.boundingBoxMm.anchoMm / 10),
+      altoCm: round2(geo.boundingBoxMm.altoMm / 10),
+    };
   }
+  agregarVersion(pieza, { geometriaPorTalla, dimensionesPorTalla, motivo: 'Reprocesada' });
   await actualizarRegistro('piezas', req.params.id, pieza);
   res.json({
     pieza,
     tallasReprocesadas: Object.keys(resuelto.geometriasPorTalla),
     tallasSinCoincidencia: sinCoincidencia,
   });
+});
+
+// Reemplaza el ARCHIVO ORIGINAL entero de una pieza ya existente (a
+// diferencia de reprocesar, que reanaliza el mismo archivo guardado, esto
+// recibe geometrías YA resueltas de un archivo NUEVO -- mismo flujo de
+// análisis/resolución que crear una pieza por primera vez en Formulario.jsx,
+// pero termina acá en vez de en POST /piezas). Versiona igual que los otros
+// dos caminos que tocan geometría.
+router.post('/piezas/:id/reemplazar-archivo', async (req, res) => {
+  const { geometriaPorTalla, archivoOriginal, formatoOriginal } = req.body;
+  if (!geometriaPorTalla || Object.keys(geometriaPorTalla).length === 0) {
+    return res.status(400).json({ error: 'Falta geometriaPorTalla' });
+  }
+  const pieza = await leerRegistro('piezas', req.params.id);
+  if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
+
+  const dimensionesPorTalla = Object.fromEntries(
+    Object.entries(geometriaPorTalla).map(([talla, geo]) => [
+      talla,
+      { anchoCm: round2(geo.boundingBoxMm.anchoMm / 10), altoCm: round2(geo.boundingBoxMm.altoMm / 10) },
+    ])
+  );
+  agregarVersion(pieza, {
+    geometriaPorTalla, dimensionesPorTalla, archivoOriginal: archivoOriginal || null,
+    formatoOriginal: formatoOriginal || null, motivo: 'Molde reemplazado',
+  });
+  await actualizarRegistro('piezas', req.params.id, pieza);
+  res.json(pieza);
+});
+
+// Borra UNA versión vieja del historial (no la pieza entera). Sin chequeo
+// propio de qué Producto todavía la usa -- mismo modelo de confianza que
+// DELETE /piezas/:id de acá abajo: el frontend (Piezas.jsx) ya avisó y
+// confirmó antes de llamar esto (ver ESTADO-ACTUAL.md).
+router.delete('/piezas/:id/versiones/:numero', async (req, res) => {
+  const pieza = await leerRegistro('piezas', req.params.id);
+  if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
+  const numero = Number(req.params.numero);
+  if (numero === pieza.version) {
+    return res.status(400).json({ error: 'No se puede borrar la versión actual.' });
+  }
+  const antes = (pieza.versiones || []).length;
+  pieza.versiones = (pieza.versiones || []).filter((v) => v.version !== numero);
+  if (pieza.versiones.length === antes) return res.status(404).json({ error: 'Esa versión no existe.' });
+  await actualizarRegistro('piezas', req.params.id, pieza);
+  res.json(pieza);
 });
 
 // --- Grupos (catálogo: una prenda = piezas de biblioteca por rol) ---------

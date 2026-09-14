@@ -38,7 +38,12 @@ const TIPO_MIME_POR_FORMATO = { dxf: 'application/dxf', pdf: 'application/pdf' }
 // de ESA pieza, para no tener que ir a otra pantalla después. Reporta su
 // estado hacia arriba en cada cambio -- el formulario padre decide cuándo
 // está todo listo para guardar.
-function FichaPieza({ archivo, onQuitar, onCambio }) {
+// Exportada: Piezas.jsx la reusa tal cual para "Reemplazar moldería" (mismo
+// análisis/resolución de acá, terminando en reemplazarArchivoPieza() en vez
+// de crearPieza()) -- nombre/categoría/tela que pide de paso se ignoran en
+// ese flujo (la pieza ya existente conserva los suyos), solo importa
+// geometriaPorTalla/archivoOriginal/formatoOriginal.
+export function FichaPieza({ archivo, onQuitar, onCambio }) {
   const [estado, setEstado] = useState('analizando'); // analizando | revisando | resuelto | error
   const [archivoTexto, setArchivoTexto] = useState(null);
   const [archivoUrl, setArchivoUrl] = useState(null);

@@ -37,6 +37,27 @@
  *   "giros" del contorno -- esquinas y vueltas suaves (geometriaSalientes.js·
  *   puntosNotablesDe)
  * @property {Record<string, {anchoCm: number, altoCm: number}>} dimensionesPorTalla  derivado de geometriaPorTalla, en cm
+ * @property {number} version                          empieza en 1, sube cada vez que cambia la geometría
+ * @property {VersionPieza[]} versiones                 historial COMPLETO (incluida la actual, versiones[length-1])
+ */
+
+/**
+ * VersionPieza: una foto de la geometría de una Pieza en un momento dado.
+ * `geometriaPorTalla`/`dimensionesPorTalla` de arriba en Pieza SIEMPRE son
+ * los de la última entrada -- ningún lector existente (Grupo, Plantilla,
+ * nesting sin Producto) necesita saber que esto existe. Un Producto puede
+ * fijarse a propósito a una versión vieja (Producto.versionesPiezas) para no
+ * verse afectado cuando la pieza se corrige más adelante -- ver
+ * rutas/api.js y dominio/resolverGrupo.js·resolverPiezasDeGrupo().
+ *
+ * @typedef {Object} VersionPieza
+ * @property {number} version
+ * @property {Record<string, Object>} geometriaPorTalla
+ * @property {Record<string, {anchoCm: number, altoCm: number}>} dimensionesPorTalla
+ * @property {string} [archivoOriginal]
+ * @property {'dxf'|'pdf'} [formatoOriginal]
+ * @property {string} creadoEn      ISO 8601
+ * @property {string} [motivo]      libre, ej. "Reprocesado", "Molde reemplazado", "Talla M corregida"
  */
 
 /**
@@ -146,6 +167,30 @@
  * @property {{activo: boolean, colorHex: string, grosorCm: number}} [bordeContraste]
  *   contorno del molde por encima del diseño recortado, para no perder los
  *   piquetes bajo el arte -- opcional, grosor real en cm (default 0.03)
+ * @property {Record<string, number>} [versionesPiezas]  piezaId -> número de
+ *   VersionPieza al que este producto queda fijado. Sin entrada para una
+ *   pieza = sigue la versión ACTUAL de esa pieza (comportamiento de
+ *   siempre). Se llena por decisión explícita del usuario cuando una pieza
+ *   que este producto usa se actualiza en Biblioteca -- nunca automático.
+ */
+
+/**
+ * Plantilla: la configuración de zonas de un Producto SIN contenido real
+ * (valorFijo/logoRuta/valorEjemplo vacíos) más la prenda a la que está
+ * atada -- para arrancar un Producto nuevo con el anclaje ya armado en vez
+ * de rehacerlo cada vez, en prendas que se repiten mucho. A diferencia de un
+ * Producto guardado, una Plantilla NO fija versión de pieza: siempre usa la
+ * geometría actual (mismo comportamiento que un Grupo), a propósito -- son
+ * los Productos ya entregados a un cliente puntual los que necesitan
+ * quedarse quietos, no las plantillas para los próximos.
+ *
+ * @typedef {Object} Plantilla
+ * @property {string} id
+ * @property {string} nombre
+ * @property {string} grupoId
+ * @property {Anclaje} anclaje
+ * @property {{activo: boolean, colorHex: string, grosorCm: number}} [bordeContraste]
+ * @property {string} creadoEn   ISO 8601
  */
 
 /**

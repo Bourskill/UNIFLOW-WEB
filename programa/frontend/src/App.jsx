@@ -2,6 +2,7 @@ import { memo, useCallback, useState } from 'react';
 import { Formulario } from './paginas/Formulario.jsx';
 import { Prendas } from './paginas/Prendas.jsx';
 import { Piezas } from './paginas/Piezas.jsx';
+import { Plantillas } from './paginas/Plantillas.jsx';
 import { Productos } from './paginas/Productos.jsx';
 import { Pedidos } from './paginas/Pedidos.jsx';
 import { Historial } from './paginas/Historial.jsx';
@@ -18,6 +19,7 @@ import { PanelDock } from './componentes/PanelDock.jsx';
 // defecto salvo que se le diga explícitamente que no hace falta.
 const ProductosMemo = memo(Productos);
 const PiezasMemo = memo(Piezas);
+const PlantillasMemo = memo(Plantillas);
 const PrendasMemo = memo(Prendas);
 const FormularioMemo = memo(Formulario);
 const PedidosMemo = memo(Pedidos);
@@ -27,8 +29,12 @@ const HistorialMemo = memo(Historial);
 // sub-pestañas DENTRO de un mismo apartado (estilo Google Drive), no como
 // entradas nuevas del nav -- corrección explícita del usuario sobre la
 // pasada anterior, que había creado un apartado nuevo por cada pantalla.
+// "Moldería" (antes "Piezas"): el id interno se deja igual a propósito --
+// nada más que la etiqueta visible depende de él (visitadas, PanelDock,
+// etc. usan 'piezas' como clave), así que renombrar el texto no toca nada
+// más.
 const PESTANAS = [
-  { id: 'piezas', etiqueta: 'Piezas', icono: 'pieza' },
+  { id: 'piezas', etiqueta: 'Moldería', icono: 'pieza' },
   { id: 'diseno', etiqueta: 'Diseño', icono: 'diseno' },
   { id: 'produccion', etiqueta: 'Producción', icono: 'pedido' },
 ];
@@ -48,6 +54,20 @@ function App() {
   // volverían a renderizar en cada cambio de estado de App, memo o no).
   const marcarCambio = useCallback(() => setRecargarSenal((n) => n + 1), []);
   const pestanaActual = PESTANAS.find((p) => p.id === pestana);
+
+  // "Usar esta plantilla" (Plantillas.jsx) tiene que llevar al usuario al
+  // apartado Diseño con esa configuración de zonas ya cargada -- mismo
+  // mecanismo lift-state-up que recargarSenal/marcarCambio: un solo dato
+  // vive acá, Plantillas.jsx lo escribe, Productos.jsx lo lee una vez al
+  // detectarlo y lo limpia después de consumirlo (para no volver a precargar
+  // si el usuario re-entra a Diseño más tarde sin haber elegido otra).
+  const [plantillaParaUsar, setPlantillaParaUsar] = useState(null);
+  const usarPlantilla = useCallback((plantilla) => {
+    setPlantillaParaUsar(plantilla);
+    ir('diseno');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const consumirPlantilla = useCallback(() => setPlantillaParaUsar(null), []);
 
   function ir(id) {
     setPestana(id);
@@ -100,6 +120,7 @@ function App() {
                   { id: 'subir', etiqueta: 'Subir piezas', contenido: <FormularioMemo onCambio={marcarCambio} /> },
                   { id: 'prendas', etiqueta: 'Prendas', contenido: <PrendasMemo recargarSenal={recargarSenal} /> },
                   { id: 'biblioteca', etiqueta: 'Biblioteca', contenido: <PiezasMemo recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
+                  { id: 'plantillas', etiqueta: 'Plantillas', contenido: <PlantillasMemo recargarSenal={recargarSenal} onUsarPlantilla={usarPlantilla} /> },
                 ]}
               />
             </div>
@@ -114,7 +135,12 @@ function App() {
                   izquierda con scroll propio + panel de zona anclado a la
                   derecha) para que el lienzo nunca se reacomode cuando el
                   panel de zona cambia de alto -- ver PanelDock.jsx. */}
-              <ProductosMemo recargarSenal={recargarSenal} onCambio={marcarCambio} />
+              <ProductosMemo
+                recargarSenal={recargarSenal}
+                onCambio={marcarCambio}
+                plantillaParaUsar={plantillaParaUsar}
+                onConsumirPlantilla={consumirPlantilla}
+              />
             </div>
           )}
           {visitadas.has('produccion') && (

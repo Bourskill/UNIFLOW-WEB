@@ -30,7 +30,11 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
       throw new Error('El producto "' + producto.nombre + '" no tiene grupo (moldería) asociado.');
     }
     const diseno = disenos.find((d) => d.id === producto.disenoId);
-    const piezasDelGrupo = resolverPiezasDeGrupo(grupo, piezas);
+    // versionesPiezas: producción respeta el pin de versión de cada pieza
+    // (ver rutas/api.js) -- es el ÚNICO camino que de verdad genera el
+    // corte/PDF final, así que es el que tiene que ver exactamente lo que
+    // el producto tenía cuando se guardó, no lo último que haya en Biblioteca.
+    const piezasDelGrupo = resolverPiezasDeGrupo(grupo, piezas, producto.versionesPiezas);
     const excluidas = new Set(linea.piezasExcluidas || []);
 
     // Todas las piezas del grupo a la MISMA talla de esta línea -- a

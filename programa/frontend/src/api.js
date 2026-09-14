@@ -84,6 +84,27 @@ export function reprocesarPieza(id) {
   return pedirJson('/piezas/' + id + '/reprocesar', { method: 'POST' });
 }
 
+// Reemplaza la geometría de UNA talla puntual sin resubir todo el rango --
+// versiona la pieza entera (ver rutas/api.js).
+export function reemplazarTallaPieza(id, talla, geometriaResuelta) {
+  return pedirJson('/piezas/' + id + '/tallas/' + talla, { method: 'PUT', body: JSON.stringify(geometriaResuelta) });
+}
+
+// Reemplaza el archivo original entero de una pieza ya existente (a
+// diferencia de crearPieza, que crea una pieza nueva) -- versiona en vez de
+// pisar, así un Producto ya guardado puede seguir fijado a la geometría
+// vieja (ver Productos.jsx·versionesPiezas).
+export function reemplazarArchivoPieza(id, { geometriaPorTalla, archivoOriginal, formatoOriginal }) {
+  return pedirJson('/piezas/' + id + '/reemplazar-archivo', {
+    method: 'POST',
+    body: JSON.stringify({ geometriaPorTalla, archivoOriginal, formatoOriginal }),
+  });
+}
+
+export function eliminarVersionPieza(id, numeroVersion) {
+  return pedirJson('/piezas/' + id + '/versiones/' + numeroVersion, { method: 'DELETE' });
+}
+
 // --- Grupos (catálogo: una prenda = piezas de biblioteca por rol) ---------
 
 export function listarGrupos() {
@@ -142,6 +163,24 @@ export function crearProducto(producto) {
 
 export function eliminarProducto(id) {
   return pedirJson('/productos/' + id, { method: 'DELETE' });
+}
+
+export function editarProducto(id, cambios) {
+  return pedirJson('/productos/' + id, { method: 'PUT', body: JSON.stringify(cambios) });
+}
+
+// --- Plantillas (zonas sin contenido, para no rearmar el anclaje cada vez) ---
+
+export function listarPlantillas() {
+  return pedirJson('/plantillas');
+}
+
+export function crearPlantilla(plantilla) {
+  return pedirJson('/plantillas', { method: 'POST', body: JSON.stringify(plantilla) });
+}
+
+export function eliminarPlantilla(id) {
+  return pedirJson('/plantillas/' + id, { method: 'DELETE' });
 }
 
 // --- Pedidos -------------------------------------------------------------------

@@ -9,6 +9,7 @@ import {
   eliminarDiseno,
   crearProducto,
   eliminarProducto,
+  crearPlantilla,
   resolverAnclaje,
   subirArchivo,
 } from '../api.js';
@@ -80,6 +81,16 @@ function nombreDeArchivo(url) {
   try { return decodeURIComponent(url.split('/').pop()); } catch { return url; }
 }
 
+// Lo único que una Plantilla NO guarda: el contenido real de cada zona
+// (dominio/modelos.js·Plantilla). campoPedido/tipo/tamaño/posición quedan
+// intactos -- es justamente eso lo que ahorra rearmar la próxima vez.
+function anclajeSinContenido(anclajeOriginal) {
+  return {
+    ...anclajeOriginal,
+    zonas: (anclajeOriginal.zonas || []).map((z) => ({ ...z, valorFijo: '', logoRuta: null, valorEjemplo: '' })),
+  };
+}
+
 // Para el selector de zonas del panel: el nombre asignado + qué tipo de
 // contenido lleva -- nunca el nombre del archivo del logo (a veces larguísimo,
 // y ya se ve en el propio selector de logo cuando la zona está abierta).
@@ -106,7 +117,7 @@ function colorDeReferencia(ref) {
   }
 }
 
-export function Productos({ recargarSenal, onCambio }) {
+export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsumirPlantilla }) {
   const [grupos, setGrupos] = useState([]);
   const [disenos, setDisenos] = useState([]);
   const [productos, setProductos] = useState([]);
@@ -155,6 +166,24 @@ export function Productos({ recargarSenal, onCambio }) {
     recargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recargarSenal]);
+
+  // "Usar esta plantilla" (Plantillas.jsx, vía App.jsx) precarga esta
+  // pantalla con una configuración de zonas ya armada -- se consume UNA
+  // sola vez (se avisa a App.jsx apenas se aplica, que limpia el dato
+  // compartido) para no volver a pisar lo que el usuario esté armando si
+  // reentra a Diseño más tarde sin haber elegido otra plantilla.
+  useEffect(() => {
+    if (!plantillaParaUsar) return;
+    setGrupoId(plantillaParaUsar.grupoId);
+    setAnclaje(plantillaParaUsar.anclaje || { anclas: [], zonas: [] });
+    if (plantillaParaUsar.bordeContraste) setBordeContraste(plantillaParaUsar.bordeContraste);
+    setDisenoId('');
+    setSeleccion(null);
+    setModo(null);
+    setTallaTrabajoPorRol({});
+    onConsumirPlantilla?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plantillaParaUsar]);
 
   const grupoSeleccionado = grupos.find((g) => g.id === grupoId);
   const disenosDeEsteGrupo = disenos.filter((d) => d.grupoId === grupoId);
@@ -473,7 +502,7 @@ export function Productos({ recargarSenal, onCambio }) {
   async function guardar(evento) {
     evento.preventDefault();
     setError(null);
-    if (!nombre.trim() || !grupoId) { setError('Falta el nombre del producto o el grupo.'); return; }
+    if (!nombre.trim() || !grupoId) { setError('Falta el nombre del producto o la prenda.'); return; }
     try {
       await crearProducto({ nombre, grupoId, disenoId: disenoId || null, anclaje, bordeContraste });
       setNombre('');
@@ -484,6 +513,21 @@ export function Productos({ recargarSenal, onCambio }) {
     } catch (e) { setError(e.message); }
   }
   async function borrar(id) { await eliminarProducto(id); await recargar(); onCambio?.(); }
+
+  async function guardarComoPlantilla() {
+    setError(null);
+    const nombrePlantilla = window.prompt('¿Cómo se llama esta plantilla?');
+    if (!nombrePlantilla || !nombrePlantilla.trim()) return;
+    try {
+      await crearPlantilla({
+        nombre: nombrePlantilla.trim(),
+        grupoId,
+        anclaje: anclajeSinContenido(anclaje),
+        bordeContraste,
+      });
+      onCambio?.();
+    } catch (e) { setError(e.message); }
+  }
 
   const piezaObj = piezaActiva ? piezaDelRol(piezaActiva) : null;
   const tallaTrabajo = piezaActiva ? tallaTrabajoDe(piezaActiva) : null;
@@ -521,14 +565,14 @@ export function Productos({ recargarSenal, onCambio }) {
       {cargando ? (
         <p className="text-sm text-muted-foreground">Cargando…</p>
       ) : grupos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Creá primero una prenda (Piezas → Prendas).</p>
+        <p className="text-sm text-muted-foreground">Creá primero una prenda (Moldería → Prendas).</p>
       ) : (
         <Tarjeta as="form" onSubmit={guardar} className="flex flex-col gap-4">
           <div className="grid max-w-3xl grid-cols-2 gap-4">
             <Campo etiqueta="Nombre del producto">
               <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Camiseta titular" />
             </Campo>
-            <Campo etiqueta="Grupo">
+            <Campo etiqueta="Prenda">
               <Select value={grupoId} onChange={(e) => alCambiarGrupo(e.target.value)}>
                 {grupos.map((g) => <option key={g.id} value={g.id}>{g.nombre}</option>)}
               </Select>
@@ -695,8 +739,16 @@ export function Productos({ recargarSenal, onCambio }) {
             </div>
           )}
 
-          <div>
+          <div className="flex items-center gap-2">
             <Boton variante="primario" type="submit">Guardar producto</Boton>
+            <Boton
+              variante="fantasma" type="button"
+              disabled={!grupoId || anclaje.zonas.length === 0}
+              onClick={guardarComoPlantilla}
+              title={anclaje.zonas.length === 0 ? 'Armá al menos una zona primero' : undefined}
+            >
+              Guardar como plantilla
+            </Boton>
           </div>
           {error && <Aviso tono="error">{error}</Aviso>}
         </Tarjeta>
