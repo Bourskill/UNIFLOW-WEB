@@ -33,7 +33,7 @@ function TarjetaPrenda({ grupo, piezas, onAbrir, onBorrar }) {
         {tallasDe(grupo, piezas).length === 0 ? (
           <span className="text-xs text-faint-foreground">sin tallas cargadas</span>
         ) : (
-          tallasDe(grupo, piezas).map((t) => <Chip key={t}>{t}</Chip>)
+          tallasDe(grupo, piezas).map((t) => <Chip key={t} className="uppercase">{t}</Chip>)
         )}
       </div>
       <div onClick={(e) => e.stopPropagation()}>
@@ -53,7 +53,7 @@ function DetallePrenda({ grupo, piezas, onVolver }) {
         <h2 className="text-lg font-semibold">{grupo.nombre}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           {grupo.piezas.length} pieza{grupo.piezas.length === 1 ? '' : 's'} — tallas disponibles:{' '}
-          {tallasDe(grupo, piezas).join(', ') || 'ninguna cargada'}
+          {tallasDe(grupo, piezas).map((t) => t.toUpperCase()).join(', ') || 'ninguna cargada'}
         </p>
       </div>
 
@@ -73,7 +73,7 @@ function DetallePrenda({ grupo, piezas, onVolver }) {
                     {pieza.categoria && <div className="text-xs text-faint-foreground">{pieza.categoria}</div>}
                     <div className="mt-1 flex flex-wrap gap-1">
                       {ordenarTallasNatural(Object.keys(pieza.dimensionesPorTalla || {})).map((t) => (
-                        <Chip key={t}>{t}: {pieza.dimensionesPorTalla[t].anchoCm}×{pieza.dimensionesPorTalla[t].altoCm}cm</Chip>
+                        <Chip key={t}>{t.toUpperCase()}: {pieza.dimensionesPorTalla[t].anchoCm}×{pieza.dimensionesPorTalla[t].altoCm}cm</Chip>
                       ))}
                     </div>
                   </>

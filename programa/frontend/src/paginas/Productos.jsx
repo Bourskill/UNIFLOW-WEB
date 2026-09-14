@@ -14,12 +14,14 @@ import {
 } from '../api.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Aviso, Ayuda } from '../componentes/ui.jsx';
-import { LienzoAnclaje } from '../componentes/LienzoAnclaje.jsx';
+import { InputNumero } from '../componentes/InputNumero.jsx';
+import { PanelDock } from '../componentes/PanelDock.jsx';
+import { LienzoAnclaje, COLOR } from '../componentes/LienzoAnclaje.jsx';
 import { SlotImagenDiseno } from '../componentes/SlotImagenDiseno.jsx';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
 
-const BORDE_POR_DEFECTO = { activo: false, colorHex: '#ffffff', grosorCm: 0.03, desplazamientoCm: 0 };
-const LEYENDA_POR_DEFECTO = { piquetes: true, extremos: true, bordes: true, vertices: false };
+const BORDE_POR_DEFECTO = { activo: false, colorHex: '#000000', grosorCm: 0.03, desplazamientoCm: 0 };
+const LEYENDA_POR_DEFECTO = { piquetes: true, extremos: true, bordes: true, vertices: false, zonas: true };
 const ORIGENES_ZONA = [
   ['centro', 'el centro de la zona'], ['supIzq', 'su esquina de arriba a la izquierda'],
   ['supDer', 'su esquina de arriba a la derecha'], ['infIzq', 'su esquina de abajo a la izquierda'],
@@ -76,6 +78,32 @@ function etiquetaZona(zona) {
 
 function nombreDeArchivo(url) {
   try { return decodeURIComponent(url.split('/').pop()); } catch { return url; }
+}
+
+// Para el selector de zonas del panel: el nombre asignado + qué tipo de
+// contenido lleva -- nunca el nombre del archivo del logo (a veces larguísimo,
+// y ya se ve en el propio selector de logo cuando la zona está abierta).
+function tipoCortoDeZona(z) {
+  if (z.tipo === 'logo') return 'Logo';
+  if (z.campoPedido === 'fijo') return 'Texto fijo';
+  if (z.campoPedido === 'numero') return 'Número';
+  return 'Nombre';
+}
+
+// Mismo color que usan los candidatos en el lienzo (LienzoAnclaje·COLOR) --
+// que el texto de "se pega a" sea del mismo color que el punto real en el
+// lienzo es lo que reemplaza a la lista desplegable: se entiende de un
+// vistazo sin tener que leer.
+function colorDeReferencia(ref) {
+  if (!ref) return undefined;
+  switch (ref.tipo) {
+    case 'piquete': return COLOR.piquete;
+    case 'extremo': case 'saliente': return COLOR.extremo;
+    case 'zona': return COLOR.zona;
+    case 'vertice': return COLOR.vertice;
+    case 'contorno': return COLOR.caja;
+    default: return undefined;
+  }
 }
 
 export function Productos({ recargarSenal, onCambio }) {
@@ -475,7 +503,13 @@ export function Productos({ recargarSenal, onCambio }) {
   }
 
   return (
-    <div className="pagina flex flex-col gap-6">
+    <div className="flex h-full min-h-0">
+      {/* Panel izquierdo: todo el formulario, con SU PROPIO scroll -- el
+          panel de zona/ancla (a la derecha, PanelDock) es un hermano flex de
+          alto completo, no un bloque más de este flujo, así que crece o
+          encoge sin reacomodar nunca el lienzo (pedido explícito: "marea un
+          poco que el lienzo se mueva en base al panel de zona"). */}
+      <div className="pagina flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto p-8">
       <div>
         <h2 className="text-lg font-semibold">Producto</h2>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
@@ -541,7 +575,8 @@ export function Productos({ recargarSenal, onCambio }) {
             <div className="mb-2 flex items-center gap-2">
               <label className="flex items-center gap-2 text-sm text-foreground">
                 <input type="checkbox" checked={bordeContraste.activo}
-                  onChange={(e) => setBordeContraste((prev) => ({ ...prev, activo: e.target.checked }))} />
+                  onChange={(e) => setBordeContraste((prev) => ({ ...prev, activo: e.target.checked }))}
+                  className="h-4 w-4 rounded accent-primary" />
                 Contorno para láser (borde de contraste sobre el diseño)
               </label>
               <Ayuda>
@@ -553,18 +588,18 @@ export function Productos({ recargarSenal, onCambio }) {
               </Ayuda>
             </div>
             {bordeContraste.activo && (
-              <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-wrap items-end gap-4 rounded-xl border border-border bg-surface-muted p-3.5">
                 <Campo etiqueta="Color">
-                  <input type="color" className="h-9 w-9 rounded border border-border" value={bordeContraste.colorHex}
+                  <input type="color" className="h-9 w-9 cursor-pointer rounded-lg border border-border bg-transparent p-0.5" value={bordeContraste.colorHex}
                     onChange={(e) => setBordeContraste((prev) => ({ ...prev, colorHex: e.target.value }))} />
                 </Campo>
                 <Campo etiqueta="Desplazamiento (cm)">
-                  <Input className="w-20" type="number" step="0.01" min="0" value={bordeContraste.desplazamientoCm ?? 0}
-                    onChange={(e) => setBordeContraste((prev) => ({ ...prev, desplazamientoCm: Number(e.target.value) }))} />
+                  <InputNumero className="w-24" step={0.1} min={0} value={bordeContraste.desplazamientoCm ?? 0}
+                    onChange={(n) => setBordeContraste((prev) => ({ ...prev, desplazamientoCm: n }))} />
                 </Campo>
                 <Campo etiqueta="Grosor (cm)">
-                  <Input className="w-20" type="number" step="0.01" min="0.01" value={bordeContraste.grosorCm}
-                    onChange={(e) => setBordeContraste((prev) => ({ ...prev, grosorCm: Number(e.target.value) }))} />
+                  <InputNumero className="w-24" step={0.1} min={0.01} value={bordeContraste.grosorCm}
+                    onChange={(n) => setBordeContraste((prev) => ({ ...prev, grosorCm: n }))} />
                 </Campo>
               </div>
             )}
@@ -596,98 +631,137 @@ export function Productos({ recargarSenal, onCambio }) {
           </div>
 
           {piezaActiva && (
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-              {/* ============ 2. LIENZO (izquierda) ============ */}
-              {/* Fijo mientras se baja por el panel de propiedades de al
-                  lado (que puede ser bastante más alto, ej. la ficha de un
-                  logo en cruz): sin sticky, el lienzo se perdía de vista de
-                  scroll arriba apenas el panel de la derecha era más largo
-                  que él. */}
-              <div className="min-w-0 flex-1 lg:sticky lg:top-4">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground"><span className="mr-1 text-primary">2</span>Lienzo</h3>
-                  {piezaObj && (
-                    <span className="text-xs text-faint-foreground">
-                      {piezaActiva} · {geoActiva ? (geoActiva.pieza.ancho_cm + ' × ' + geoActiva.pieza.alto_cm + ' cm') : ''}
-                    </span>
-                  )}
-                  <span className="text-xs text-faint-foreground">· molde de referencia:</span>
-                  <Select className="max-w-[100px]" value={tallaTrabajo || ''}
-                    onChange={(e) => setTallaTrabajoPorRol((prev) => ({ ...prev, [piezaActiva]: e.target.value }))}>
-                    {tallasDePieza.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </Select>
-                </div>
+            <div className="min-w-0">
+              {/* ============ 2. LIENZO ============ */}
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground"><span className="mr-1 text-primary">2</span>Lienzo</h3>
+                {piezaObj && (
+                  <span className="text-xs text-faint-foreground">
+                    {piezaActiva} · {geoActiva ? (geoActiva.pieza.ancho_cm + ' × ' + geoActiva.pieza.alto_cm + ' cm') : ''}
+                  </span>
+                )}
+                <span className="text-xs text-faint-foreground">· molde de referencia:</span>
+                <Select className="max-w-[100px]" value={tallaTrabajo || ''}
+                  onChange={(e) => setTallaTrabajoPorRol((prev) => ({ ...prev, [piezaActiva]: e.target.value }))}>
+                  {tallasDePieza.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                </Select>
+              </div>
 
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <button type="button" onClick={() => setModo((m) => (m === 'zona' ? null : 'zona'))}
-                    className={'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ' +
-                      (modo === 'zona' ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-surface text-foreground hover:border-primary')}>
-                    + Zona
+              <div className="mb-2 flex flex-wrap items-center gap-3 text-xs">
+                {[['piquetes', '#f5a623'], ['extremos', '#4ade80'], ['bordes', '#6b7389'], ['vertices', '#6b7389'], ['zonas', COLOR.zona]].map(([campo, color]) => (
+                  <button key={campo} type="button" onClick={() => setLeyenda((prev) => ({ ...prev, [campo]: !prev[campo] }))}
+                    className={'flex items-center gap-1.5 ' + (leyenda[campo] ? 'text-foreground' : 'text-faint-foreground opacity-50')}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: color }} />
+                    {campo === 'zonas' ? 'zona' : campo}
                   </button>
-                  <div className="ml-2 flex flex-wrap items-center gap-3 text-xs">
-                    {[['piquetes', '#f5a623'], ['extremos', '#4ade80'], ['bordes', '#6b7389'], ['vertices', '#6b7389']].map(([campo, color]) => (
-                      <button key={campo} type="button" onClick={() => setLeyenda((prev) => ({ ...prev, [campo]: !prev[campo] }))}
-                        className={'flex items-center gap-1.5 ' + (leyenda[campo] ? 'text-foreground' : 'text-faint-foreground opacity-50')}>
-                        <span className="h-2 w-2 rounded-full" style={{ background: color }} />
-                        {campo}
+                ))}
+              </div>
+
+              <LienzoAnclaje
+                geo={geoActiva}
+                anclasResueltas={anclasResueltasDeEstaPieza}
+                zonasResueltas={zonasDeEstaPiezaConDatos}
+                anclaSeleccionadaId={seleccion?.tipo === 'ancla' ? seleccion.id : null}
+                zonaSeleccionadaId={seleccion?.tipo === 'zona' ? seleccion.id : null}
+                onSeleccionarAncla={(id) => setSeleccion({ tipo: 'ancla', id })}
+                onSeleccionarZona={(id) => setSeleccion({ tipo: 'zona', id })}
+                onDeseleccionar={() => setSeleccion(null)}
+                leyenda={leyenda}
+                modo={modo}
+                onElegirCandidato={elegirCandidato}
+                onArrastrarZona={moverZona}
+                senalServidor={resuelto}
+                imagenUrl={disenoSeleccionado?.imagenesPorPieza?.[piezaActiva]}
+                borde={bordeContraste}
+              />
+              <p className="mt-1 text-xs text-faint-foreground">
+                {modo === 'zona' && 'Hacé clic sobre la pieza: ahí nace la zona, enganchada al rasgo más cercano.'}
+                {modo === 'cruzar' && 'Hacé clic en el segundo punto: entre los dos vas a poder elegir la esquina del cruce, o el punto medio.'}
+                {modo === 'recolocar' && 'Hacé clic en el punto al que querés pegar ' + (recolocarInfo?.eje === 'x' ? 'la posición horizontal' : 'la posición vertical') + '.'}
+                {!modo && 'Elegí «+ Nueva zona» (panel de la derecha) y hacé clic sobre la pieza para crear una.'}
+              </p>
+
+              {(() => {
+                const ciclos = Math.max((resuelto?.errores.length || 0) - (resuelto?.sinResolver.length || 0), 0);
+                const erroresPieza = resuelto ? resuelto.errores.slice(0, ciclos) : [];
+                (resuelto?.sinResolver || []).forEach((s, i) => { if (s.pieza === piezaActiva) erroresPieza.push(resuelto.errores[ciclos + i]); });
+                return (
+                  <div className="mt-2 flex flex-col gap-2">
+                    {erroresPieza.map((e, i) => <Aviso key={'e' + i} tono="error">{e}</Aviso>)}
+                    {(resuelto?.avisos || []).slice(0, 6).map((a, i) => <Aviso key={'a' + i} tono="info">{a}</Aviso>)}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          <div>
+            <Boton variante="primario" type="submit">Guardar producto</Boton>
+          </div>
+          {error && <Aviso tono="error">{error}</Aviso>}
+        </Tarjeta>
+      )}
+
+      <div>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground">Productos cargados</h3>
+        {productos.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Todavía no hay ninguno.</p>
+        ) : (
+          <div className="flex max-w-2xl flex-col gap-2">
+            {productos.map((p) => (
+              <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
+                <div className="flex-1">
+                  <span className="font-medium">{p.nombre}</span>{' '}
+                  <span className="text-muted-foreground">
+                    — {disenos.find((d) => d.id === p.disenoId)?.nombre || 'sin diseño'} · {p.anclaje?.zonas?.length || 0} zona(s)
+                  </span>
+                </div>
+                <Boton variante="fantasma" tamano="sm" onClick={() => borrar(p.id)}>Eliminar</Boton>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      </div>
+
+      {/* Panel derecho: anclado, redimensionable y colapsable a íconos
+          (PanelDock) -- mismo lenguaje visual que el nav de apartados. Acá
+          viven "+ Nueva zona" y el selector de zonas (antes debajo del
+          lienzo) más la ficha de edición del ancla/zona elegida. */}
+      {piezaActiva && (
+        <PanelDock storageKey="zona" lado="derecha" anchoPorDefecto={384} anchoMinimo={300} anchoMaximo={560}>
+          {(colapsado) => colapsado ? null : (
+            <div className="flex flex-col gap-3 p-3">
+              <Boton
+                variante={modo === 'zona' ? 'primario' : 'secundario'}
+                type="button"
+                className="w-full justify-center gap-1.5 py-2.5 text-sm font-semibold"
+                onClick={() => setModo((m) => (m === 'zona' ? null : 'zona'))}
+              >
+                <span className="text-base leading-none">+</span> Nueva zona
+              </Boton>
+
+              <div className="flex flex-col gap-1.5 border-t border-border pt-3">
+                <span className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">Zonas de esta pieza</span>
+                {zonasDeEstaPieza.length === 0 ? (
+                  <span className="text-xs text-faint-foreground">Sin zonas todavía en esta pieza.</span>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {anclaje.zonas.filter((z) => z.pieza === piezaActiva).map((z) => (
+                      <button key={z.id} type="button" onClick={() => setSeleccion({ tipo: 'zona', id: z.id })}
+                        className={'group flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors ' +
+                          (seleccion?.id === z.id ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface text-muted-foreground hover:border-primary')}>
+                        {(z.nombre || z.id) + ' · ' + tipoCortoDeZona(z)}
+                        <span onClick={(e) => { e.stopPropagation(); borrarNodo('zona', z.id); }} className="text-faint-foreground hover:text-danger" title="Quitar esta zona">×</span>
                       </button>
                     ))}
                   </div>
-                </div>
-
-                <LienzoAnclaje
-                  geo={geoActiva}
-                  anclasResueltas={anclasResueltasDeEstaPieza}
-                  zonasResueltas={zonasDeEstaPiezaConDatos}
-                  anclaSeleccionadaId={seleccion?.tipo === 'ancla' ? seleccion.id : null}
-                  zonaSeleccionadaId={seleccion?.tipo === 'zona' ? seleccion.id : null}
-                  onSeleccionarAncla={(id) => setSeleccion({ tipo: 'ancla', id })}
-                  onSeleccionarZona={(id) => setSeleccion({ tipo: 'zona', id })}
-                  onDeseleccionar={() => setSeleccion(null)}
-                  leyenda={leyenda}
-                  modo={modo}
-                  onElegirCandidato={elegirCandidato}
-                  onArrastrarZona={moverZona}
-                  senalServidor={resuelto}
-                  imagenUrl={disenoSeleccionado?.imagenesPorPieza?.[piezaActiva]}
-                  borde={bordeContraste}
-                />
-                <p className="mt-1 text-xs text-faint-foreground">
-                  {modo === 'zona' && 'Hacé clic sobre la pieza: ahí nace la zona, enganchada al rasgo más cercano.'}
-                  {modo === 'cruzar' && 'Hacé clic en el segundo punto: entre los dos vas a poder elegir la esquina del cruce, o el punto medio.'}
-                  {modo === 'recolocar' && 'Hacé clic en el punto al que querés pegar ' + (recolocarInfo?.eje === 'x' ? 'la posición horizontal' : 'la posición vertical') + '.'}
-                  {!modo && 'Elegí «+ Zona» y hacé clic sobre la pieza para crear una.'}
-                </p>
-
-                {(() => {
-                  const ciclos = Math.max((resuelto?.errores.length || 0) - (resuelto?.sinResolver.length || 0), 0);
-                  const erroresPieza = resuelto ? resuelto.errores.slice(0, ciclos) : [];
-                  (resuelto?.sinResolver || []).forEach((s, i) => { if (s.pieza === piezaActiva) erroresPieza.push(resuelto.errores[ciclos + i]); });
-                  return (
-                    <div className="mt-2 flex flex-col gap-2">
-                      {erroresPieza.map((e, i) => <Aviso key={'e' + i} tono="error">{e}</Aviso>)}
-                      {(resuelto?.avisos || []).slice(0, 6).map((a, i) => <Aviso key={'a' + i} tono="info">{a}</Aviso>)}
-                    </div>
-                  );
-                })()}
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {zonasDeEstaPieza.length === 0 && <span className="text-xs text-faint-foreground">Sin zonas todavía en esta pieza.</span>}
-                  {anclaje.zonas.filter((z) => z.pieza === piezaActiva).map((z) => (
-                    <button key={z.id} type="button" onClick={() => setSeleccion({ tipo: 'zona', id: z.id })}
-                      className={'group flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors ' +
-                        (seleccion?.id === z.id ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface text-muted-foreground hover:border-primary')}>
-                      {etiquetaZona(z)}
-                      <span onClick={(e) => { e.stopPropagation(); borrarNodo('zona', z.id); }} className="text-faint-foreground hover:text-danger" title="Quitar esta zona">×</span>
-                    </button>
-                  ))}
-                </div>
+                )}
               </div>
 
-              {/* ============ panel de propiedades (derecha) ============ */}
-              <div className="w-full flex-none lg:w-96">
+              <div className="border-t border-border pt-3">
                 {!seleccionado && (
-                  <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border p-6 text-center text-sm text-faint-foreground">
+                  <div className="flex items-center justify-center rounded-lg border border-dashed border-border p-6 text-center text-sm text-faint-foreground">
                     Elegí un ancla o una zona en el lienzo para editarla acá.
                   </div>
                 )}
@@ -726,34 +800,8 @@ export function Productos({ recargarSenal, onCambio }) {
               </div>
             </div>
           )}
-
-          <div>
-            <Boton variante="primario" type="submit">Guardar producto</Boton>
-          </div>
-          {error && <Aviso tono="error">{error}</Aviso>}
-        </Tarjeta>
+        </PanelDock>
       )}
-
-      <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground">Productos cargados</h3>
-        {productos.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Todavía no hay ninguno.</p>
-        ) : (
-          <div className="flex max-w-2xl flex-col gap-2">
-            {productos.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
-                <div className="flex-1">
-                  <span className="font-medium">{p.nombre}</span>{' '}
-                  <span className="text-muted-foreground">
-                    — {disenos.find((d) => d.id === p.disenoId)?.nombre || 'sin diseño'} · {p.anclaje?.zonas?.length || 0} zona(s)
-                  </span>
-                </div>
-                <Boton variante="fantasma" tamano="sm" onClick={() => borrar(p.id)}>Eliminar</Boton>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -785,9 +833,9 @@ function PanelAncla({ ancla, onRenombrar, onRecolocar, onCambiarEje, onQuitar, r
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">Lo separo</span>
-              <Input className="w-20" type="number" step={esProp ? '1' : '0.1'}
+              <InputNumero className="w-20" step={esProp ? 1 : 0.1}
                 value={esProp ? Math.round(e.valor * 100) : e.valor}
-                onChange={(ev) => onCambiarEje(eje, { valor: esProp ? Number(ev.target.value) / 100 : Number(ev.target.value) })} />
+                onChange={(n) => onCambiarEje(eje, { valor: esProp ? n / 100 : n })} />
               <Select className="max-w-[150px]" value={e.modo} onChange={(ev) => onCambiarEje(eje, { modo: ev.target.value, valor: 0 })}>
                 <option value="fijo">cm fijos</option>
                 <option value="proporcional">% de la pieza</option>
@@ -812,9 +860,9 @@ function LineaMedida({ etiqueta, valor, onCambiar }) {
         <option value="fijo">cm</option>
         <option value="proporcional">% de la pieza</option>
       </Select>
-      <Input className="w-20" type="number" step={esProp ? '1' : '0.1'}
+      <InputNumero className="w-20" step={esProp ? 1 : 0.1}
         value={esProp ? Math.round(valor.valor * 100) : valor.valor}
-        onChange={(e) => onCambiar({ modo: valor.modo, valor: esProp ? Number(e.target.value) / 100 : Number(e.target.value) })} />
+        onChange={(n) => onCambiar({ modo: valor.modo, valor: esProp ? n / 100 : n })} />
     </div>
   );
 }
@@ -860,18 +908,102 @@ function SelectorLogo({ url, onElegir }) {
   );
 }
 
+const ORIGEN_POS = {
+  centro: [0.5, 0.5], centroArriba: [0.5, 0], centroAbajo: [0.5, 1],
+  centroIzq: [0, 0.5], centroDer: [1, 0.5],
+  supIzq: [0, 0], supDer: [1, 0], infIzq: [0, 1], infDer: [1, 1],
+};
+
+// Reemplaza la lista desplegable de "Punto de ancla" -- en vez de leer 9
+// nombres de texto para entender cuál está activo, un cubo con los 9 puntos
+// reales (mismo layout que la caja de una zona) y el punto activo resaltado
+// se entiende con un vistazo. Pedido explícito: "una solución comunicativa
+// sin necesidad de demasiado texto".
+function SelectorOrigen({ valor, onCambiar }) {
+  const activo = valor || 'centro';
+  const LADO = 72, M = 12;
+  const punto = (fx, fy) => [M + fx * (LADO - M * 2), M + fy * (LADO - M * 2)];
+  const etiquetaActiva = ORIGENES_ZONA.find(([v]) => v === activo)?.[1] || 'centro';
+  return (
+    <div className="flex items-center gap-3">
+      <svg width={LADO} height={LADO} viewBox={'0 0 ' + LADO + ' ' + LADO} className="flex-none">
+        <rect x={M} y={M} width={LADO - M * 2} height={LADO - M * 2} rx="6" fill="rgba(76,141,255,0.08)" stroke="#2b303d" strokeWidth="1.5" />
+        {ORIGENES_ZONA.map(([v, etiqueta]) => {
+          const [fx, fy] = ORIGEN_POS[v];
+          const [cx, cy] = punto(fx, fy);
+          const esActivo = v === activo;
+          return (
+            <g key={v} onClick={() => onCambiar(v)} className="cursor-pointer">
+              <circle cx={cx} cy={cy} r={9} fill="transparent" />
+              <circle cx={cx} cy={cy} r={esActivo ? 5.5 : 3.5}
+                fill={esActivo ? '#4c8dff' : '#3a4051'}
+                stroke={esActivo ? '#e6e9f0' : 'none'} strokeWidth={esActivo ? 1.5 : 0}
+                className="transition-all" />
+              <title>{etiqueta}</title>
+            </g>
+          );
+        })}
+      </svg>
+      <span className="text-xs text-muted-foreground">{etiquetaActiva}</span>
+    </div>
+  );
+}
+
+// Reemplaza la lista desplegable de "Cruce" -- mismo espíritu que
+// SelectorOrigen: un rectángulo entre las dos anclas del cruce, con sus dos
+// esquinas reales + el punto medio marcados, y el que está activo resaltado.
+// El diagrama respeta la geometría real (horiz/vert, ya calculada arriba en
+// PanelZona a partir de dónde resuelven de verdad las dos anclas) en vez de
+// mostrar siempre "arriba-izquierda" fijo.
+function SelectorCruce({ zona, etiquetaActual, etiquetaOtra, horiz, vert, onElegirEsquina, onElegirOtra, onElegirMedio }) {
+  const LADO = 76, M = 14;
+  const fxActual = horiz === 'derecha' ? 1 : 0;
+  const fyActual = vert === 'abajo' ? 1 : 0;
+  const punto = (fx, fy) => [M + fx * (LADO - M * 2), M + fy * (LADO - M * 2)];
+  const [axA, ayA] = punto(fxActual, fyActual);
+  const [axB, ayB] = punto(1 - fxActual, 1 - fyActual);
+  const [cx, cy] = punto(0.5, 0.5);
+  const enMedio = zona.modoCruce === 'medio';
+  return (
+    <div className="flex items-center gap-3">
+      <svg width={LADO} height={LADO} viewBox={'0 0 ' + LADO + ' ' + LADO} className="flex-none">
+        <rect x={M} y={M} width={LADO - M * 2} height={LADO - M * 2} rx="6" fill="rgba(76,141,255,0.06)" stroke="#2b303d" strokeWidth="1.5" strokeDasharray="3 3" />
+        <line x1={axA} y1={ayA} x2={axB} y2={ayB} stroke="#2b303d" strokeWidth="1.5" />
+        <g onClick={onElegirEsquina} className="cursor-pointer">
+          <circle cx={axA} cy={ayA} r={9} fill="transparent" />
+          <circle cx={axA} cy={ayA} r={!enMedio ? 6 : 4} fill={!enMedio ? '#4c8dff' : '#3a4051'} stroke={!enMedio ? '#e6e9f0' : 'none'} strokeWidth={!enMedio ? 1.5 : 0} className="transition-all" />
+          <title>{etiquetaActual}</title>
+        </g>
+        <g onClick={onElegirOtra} className="cursor-pointer">
+          <circle cx={axB} cy={ayB} r={9} fill="transparent" />
+          <circle cx={axB} cy={ayB} r={4} fill="#3a4051" />
+          <title>{etiquetaOtra}</title>
+        </g>
+        <g onClick={onElegirMedio} className="cursor-pointer">
+          <circle cx={cx} cy={cy} r={9} fill="transparent" />
+          <circle cx={cx} cy={cy} r={enMedio ? 6 : 4} fill={enMedio ? '#4c8dff' : '#3a4051'} stroke={enMedio ? '#e6e9f0' : 'none'} strokeWidth={enMedio ? 1.5 : 0} className="transition-all" />
+          <title>{'a medio camino entre «' + zona.anclaX + '» y «' + zona.anclaY + '»'}</title>
+        </g>
+      </svg>
+      <span className="text-xs text-muted-foreground">{enMedio ? 'A medio camino' : etiquetaActual}</span>
+    </div>
+  );
+}
+
 // ============ panel: zona ============
 function PanelZona({ zona, anclasDisponibles, anclasResueltas, onRenombrar, onActualizar, onCambiarGrupo, hermanas, onQuitar, onDuplicar, onCruzar, onVolverAUnPunto }) {
   const cruzada = !!(zona.anclaX && zona.anclaY && zona.anclaX !== zona.anclaY);
   const rxA = anclasResueltas[zona.anclaX], ryA = anclasResueltas[zona.anclaY];
   let etiquetaEsquinaActual = 'esquina', etiquetaEsquinaOtra = 'la otra esquina';
+  let horiz = null, vert = null;
   if (cruzada && rxA && ryA) {
-    const horiz = rxA.x < ryA.x ? 'izquierda' : rxA.x > ryA.x ? 'derecha' : null;
-    const vert = ryA.y < rxA.y ? 'arriba' : ryA.y > rxA.y ? 'abajo' : null;
+    horiz = rxA.x < ryA.x ? 'izquierda' : rxA.x > ryA.x ? 'derecha' : null;
+    vert = ryA.y < rxA.y ? 'arriba' : ryA.y > rxA.y ? 'abajo' : null;
     const nombrar = (v, h) => (v && h ? 'esquina de ' + v + ' a la ' + h : v ? 'esquina de ' + v : h ? 'esquina de la ' + h : 'esquina');
     etiquetaEsquinaActual = nombrar(vert, horiz);
     etiquetaEsquinaOtra = nombrar(vert === 'arriba' ? 'abajo' : vert === 'abajo' ? 'arriba' : null, horiz === 'izquierda' ? 'derecha' : horiz === 'derecha' ? 'izquierda' : null);
   }
+  const anclaActual = anclasDisponibles.find((a) => a.id === zona.anclaX);
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-3">
@@ -943,33 +1075,29 @@ function PanelZona({ zona, anclasDisponibles, anclasResueltas, onRenombrar, onAc
         )}
       </div>
 
-      <div className="flex flex-col gap-2 border-t border-border pt-3">
+      <div className="flex flex-col gap-3 border-t border-border pt-3">
         <span className="text-xs font-semibold text-faint-foreground">Posición</span>
         {!cruzada ? (
           <div className="flex items-center gap-2">
             <span className="w-20 flex-none text-xs text-muted-foreground">Se pega a</span>
-            <Select value={zona.anclaX} onChange={(e) => onActualizar({ anclaX: e.target.value, anclaY: e.target.value })}>
-              {anclasDisponibles.map((a) => <option key={a.id} value={a.id}>{a.nombre || a.id}</option>)}
-            </Select>
+            <span className="text-xs font-medium" style={{ color: colorDeReferencia(anclaActual?.x?.ref) }}>
+              {describirReferencia(anclaActual?.x?.ref)}
+            </span>
           </div>
         ) : (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <span className="w-20 flex-none text-xs text-muted-foreground">Cruce</span>
-            <Select value={zona.modoCruce === 'medio' ? 'medio' : 'esquina'} onChange={(e) => {
-              if (e.target.value === 'otra') onActualizar({ anclaX: zona.anclaY, anclaY: zona.anclaX, modoCruce: 'esquina' });
-              else onActualizar({ modoCruce: e.target.value });
-            }}>
-              <option value="esquina">{etiquetaEsquinaActual}</option>
-              <option value="otra">{etiquetaEsquinaOtra}</option>
-              <option value="medio">a medio camino entre «{zona.anclaX}» y «{zona.anclaY}»</option>
-            </Select>
+            <SelectorCruce
+              zona={zona} etiquetaActual={etiquetaEsquinaActual} etiquetaOtra={etiquetaEsquinaOtra} horiz={horiz} vert={vert}
+              onElegirEsquina={() => onActualizar({ modoCruce: 'esquina' })}
+              onElegirOtra={() => onActualizar({ anclaX: zona.anclaY, anclaY: zona.anclaX, modoCruce: 'esquina' })}
+              onElegirMedio={() => onActualizar({ modoCruce: 'medio' })}
+            />
           </div>
         )}
-        <div className="flex items-center gap-2">
-          <span className="w-20 flex-none text-xs text-muted-foreground">Ese punto es</span>
-          <Select value={zona.origen || 'centro'} onChange={(e) => onActualizar({ origen: e.target.value })}>
-            {ORIGENES_ZONA.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </Select>
+        <div className="flex items-center gap-3">
+          <span className="w-20 flex-none text-xs text-muted-foreground">Punto de ancla</span>
+          <SelectorOrigen valor={zona.origen} onCambiar={(v) => onActualizar({ origen: v })} />
         </div>
         {cruzada ? (
           <button type="button" onClick={onVolverAUnPunto} className="self-start text-xs text-primary hover:underline">Volver a un solo punto de ancla</button>
@@ -984,8 +1112,8 @@ function PanelZona({ zona, anclasDisponibles, anclasResueltas, onRenombrar, onAc
         <LineaMedida etiqueta="Mover Y" valor={zona.offset.y} onCambiar={(m) => onActualizar({ offset: { ...zona.offset, y: m } })} />
         <div className="flex items-center gap-2">
           <span className="w-24 flex-none text-xs text-muted-foreground">Girar</span>
-          <Input className="w-20" type="number" step="1" value={zona.rotacion || 0}
-            onChange={(e) => onActualizar({ rotacion: Number(e.target.value) })} />
+          <InputNumero className="w-20" step={1} value={zona.rotacion || 0}
+            onChange={(n) => onActualizar({ rotacion: n })} />
           <span className="text-xs text-muted-foreground">°</span>
           {[0, 90, 180, 270].map((g) => (
             <button key={g} type="button" onClick={() => onActualizar({ rotacion: g })}

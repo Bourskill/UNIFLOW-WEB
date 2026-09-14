@@ -42,7 +42,7 @@ function PiezaEnLienzo({ pieza }) {
         <Text
           x={4}
           y={4}
-          text={pieza.piezaId + '\n' + pieza.talla + (esRotada ? ' · 180°' : '')}
+          text={pieza.piezaId + '\n' + (pieza.talla || '').toUpperCase() + (esRotada ? ' · 180°' : '')}
           fontSize={11}
           fill="#222"
         />

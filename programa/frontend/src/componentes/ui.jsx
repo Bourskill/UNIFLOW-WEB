@@ -15,7 +15,8 @@ export function Boton({ variante = 'secundario', tamano = 'md', className = '', 
     <button
       className={
         'inline-flex items-center justify-center gap-1.5 rounded-lg border font-medium ' +
-        'transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ' +
+        'transition-[color,background-color,border-color,transform] active:scale-[0.97] ' +
+        'disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 cursor-pointer ' +
         tamanos + ' ' + ESTILOS_BOTON[variante] + ' ' + className
       }
       {...props}

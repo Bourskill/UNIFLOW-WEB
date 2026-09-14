@@ -8,6 +8,7 @@ import { Historial } from './paginas/Historial.jsx';
 import { Icono } from './componentes/Icono.jsx';
 import { EstadoServidor } from './componentes/EstadoServidor.jsx';
 import { SubTabs } from './componentes/SubTabs.jsx';
+import { PanelDock } from './componentes/PanelDock.jsx';
 
 // Memoizados: aunque un apartado ya visitado se queda montado (oculto con
 // `hidden`, ver más abajo), sin esto igual volvía a RENDERIZARSE entero --
@@ -67,23 +68,29 @@ function App() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <nav className="flex w-56 flex-none flex-col gap-1 border-r border-border bg-surface p-3">
-          {PESTANAS.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => ir(p.id)}
-              className={
-                'flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ' +
-                (pestana === p.id
-                  ? 'bg-primary-soft font-medium text-primary'
-                  : 'text-muted-foreground hover:bg-surface-muted hover:text-foreground')
-              }
-            >
-              <Icono nombre={p.icono} />
-              {p.etiqueta}
-            </button>
-          ))}
-        </nav>
+        <PanelDock storageKey="apartados" lado="izquierda" anchoPorDefecto={224} anchoMinimo={160} anchoMaximo={320}>
+          {(colapsado) => (
+            <nav className="flex flex-col gap-1 p-3">
+              {PESTANAS.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => ir(p.id)}
+                  title={colapsado ? p.etiqueta : undefined}
+                  className={
+                    'flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ' +
+                    (colapsado ? 'justify-center px-0' : '') + ' ' +
+                    (pestana === p.id
+                      ? 'bg-primary-soft font-medium text-primary'
+                      : 'text-muted-foreground hover:bg-surface-muted hover:text-foreground')
+                  }
+                >
+                  <Icono nombre={p.icono} />
+                  {!colapsado && p.etiqueta}
+                </button>
+              ))}
+            </nav>
+          )}
+        </PanelDock>
 
         <main className="min-h-0 flex-1">
           {visitadas.has('piezas') && (
@@ -98,11 +105,15 @@ function App() {
             </div>
           )}
           {visitadas.has('diseno') && (
-            <div hidden={pestana !== 'diseno'} className="h-full overflow-y-auto p-8">
+            <div hidden={pestana !== 'diseno'} className="h-full">
               {/* Una sola pantalla, sin sub-pestañas -- unificado a pedido del
                   usuario (antes Diseños y Productos eran dos pasos separados
                   que había que guardar por separado y volver a conectar por
-                  nombre; ver Productos.jsx). */}
+                  nombre; ver Productos.jsx). Sin scroll/padding acá: Productos
+                  arma su propio layout de dos paneles (contenido a la
+                  izquierda con scroll propio + panel de zona anclado a la
+                  derecha) para que el lienzo nunca se reacomode cuando el
+                  panel de zona cambia de alto -- ver PanelDock.jsx. */}
               <ProductosMemo recargarSenal={recargarSenal} onCambio={marcarCambio} />
             </div>
           )}

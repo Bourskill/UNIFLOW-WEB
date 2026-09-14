@@ -196,7 +196,7 @@ function FichaPieza({ archivo, onQuitar, onCambio }) {
               {tallasOrdenadas.length === 0 ? (
                 <span className="text-xs text-faint-foreground">No se detectó ninguna talla.</span>
               ) : (
-                tallasOrdenadas.map((talla) => <Chip key={talla} tono="activo">{talla}</Chip>)
+                tallasOrdenadas.map((talla) => <Chip key={talla} tono="activo" className="uppercase">{talla}</Chip>)
               )}
               <Boton tamano="sm" variante="fantasma" type="button" onClick={() => setEditando((v) => !v)}>
                 {editando ? 'Listo' : 'Editar'}

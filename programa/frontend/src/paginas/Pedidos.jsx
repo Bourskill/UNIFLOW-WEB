@@ -208,7 +208,7 @@ export function Pedidos({ recargarSenal }) {
                         onChange={(e) => actualizarLinea(linea.id, { talla: e.target.value })}
                       >
                         {tallas.length === 0 && <option value="">— sin talla —</option>}
-                        {tallas.map((t) => <option key={t} value={t}>{t}</option>)}
+                        {tallas.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
                       </Select>
                       <Input
                         className="max-w-[140px]"
@@ -275,7 +275,7 @@ export function Pedidos({ recargarSenal }) {
                   <span className="text-muted-foreground">
                     — {p.lineas.length} prenda(s):{' '}
                     {p.lineas.map((l) =>
-                      l.talla + ' ' + l.nombre + '/' + l.numero + (l.piezasExcluidas?.length ? ' (sin ' + l.piezasExcluidas.join(', ') + ')' : '')
+                      (l.talla || '').toUpperCase() + ' ' + l.nombre + '/' + l.numero + (l.piezasExcluidas?.length ? ' (sin ' + l.piezasExcluidas.join(', ') + ')' : '')
                     ).join(', ')}
                   </span>
                 </div>

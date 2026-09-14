@@ -185,7 +185,7 @@ function sinMontonera(lista, maxDim) {
   return salida;
 }
 
-const COLOR = {
+export const COLOR = {
   piquete: '#f5a623', extremo: '#4ade80', caja: '#6b7389', vertice: '#6b7389',
   zona: '#4c8dff', zonaOrigen: '#4ade80',
   ancla: '#4c8dff', zonaRect: '#4c8dff', zonaFuera: '#f87171',
@@ -240,7 +240,7 @@ function medidaLogoAjustada({ cruz, lado, ancho, alto, natural }) {
 // reconciliación de más (no el arrastre en sí) era la otra causa real de
 // que se sintiera con delay.
 const ZonaEnLienzo = memo(function ZonaEnLienzo({
-  zona: z, seleccionada, arrastrando, modo, W, H, R, F, mostrarSola,
+  zona: z, seleccionada, arrastrando, modo, W, H, R, F, mostrarSola, mostrarMarco,
   onSeleccionarZona, iniciarArrastreZona,
 }) {
   const fuera = z.x < 0 || z.y < 0 || z.x + z.ancho > W + 0.01 || z.y + z.alto > H + 0.01;
@@ -254,6 +254,24 @@ const ZonaEnLienzo = memo(function ZonaEnLienzo({
   const medida = esLogo && z.logoRuta
     ? medidaLogoAjustada({ cruz: enCruz, lado: z.ancho, ancho: z.ancho, alto: z.alto, natural })
     : null;
+
+  // El toggle "zona" del panel oculta el marco/cuadrito (rect, cruz, texto)
+  // para previsualizar el diseño real, pero NUNCA el contenido de verdad
+  // (el logo ya colocado) -- ocultar un logo real junto con su marco haría
+  // exactamente lo que el pedido no quería: perder de vista cómo queda el
+  // diseño. Una zona de texto no tiene contenido real que mostrar todavía
+  // (el nombre/número se escribe recién en producción), así que oculta
+  // entera.
+  if (!mostrarMarco) {
+    if (esLogo && z.logoRuta && medida) {
+      return (
+        <g transform={transformZona} onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }}>
+          <image href={z.logoRuta} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
+        </g>
+      );
+    }
+    return null;
+  }
 
   return (
     <g transform={transformZona}
@@ -597,6 +615,7 @@ export function LienzoAnclaje({
               modo={modo}
               W={W} H={H} R={R} F={F}
               mostrarSola={zonasResueltas.length <= 1}
+              mostrarMarco={leyenda.zonas !== false}
               onSeleccionarZona={onSeleccionarZona}
               iniciarArrastreZona={iniciarArrastreZona}
             />

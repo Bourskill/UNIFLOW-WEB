@@ -34,8 +34,8 @@ function FilaPieza({ pieza, usadaEn, onCambio, onBorrar }) {
       const r = await reprocesarPieza(pieza.id);
       setResultadoReproceso({
         tono: 'info',
-        texto: 'Recalculadas: ' + r.tallasReprocesadas.join(', ') +
-          (r.tallasSinCoincidencia.length ? ' · sin coincidencia en el archivo: ' + r.tallasSinCoincidencia.join(', ') : ''),
+        texto: 'Recalculadas: ' + r.tallasReprocesadas.map((t) => t.toUpperCase()).join(', ') +
+          (r.tallasSinCoincidencia.length ? ' · sin coincidencia en el archivo: ' + r.tallasSinCoincidencia.map((t) => t.toUpperCase()).join(', ') : ''),
       });
       onCambio();
     } catch (e) {
@@ -63,7 +63,7 @@ function FilaPieza({ pieza, usadaEn, onCambio, onBorrar }) {
               <span className="text-xs text-faint-foreground">sin geometría cargada</span>
             ) : (
               tallas.map((t) => (
-                <Chip key={t}>{t}: {pieza.dimensionesPorTalla[t].anchoCm}×{pieza.dimensionesPorTalla[t].altoCm}cm</Chip>
+                <Chip key={t}>{t.toUpperCase()}: {pieza.dimensionesPorTalla[t].anchoCm}×{pieza.dimensionesPorTalla[t].altoCm}cm</Chip>
               ))
             )}
           </div>

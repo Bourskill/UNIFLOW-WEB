@@ -47,7 +47,7 @@ function FilaGeneracion({ generacion, onReponer }) {
             <div key={p.id} className="flex items-center justify-between gap-2 rounded-md bg-surface-muted px-3 py-2 text-sm">
               <div className="flex items-center gap-2">
                 <span>{p.piezaId}</span>
-                <Chip tono={p.estado === 'repuesta' ? 'activo' : 'neutro'}>{p.talla}</Chip>
+                <Chip tono={p.estado === 'repuesta' ? 'activo' : 'neutro'} className="uppercase">{p.talla}</Chip>
                 {p.estado === 'repuesta' && <Chip tono="activo">repuesta</Chip>}
               </div>
               <Boton
