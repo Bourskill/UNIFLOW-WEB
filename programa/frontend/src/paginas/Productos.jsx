@@ -261,6 +261,19 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     return lista.find((n) => n.id === id) || null;
   }
 
+  // Clicar el mismo ancla/zona que ya está seleccionada la cierra, clicar
+  // otra distinta la selecciona -- pedido explícito ("si yo quiero salirme
+  // presiono el nombre de la zona y ya"). Un solo lugar para esto: estaba
+  // repetido en tres sitios (lienzo·ancla, lienzo·zona, chip de zona), y el
+  // chip había quedado sin comparar `tipo`, solo `id` -- inofensivo hoy
+  // porque los ids de ancla ("A1"…) y zona ("ZONA_1"…) nunca chocan
+  // (`idLibre` los arma con prefijos distintos, y `renombrarNodo` exige
+  // unicidad cruzada), pero un futuro cambio en cómo se arman los ids no
+  // tendría por qué preservar esa distancia.
+  function toggleSeleccion(tipo, id) {
+    setSeleccion((s) => (s?.tipo === tipo && s.id === id ? null : { tipo, id }));
+  }
+
   // ---- crear: un solo gesto ("+ Zona") crea el ancla Y la zona juntas --
   function crearAncla(cand) {
     const nuevaId = idLibre('A', anclaje.anclas);
@@ -678,8 +691,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 zonasResueltas={zonasDeEstaPiezaConDatos}
                 anclaSeleccionadaId={seleccion?.tipo === 'ancla' ? seleccion.id : null}
                 zonaSeleccionadaId={seleccion?.tipo === 'zona' ? seleccion.id : null}
-                onSeleccionarAncla={(id) => setSeleccion((s) => (s?.tipo === 'ancla' && s.id === id ? null : { tipo: 'ancla', id }))}
-                onSeleccionarZona={(id) => setSeleccion((s) => (s?.tipo === 'zona' && s.id === id ? null : { tipo: 'zona', id }))}
+                onSeleccionarAncla={(id) => toggleSeleccion('ancla', id)}
+                onSeleccionarZona={(id) => toggleSeleccion('zona', id)}
                 leyenda={leyenda}
                 modo={modo}
                 onElegirCandidato={elegirCandidato}
@@ -731,7 +744,17 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                       real: "ese botón está malo"). */}
                   <span className={'absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ' + (bordeContraste.activo ? 'translate-x-4' : 'translate-x-0')} />
                 </button>
-                <span className="text-sm font-medium text-foreground">Contorno para láser</span>
+                {/* Clickeable también en el texto -- antes era un <label> nativo
+                    alrededor del checkbox (cualquier parte de la frase
+                    activaba el toggle); al pasar a un switch propio con
+                    role="switch" se perdió ese área grande sin querer, y
+                    solo el interruptor de 36×20px seguía respondiendo. */}
+                <span
+                  className="cursor-pointer select-none text-sm font-medium text-foreground"
+                  onClick={() => setBordeContraste((prev) => ({ ...prev, activo: !prev.activo }))}
+                >
+                  Contorno para láser
+                </span>
                 <Ayuda>
                   El mismo contorno sirve para dos cosas: se ve en el editor y en el PDF encima del
                   diseño recortado (para no perder de vista los piquetes) y es el que se corta de
@@ -821,7 +844,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 ) : (
                   <div className="flex flex-wrap gap-1.5">
                     {anclaje.zonas.filter((z) => z.pieza === piezaActiva).map((z) => (
-                      <button key={z.id} type="button" onClick={() => setSeleccion((s) => (s?.id === z.id ? null : { tipo: 'zona', id: z.id }))}
+                      <button key={z.id} type="button" onClick={() => toggleSeleccion('zona', z.id)}
                         className={'group flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors ' +
                           (seleccion?.id === z.id ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface text-muted-foreground hover:border-primary')}>
                         {(z.nombre || z.id) + ' · ' + tipoCortoDeZona(z)}
@@ -841,6 +864,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 {seleccionado && seleccion.tipo === 'ancla' && (
                   <PanelAncla
                     ancla={seleccionado}
+                    onCerrar={() => toggleSeleccion('ancla', seleccionado.id)}
                     onRenombrar={(v) => renombrarNodo('ancla', seleccionado.id, v)}
                     onRecolocar={(eje) => { setModo('recolocar'); setRecolocarInfo({ anclaId: seleccionado.id, eje }); }}
                     onCambiarEje={(eje, cambios) => setAnclaje((prev) => ({ ...prev, anclas: prev.anclas.map((a) => (a.id === seleccionado.id ? { ...a, [eje]: { ...a[eje], ...cambios } } : a)) }))}
@@ -883,11 +907,20 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
 // "Pegado a" es un DATO, no un campo a rellenar -- el punto se señala
 // clicando en el lienzo (Recolocar), no eligiendo de un desplegable "el
 // piquete 2 de 5" sin ver dónde está. Puerto de bloqueEje() (main.js).
-function PanelAncla({ ancla, onRenombrar, onRecolocar, onCambiarEje, onQuitar, resueltoAncla, motivo }) {
+function PanelAncla({ ancla, onCerrar, onRenombrar, onRecolocar, onCambiarEje, onQuitar, resueltoAncla, motivo }) {
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-3">
       <div className="flex items-center justify-between">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">Punto de ancla</h4>
+        {/* Clickeable para cerrar, mismo gesto que el nombre de una zona --
+            necesario acá porque el punto en el lienzo puede quedar oculto
+            (toggle "zona" apagado) sin otra forma de deseleccionarlo. */}
+        <h4
+          className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-faint-foreground hover:text-foreground"
+          onClick={onCerrar}
+          title="Cerrar"
+        >
+          Punto de ancla
+        </h4>
         <Boton variante="fantasma" tamano="sm" type="button" onClick={onQuitar}>Quitar</Boton>
       </div>
       <Campo etiqueta="Se llama">

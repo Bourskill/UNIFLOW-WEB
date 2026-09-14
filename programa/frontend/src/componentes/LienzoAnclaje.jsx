@@ -644,8 +644,8 @@ export function LienzoAnclaje({
 
         <CandidatosCapa cands={cands} modo={modo} onElegirCandidato={onElegirCandidato} R={R} />
         {/* Misma lógica que los candidatos de zona más arriba: las cruces de
-            ancla son plumbing de las zonas, no parte del diseño -- el toggle
-            "zona" las oculta junto con el resto del "cuadrito". */}
+            ancla son mecanismo interno de las zonas, no parte del diseño --
+            el interruptor "zona" las oculta junto con el resto del "cuadrito". */}
         {leyenda.zonas !== false && (
           <AnclasCapa anclasResueltas={anclasResueltas} anclaSeleccionadaId={anclaSeleccionadaId} onSeleccionarAncla={onSeleccionarAncla} R={R} />
         )}
