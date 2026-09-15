@@ -5,6 +5,7 @@ import {
   listarPiezas,
   listarPedidos,
   crearPedido,
+  editarPedido,
   eliminarPedido,
   anidarDesdePedido,
   generarPdf,
@@ -87,6 +88,9 @@ export function Pedidos({ recargarSenal }) {
   const [cliente, setCliente] = useState('');
   const [lineas, setLineas] = useState([]);
   const [error, setError] = useState(null);
+  // Con id, el formulario de arriba (mismo para crear y editar) está
+  // modificando ESE pedido en vez de armar uno nuevo -- ver editar()/guardar().
+  const [editandoId, setEditandoId] = useState(null);
 
   const [pedidoParaGenerar, setPedidoParaGenerar] = useState(null);
   const [anchoLienzoCm, setAnchoLienzoCm] = useState(160);
@@ -170,8 +174,10 @@ export function Pedidos({ recargarSenal }) {
       return;
     }
     try {
-      await crearPedido({ cliente, lineas });
+      if (editandoId) await editarPedido(editandoId, { cliente, lineas });
+      else await crearPedido({ cliente, lineas });
       setCliente('');
+      setEditandoId(null);
       setLineas(
         productos.length > 0
           ? [lineaVacia(productos[0].id, tallasDelProducto(productos[0].id, productos, grupos, piezas)[0])]
@@ -183,9 +189,28 @@ export function Pedidos({ recargarSenal }) {
     }
   }
 
+  function editar(pedido) {
+    setEditandoId(pedido.id);
+    setCliente(pedido.cliente);
+    setLineas(pedido.lineas);
+    setError(null);
+  }
+
+  function cancelarEdicion() {
+    setEditandoId(null);
+    setCliente('');
+    setLineas(
+      productos.length > 0
+        ? [lineaVacia(productos[0].id, tallasDelProducto(productos[0].id, productos, grupos, piezas)[0])]
+        : []
+    );
+    setError(null);
+  }
+
   async function borrar(id) {
     await eliminarPedido(id);
     if (pedidoParaGenerar === id) setPedidoParaGenerar(null);
+    if (editandoId === id) cancelarEdicion();
     await recargar();
   }
 
@@ -223,6 +248,9 @@ export function Pedidos({ recargarSenal }) {
         <p className="text-sm text-muted-foreground">Creá primero un producto (Diseño → Productos).</p>
       ) : (
         <Tarjeta as="form" onSubmit={guardar} className="flex max-w-2xl flex-col gap-4">
+          {editandoId && (
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Editando pedido existente</p>
+          )}
           <Campo etiqueta="Cliente / equipo">
             <Input value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Club Atlético X" />
           </Campo>
@@ -310,7 +338,10 @@ export function Pedidos({ recargarSenal }) {
 
           <div className="flex gap-2">
             <Boton type="button" onClick={agregarLinea}>+ Agregar prenda</Boton>
-            <Boton variante="primario" type="submit">Guardar pedido</Boton>
+            <Boton variante="primario" type="submit">{editandoId ? 'Guardar cambios' : 'Guardar pedido'}</Boton>
+            {editandoId && (
+              <Boton variante="fantasma" type="button" onClick={cancelarEdicion}>Cancelar edición</Boton>
+            )}
           </div>
           {error && <Aviso tono="error">{error}</Aviso>}
         </Tarjeta>
@@ -343,6 +374,7 @@ export function Pedidos({ recargarSenal }) {
                 <Boton variante="secundario" tamano="sm" onClick={() => { setPedidoParaGenerar(p.id); setResultado(null); }}>
                   Generar
                 </Boton>
+                <Boton tamano="sm" onClick={() => editar(p)}>Editar</Boton>
                 <Boton variante="fantasma" tamano="sm" onClick={() => borrar(p.id)}>Eliminar</Boton>
               </div>
             ))}

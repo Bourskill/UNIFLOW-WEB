@@ -115,6 +115,10 @@ export function crearGrupo(grupo) {
   return pedirJson('/grupos', { method: 'POST', body: JSON.stringify(grupo) });
 }
 
+export function editarGrupo(id, cambios) {
+  return pedirJson('/grupos/' + id, { method: 'PUT', body: JSON.stringify(cambios) });
+}
+
 export function eliminarGrupo(id) {
   return pedirJson('/grupos/' + id, { method: 'DELETE' });
 }
@@ -147,6 +151,10 @@ export function listarDisenos() {
 
 export function crearDiseno(diseno) {
   return pedirJson('/disenos', { method: 'POST', body: JSON.stringify(diseno) });
+}
+
+export function editarDiseno(id, cambios) {
+  return pedirJson('/disenos/' + id, { method: 'PUT', body: JSON.stringify(cambios) });
 }
 
 export function eliminarDiseno(id) {
@@ -193,6 +201,10 @@ export function listarPedidos() {
 
 export function crearPedido(pedido) {
   return pedirJson('/pedidos', { method: 'POST', body: JSON.stringify(pedido) });
+}
+
+export function editarPedido(id, cambios) {
+  return pedirJson('/pedidos/' + id, { method: 'PUT', body: JSON.stringify(cambios) });
 }
 
 export function eliminarPedido(id) {

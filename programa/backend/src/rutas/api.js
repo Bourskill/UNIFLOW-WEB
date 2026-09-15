@@ -476,6 +476,37 @@ router.post('/grupos', async (req, res) => {
   res.status(201).json(grupo);
 });
 
+// Editar nombre y/o la lista de piezas (agregar, quitar, o cambiar a qué
+// pieza de biblioteca apunta un rol ya existente). Sin chequeo propio de qué
+// Producto ya usa este grupo -- mismo modelo de confianza que el resto de
+// los DELETE de acá (el frontend avisa antes de tocar un rol que un
+// Producto ya tenga anclado, ver Prendas.jsx). Renombrar o borrar un rol NO
+// rompe la referencia por sí solo (Producto.anclaje ancla contra el ROL, no
+// contra el nombre del grupo), pero si ese rol deja de existir en el grupo,
+// el próximo /anclaje/resolver de ese Producto no va a encontrar su
+// geometría -- por eso el aviso vive en el frontend, no acá.
+router.put('/grupos/:id', async (req, res) => {
+  const { nombre, piezas } = req.body;
+  const grupo = await leerRegistro('grupos', req.params.id);
+  if (!grupo) return res.status(404).json({ error: 'Grupo no encontrado' });
+
+  if (nombre !== undefined) grupo.nombre = nombre;
+  if (piezas !== undefined) {
+    if (!Array.isArray(piezas) || piezas.length === 0) {
+      return res.status(400).json({ error: 'Una prenda necesita al menos una pieza' });
+    }
+    for (const gp of piezas) {
+      if (!gp.piezaId || !gp.rol) {
+        return res.status(400).json({ error: 'Cada pieza del grupo necesita piezaId y rol' });
+      }
+    }
+    grupo.piezas = piezas;
+  }
+  await actualizarRegistro('grupos', req.params.id, grupo);
+  await registrarEvento('grupos', 'actualizar', req.params.id, grupo.nombre);
+  res.json(grupo);
+});
+
 router.delete('/grupos/:id', async (req, res) => {
   const grupo = await leerRegistro('grupos', req.params.id);
   await borrarRegistro('grupos', req.params.id);
