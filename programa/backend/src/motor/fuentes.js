@@ -6,9 +6,21 @@
 //
 // v0: recibe un objeto de fuente ya cargado con fontkit (o compatible, con
 // .hasGlyphForCodePoint / .characterSet) — la carga de archivos de fuente en
-// sí se resuelve cuando exista un catálogo real de fuentes en el proyecto.
+// sí se resuelve cuando exista un catálogo real de fuentes en el proyecto
+// (pasada 34, rutas/api.js·POST /fuentes, ya conectado).
+//
+// Límite real, probado a mano: esto confirma que existe UN GLIFO en esa
+// posición Unicode, no que se vea como la letra esperada -- una fuente de
+// íconos (probado con Wingdings real) también "soporta" ñ/acentos según
+// este chequeo, porque su cmap sí mapea algo a esos codepoints (un dingbat,
+// no la letra). Mismo enfoque que usan herramientas conocidas de cobertura
+// de fuentes (cmap, no verificación visual) -- para el caso real que este
+// chequeo existe (una fuente de letras real que le faltan LOS ACENTOS
+// puntuales), funciona bien; una fuente de símbolos subida por error se
+// nota a simple vista en la vista previa del PDF, no hace falta que este
+// chequeo también lo agarre.
 
-const CARACTERES_CRITICOS = ['ñ', 'Ñ', 'á', 'é', 'í', 'ó', 'ú', 'Á', 'É', 'Í', 'Ó', 'Ú'];
+export const CARACTERES_CRITICOS = ['ñ', 'Ñ', 'á', 'é', 'í', 'ó', 'ú', 'Á', 'É', 'Í', 'Ó', 'Ú'];
 
 /**
  * @param {{ hasGlyphForCodePoint?: (cp: number) => boolean, characterSet?: number[] }} fuente

@@ -67,8 +67,19 @@ create table if not exists eventos (
   creado_en timestamptz not null default now()
 );
 
+-- Fuentes: catálogo de tipografías propias (TTF/OTF) para nombre/número/
+-- texto fijo de una zona -- sin esto, todo se escribía siempre con la
+-- Helvetica estándar de pdf-lib. `datos` guarda nombre, la URL del archivo
+-- en Storage, y la cobertura de ñ/acentos ya calculada UNA vez al subirla
+-- (motor/fuentes.js·verificarCobertura), no en cada PDF generado.
+create table if not exists fuentes (
+  id text primary key,
+  datos jsonb not null,
+  creado_en timestamptz not null default now()
+);
+
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on
-  piezas, grupos, disenos, productos, pedidos, generaciones, plantillas
+  piezas, grupos, disenos, productos, pedidos, generaciones, plantillas, fuentes
   to anon, authenticated;
 grant select, insert on eventos to anon, authenticated;

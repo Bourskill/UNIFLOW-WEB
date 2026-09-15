@@ -14,6 +14,7 @@ import {
   crearPlantilla,
   resolverAnclaje,
   subirArchivo,
+  listarFuentes,
 } from '../api.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
@@ -134,6 +135,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   const [disenos, setDisenos] = useState([]);
   const [productos, setProductos] = useState([]);
   const [piezas, setPiezas] = useState([]);
+  const [fuentes, setFuentes] = useState([]);
   const [nombre, setNombre] = useState('');
   // grupoIds: uno o más -- productos multi-prenda ("kit": camiseta + short
   // + medias en un solo armado). Un solo elemento es el caso de siempre.
@@ -180,6 +182,10 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       setProductos(ps);
       setPiezas(pzs);
       if (gs.length > 0 && grupoIds.length === 0) setGrupoIds([gs[0].id]);
+      // Nunca puede tumbar la carga de esta pantalla entera por faltar la
+      // tabla `fuentes` (recién agregada) -- sin ella, el selector de
+      // fuente de cada zona simplemente no tiene más opción que Helvetica.
+      setFuentes(await listarFuentes().catch(() => []));
     } finally {
       setCargando(false);
     }
@@ -1032,6 +1038,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 {seleccionado && seleccion.tipo === 'zona' && (
                   <PanelZona
                     zona={seleccionado}
+                    fuentes={fuentes}
                     anclasDisponibles={anclaje.anclas.filter((a) => a.pieza === piezaActiva)}
                     anclasResueltas={resuelto?.anclas || {}}
                     onRenombrar={(v) => renombrarNodo('zona', seleccionado.id, v)}
@@ -1253,7 +1260,7 @@ function SelectorCruce({ zona, etiquetaActual, etiquetaOtra, horiz, vert, onEleg
 }
 
 // ============ panel: zona ============
-function PanelZona({ zona, anclasDisponibles, anclasResueltas, onRenombrar, onActualizar, onCambiarGrupo, hermanas, onQuitar, onDuplicar, onCruzar, onVolverAUnPunto }) {
+function PanelZona({ zona, fuentes, anclasDisponibles, anclasResueltas, onRenombrar, onActualizar, onCambiarGrupo, hermanas, onQuitar, onDuplicar, onCruzar, onVolverAUnPunto }) {
   const cruzada = !!(zona.anclaX && zona.anclaY && zona.anclaX !== zona.anclaY);
   const rxA = anclasResueltas[zona.anclaX], ryA = anclasResueltas[zona.anclaY];
   let etiquetaEsquinaActual = 'esquina', etiquetaEsquinaOtra = 'la otra esquina';
@@ -1391,6 +1398,21 @@ function PanelZona({ zona, anclasDisponibles, anclasResueltas, onRenombrar, onAc
           <span className="text-xs text-muted-foreground">Color del texto</span>
           <input type="color" className="h-8 w-8 rounded border border-border" value={zona.colorHex} onChange={(e) => onActualizar({ colorHex: e.target.value })} />
           <Ayuda>Con qué color se imprime este nombre/número/texto de verdad, en el PDF final (sublimación).</Ayuda>
+        </div>
+      )}
+
+      {zona.tipo !== 'logo' && (
+        <div className="flex items-center gap-2 border-t border-border pt-3">
+          <span className="text-xs text-muted-foreground">Fuente</span>
+          <Select className="max-w-[180px]" value={zona.fuenteId || ''} onChange={(e) => onActualizar({ fuenteId: e.target.value || null })}>
+            <option value="">Helvetica (estándar)</option>
+            {fuentes.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.nombre}{!f.coberturaCompleta ? ' (sin ñ/acentos)' : ''}
+              </option>
+            ))}
+          </Select>
+          <Ayuda>Tipografías propias se cargan en Moldería → Fuentes.</Ayuda>
         </div>
       )}
     </div>

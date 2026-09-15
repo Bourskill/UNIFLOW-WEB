@@ -8,6 +8,8 @@ import { resolverPiezasDePedido, tallaRealDePieza } from '../motor/resolverPedid
 import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
 import { geometriaDelGrupo, geometriaParaAnclaje } from '../motor/geometriaAnclaje.js';
 import { generarDxfNesting } from '../motor/exportarDxf.js';
+import { verificarCobertura, CARACTERES_CRITICOS } from '../motor/fuentes.js';
+import fontkit from '@pdf-lib/fontkit';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
 import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf } from '../motor/importarPdf.js';
 
@@ -32,6 +34,11 @@ const EXTENSION_POR_TIPO = {
   'application/pdf': '.pdf',
   'application/dxf': '.dxf',
   'image/vnd.dxf': '.dxf',
+  'font/ttf': '.ttf',
+  'font/otf': '.otf',
+  'application/x-font-ttf': '.ttf',
+  'application/font-sfnt': '.otf',
+  'font/sfnt': '.otf',
 };
 
 // Punto único de subida de archivos pesados (imagen de Diseño, PDF/DXF
@@ -60,6 +67,60 @@ router.post('/archivos', async (req, res) => {
 function resumenDe(registro) {
   return registro?.nombre || registro?.id || null;
 }
+
+// --- Fuentes (catálogo de tipografías propias) -----------------------------
+// UNIFLOW/Illustrator nunca validó si una fuente tenía ñ/acentos antes de
+// escribir con ella -- hallazgo real de la investigación de un competidor
+// (Sublimifyer catalogaba cada fuente por su cobertura). Acá se calcula UNA
+// vez al subir el archivo, no en cada PDF generado.
+router.get('/fuentes', async (req, res) => {
+  res.json(await leerColeccion('fuentes'));
+});
+
+router.post('/fuentes', async (req, res) => {
+  const { nombre, base64, contentType } = req.body;
+  if (!nombre || !base64 || !contentType) {
+    return res.status(400).json({ error: 'Faltan nombre, base64 o contentType' });
+  }
+  const buffer = Buffer.from(base64, 'base64');
+  const extension = EXTENSION_POR_TIPO[contentType];
+  if (!extension || !['.ttf', '.otf'].includes(extension)) {
+    return res.status(400).json({ error: 'Solo se aceptan archivos .ttf o .otf' });
+  }
+
+  let fuenteParseada;
+  try {
+    fuenteParseada = fontkit.create(buffer);
+  } catch (error) {
+    return res.status(400).json({ error: 'No se pudo leer el archivo de fuente: ' + error.message });
+  }
+  const cobertura = verificarCobertura(fuenteParseada, CARACTERES_CRITICOS.join(''));
+
+  const url = await subirArchivo(
+    nombre.replace(/[^a-z0-9_-]/gi, '_') + '-' + nanoid() + extension,
+    buffer,
+    contentType
+  );
+
+  const registro = {
+    id: nanoid(),
+    nombre,
+    archivoUrl: url,
+    formatoOriginal: extension.slice(1),
+    coberturaCompleta: cobertura.soportado,
+    caracteresFaltantes: cobertura.faltantes,
+  };
+  await crearRegistro('fuentes', registro);
+  await registrarEvento('fuentes', 'crear', registro.id, registro.nombre);
+  res.status(201).json(registro);
+});
+
+router.delete('/fuentes/:id', async (req, res) => {
+  const fuente = await leerRegistro('fuentes', req.params.id);
+  await borrarRegistro('fuentes', req.params.id);
+  await registrarEvento('fuentes', 'borrar', req.params.id, fuente?.nombre);
+  res.status(204).end();
+});
 
 function crudSimple(nombreColeccion) {
   router.get('/' + nombreColeccion, async (req, res) => {
@@ -651,6 +712,11 @@ router.post('/nesting/desde-pedido', async (req, res) => {
     leerColeccion('piezas'),
     leerColeccion('disenos'),
   ]);
+  // Nunca puede tumbar la generación real de un pedido por faltar la tabla
+  // `fuentes` (recién agregada, hace falta correr supabase-schema.sql) --
+  // sin ella, cada zona simplemente cae a la Helvetica estándar de siempre
+  // (ver resolverPedido.js), no se bloquea nada.
+  const fuentes = await leerColeccion('fuentes').catch(() => []);
 
   const pedido = pedidos.find((p) => p.id === pedidoId);
   if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -660,7 +726,7 @@ router.post('/nesting/desde-pedido', async (req, res) => {
 
   let piezasParaAnidar;
   try {
-    piezasParaAnidar = resolverPiezasDePedido({ pedido, productos, grupos, piezas, disenos });
+    piezasParaAnidar = resolverPiezasDePedido({ pedido, productos, grupos, piezas, disenos, fuentes });
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }

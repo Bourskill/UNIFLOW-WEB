@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "prueba": "node pruebas/prueba-anclaje.js && node pruebas/prueba-piquetes.js && node pruebas/prueba-salientes.js && node pruebas/prueba-offset-contorno.js && node pruebas/prueba-versionado.js && node pruebas/prueba-talla-unica.js && node pruebas/prueba-multi-prenda.js && node pruebas/prueba-exportar-dxf.js"
+    "prueba": "node pruebas/prueba-anclaje.js && node pruebas/prueba-piquetes.js && node pruebas/prueba-salientes.js && node pruebas/prueba-offset-contorno.js && node pruebas/prueba-versionado.js && node pruebas/prueba-talla-unica.js && node pruebas/prueba-multi-prenda.js && node pruebas/prueba-exportar-dxf.js && node pruebas/prueba-fuentes.js"
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
     "@supabase/supabase-js": "^2.116.0",
     "clipper-lib": "^6.4.2",
     "cors": "^2.8.5",

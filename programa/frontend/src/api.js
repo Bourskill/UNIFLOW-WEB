@@ -42,6 +42,24 @@ export function subirArchivo(base64, contentType, nombre) {
   );
 }
 
+// --- Fuentes (catálogo de tipografías propias) ------------------------------
+// A diferencia de subirArchivo (que sube y listo), acá el backend además
+// parsea el archivo y calcula la cobertura de ñ/acentos UNA vez (ver
+// rutas/api.js·POST /fuentes) -- por eso no es simplemente subirArchivo +
+// crearRegistro por separado.
+
+export function listarFuentes() {
+  return pedirJson('/fuentes');
+}
+
+export function crearFuente({ nombre, base64, contentType }) {
+  return pedirJson('/fuentes', { method: 'POST', body: JSON.stringify({ nombre, base64, contentType }) });
+}
+
+export function eliminarFuente(id) {
+  return pedirJson('/fuentes/' + id, { method: 'DELETE' });
+}
+
 // --- Piezas (biblioteca) ---------------------------------------------------
 
 export function listarPiezas() {

@@ -3,6 +3,7 @@ import { Formulario } from './paginas/Formulario.jsx';
 import { Prendas } from './paginas/Prendas.jsx';
 import { Piezas } from './paginas/Piezas.jsx';
 import { Plantillas } from './paginas/Plantillas.jsx';
+import { Fuentes } from './paginas/Fuentes.jsx';
 import { Productos } from './paginas/Productos.jsx';
 import { Pedidos } from './paginas/Pedidos.jsx';
 import { Historial } from './paginas/Historial.jsx';
@@ -21,6 +22,7 @@ import { PanelDock } from './componentes/PanelDock.jsx';
 const ProductosMemo = memo(Productos);
 const PiezasMemo = memo(Piezas);
 const PlantillasMemo = memo(Plantillas);
+const FuentesMemo = memo(Fuentes);
 const PrendasMemo = memo(Prendas);
 const FormularioMemo = memo(Formulario);
 const PedidosMemo = memo(Pedidos);
@@ -123,6 +125,7 @@ function App() {
                   { id: 'prendas', etiqueta: 'Prendas', contenido: <PrendasMemo recargarSenal={recargarSenal} /> },
                   { id: 'biblioteca', etiqueta: 'Biblioteca', contenido: <PiezasMemo recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
                   { id: 'plantillas', etiqueta: 'Plantillas', contenido: <PlantillasMemo recargarSenal={recargarSenal} onUsarPlantilla={usarPlantilla} /> },
+                  { id: 'fuentes', etiqueta: 'Fuentes', contenido: <FuentesMemo /> },
                 ]}
               />
             </div>

@@ -11,6 +11,7 @@ import {
   pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath,
 } from 'pdf-lib';
 import ClipperLib from 'clipper-lib';
+import fontkit from '@pdf-lib/fontkit';
 
 const CM_A_PUNTOS = 28.3465;
 
@@ -111,8 +112,31 @@ export function offsetPoligono(vertices, distancia) {
 
 export async function generarPdfNesting(resultadoNesting) {
   const pdf = await PDFDocument.create();
+  pdf.registerFontkit(fontkit);
   const fuente = await pdf.embedFont(StandardFonts.Helvetica);
   const fuenteTexto = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  // Fuente propia elegida para una zona puntual (pasada 34, catálogo de
+  // tipografías) -- se descarga y embebe UNA sola vez por URL aunque la
+  // misma fuente se use en muchas piezas/textos del mismo PDF. Si falla
+  // (red, archivo corrupto), cae a la Helvetica de siempre -- una fuente
+  // rota nunca puede tumbar la generación real de un pedido.
+  const cacheFuentes = new Map();
+  async function fuentePersonalizada(url) {
+    if (!url) return null;
+    if (cacheFuentes.has(url)) return cacheFuentes.get(url);
+    let embebida = null;
+    try {
+      const respuesta = await fetch(url);
+      if (!respuesta.ok) throw new Error('HTTP ' + respuesta.status);
+      const bytes = Buffer.from(await respuesta.arrayBuffer());
+      embebida = await pdf.embedFont(bytes);
+    } catch (error) {
+      console.error('No se pudo usar la fuente personalizada (' + url + '): ' + error.message + ' -- se usa Helvetica.');
+    }
+    cacheFuentes.set(url, embebida);
+    return embebida;
+  }
 
   const anchoPt = resultadoNesting.anchoLienzoCm * CM_A_PUNTOS;
   const altoPt = resultadoNesting.altoLienzoCm * CM_A_PUNTOS;
@@ -189,11 +213,12 @@ export async function generarPdfNesting(resultadoNesting) {
       // LA PIEZA (no del lienzo) — por eso se sitúan relativos a xPt/yPt.
       const anclaX = xPt + texto.xCm * CM_A_PUNTOS;
       const anclaY = yPt + altoRectPt - texto.yCm * CM_A_PUNTOS - tamanoPt;
+      const fontElegida = (await fuentePersonalizada(texto.fuenteUrl)) || fuenteTexto;
       pagina.drawText(texto.texto, {
         x: anclaX,
         y: anclaY,
         size: tamanoPt,
-        font: fuenteTexto,
+        font: fontElegida,
         color: rgb(color.r, color.g, color.b),
         // Rotar en el mismo sitio donde ya se ancla el texto (su esquina):
         // gira, pero no se corre -- coherente con que nunca estuvo

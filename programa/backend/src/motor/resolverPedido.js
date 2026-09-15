@@ -46,7 +46,7 @@ export function tallaRealDePieza(pieza, tallaPedida) {
   return tallasDisponibles.length === 1 ? tallasDisponibles[0] : tallaPedida;
 }
 
-export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, disenos }) {
+export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, disenos, fuentes }) {
   const piezasParaAnidar = [];
   let contador = 0;
 
@@ -127,6 +127,13 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             cruda?.valorFijo;
           if (!valor) return null;
 
+          // fuenteId (elegida en el panel de la zona, Productos.jsx) apunta
+          // al catálogo de fuentes propias (pasada 34) -- sin elegir
+          // ninguna, o si la fuente elegida se borró de la biblioteca,
+          // fuenteUrl queda null y exportarPdf.js cae a la Helvetica
+          // estándar de siempre (nunca falla por esto).
+          const fuente = cruda?.fuenteId ? fuentes?.find((f) => f.id === cruda.fuenteId) : null;
+
           return {
             texto: String(valor),
             xCm: zona.x,
@@ -136,6 +143,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             altoCm: zona.alto,
             colorHex: cruda?.colorHex || '#000000',
             rotacionGrados: cruda?.rotacion || 0,
+            fuenteUrl: fuente?.archivoUrl || null,
           };
         })
         .filter(Boolean);
