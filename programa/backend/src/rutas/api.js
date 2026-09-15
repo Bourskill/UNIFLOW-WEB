@@ -6,7 +6,8 @@ import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
 import { resolverPiezasDePedido, tallaRealDePieza } from '../motor/resolverPedido.js';
 import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
-import { geometriaDelGrupo } from '../motor/geometriaAnclaje.js';
+import { geometriaDelGrupo, geometriaParaAnclaje } from '../motor/geometriaAnclaje.js';
+import { generarDxfNesting } from '../motor/exportarDxf.js';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
 import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf } from '../motor/importarPdf.js';
 
@@ -607,6 +608,13 @@ router.post('/nesting/desde-grupo', async (req, res) => {
               linea.talla + '. No se genera nada hasta que esté completa.',
           });
         }
+        // El contorno real (no solo ancho/alto) es lo que hace falta para
+        // que el corte láser de verdad recorte la forma de la pieza --
+        // mismas coordenadas cm que ya usa exportarPdf.js/exportarDxf.js.
+        // Sin geometría real cargada para esta talla puntual, queda null
+        // (nunca se inventa un contorno): exportarDxf.js ya sabe excluir
+        // esas piezas en vez de escribir un rectángulo falso.
+        const geo = geometriaParaAnclaje(pieza, tallaReal);
         piezasParaAnidar.push({
           id: 'g' + contador++,
           piezaId: pieza.nombre,
@@ -615,6 +623,7 @@ router.post('/nesting/desde-grupo', async (req, res) => {
           anchoCm: dimension.anchoCm,
           altoCm: dimension.altoCm,
           rotable: !!pieza.rotable,
+          contornoCm: geo?.vertices || null,
         });
       }
     }
@@ -685,6 +694,30 @@ router.post('/nesting/generar', async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', 'attachment; filename="generacion-' + generacion.id + '.pdf"');
   res.send(Buffer.from(pdfBytes));
+});
+
+// Genera el DXF de corte láser a partir de un layout ya anidado (normalmente
+// el de /nesting/desde-grupo) -- el camino SIN personalizar, moldería +
+// talla + cantidad, contorno real de corte. A diferencia de /nesting/generar
+// (PDF), no guarda un registro en `generaciones`: reposición asume un lote
+// personalizado (nombre/número por pieza), que un lote de corte sin
+// personalizar no tiene -- si hace falta reponer una pieza de un corte de
+// láser, se vuelve a generar el DXF entero (es liviano, no hay imagen que
+// re-descargar ni texto que recalibrar).
+router.post('/nesting/generar-dxf', async (req, res) => {
+  const resultadoNesting = req.body;
+  if (!Array.isArray(resultadoNesting?.piezas)) {
+    return res.status(400).json({ error: 'Falta el resultado de nesting a generar' });
+  }
+  let dxfTexto;
+  try {
+    dxfTexto = generarDxfNesting(resultadoNesting);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  res.setHeader('Content-Type', 'application/dxf');
+  res.setHeader('Content-Disposition', 'attachment; filename="corte-laser-' + nanoid() + '.dxf"');
+  res.send(dxfTexto);
 });
 
 // Historial de producción: cada corrida de nesting ya generada, más nueva

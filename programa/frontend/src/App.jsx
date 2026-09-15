@@ -6,6 +6,7 @@ import { Plantillas } from './paginas/Plantillas.jsx';
 import { Productos } from './paginas/Productos.jsx';
 import { Pedidos } from './paginas/Pedidos.jsx';
 import { Historial } from './paginas/Historial.jsx';
+import { CorteLaser } from './paginas/CorteLaser.jsx';
 import { Icono } from './componentes/Icono.jsx';
 import { EstadoServidor } from './componentes/EstadoServidor.jsx';
 import { SubTabs } from './componentes/SubTabs.jsx';
@@ -24,6 +25,7 @@ const PrendasMemo = memo(Prendas);
 const FormularioMemo = memo(Formulario);
 const PedidosMemo = memo(Pedidos);
 const HistorialMemo = memo(Historial);
+const CorteLaserMemo = memo(CorteLaser);
 
 // Tres apartados en el nav (no seis): pantallas relacionadas viven como
 // sub-pestañas DENTRO de un mismo apartado (estilo Google Drive), no como
@@ -148,6 +150,7 @@ function App() {
               <SubTabs
                 tabs={[
                   { id: 'nuevo', etiqueta: 'Nuevo pedido', contenido: <PedidosMemo recargarSenal={recargarSenal} /> },
+                  { id: 'laser', etiqueta: 'Corte láser', contenido: <CorteLaserMemo /> },
                   { id: 'historial', etiqueta: 'Historial', contenido: <HistorialMemo recargarSenal={recargarSenal} /> },
                 ]}
               />

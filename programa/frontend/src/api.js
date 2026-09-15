@@ -234,6 +234,28 @@ export async function generarPdf(resultadoNesting) {
   URL.revokeObjectURL(url);
 }
 
+// Corte láser: moldería + talla + cantidad, SIN personalización -- ver
+// rutas/api.js·POST /nesting/generar-dxf. Descarga directa, mismo patrón
+// que generarPdf.
+export async function generarDxf(resultadoNesting) {
+  const respuesta = await fetch(BASE_URL + '/nesting/generar-dxf', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(resultadoNesting),
+  });
+  if (!respuesta.ok) {
+    const cuerpo = await respuesta.json().catch(() => ({}));
+    throw new Error(cuerpo.error || 'Falló la generación del DXF');
+  }
+  const blob = await respuesta.blob();
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement('a');
+  enlace.href = url;
+  enlace.download = 'corte-laser.dxf';
+  enlace.click();
+  URL.revokeObjectURL(url);
+}
+
 // --- Historial de producción -------------------------------------------------
 
 export function listarGeneraciones() {
