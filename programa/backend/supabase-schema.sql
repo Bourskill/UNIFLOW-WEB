@@ -57,7 +57,18 @@ create table if not exists plantillas (
   creado_en timestamptz not null default now()
 );
 
+-- Eventos: historial de auditoría (qué se creó/actualizó/borró, cuándo,
+-- resumen) -- ver almacen.js·registrarEvento. Append-only a propósito: el
+-- backend nunca le pide update ni delete, y tampoco se los otorga acá, así
+-- que ni un bug propio puede corromper el historial.
+create table if not exists eventos (
+  id text primary key,
+  datos jsonb not null,
+  creado_en timestamptz not null default now()
+);
+
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on
   piezas, grupos, disenos, productos, pedidos, generaciones, plantillas
   to anon, authenticated;
+grant select, insert on eventos to anon, authenticated;

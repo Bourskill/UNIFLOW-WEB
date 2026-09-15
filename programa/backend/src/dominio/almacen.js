@@ -16,6 +16,7 @@
 // llamada en api.js siempre tocaba un solo registro.
 
 import { createClient } from '@supabase/supabase-js';
+import { nanoid } from 'nanoid';
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_KEY;
@@ -112,4 +113,41 @@ export async function subirArchivo(ruta, buffer, contentType) {
   if (error) throw new Error('Supabase (subir archivo): ' + error.message);
   const { data } = supabaseStorage.storage.from(NOMBRE_BUCKET).getPublicUrl(ruta);
   return data.publicUrl;
+}
+
+// --- Eventos (historial de auditoría) --------------------------------------
+// Registro append-only de qué se creó/actualizó/borró, cuándo y un resumen
+// breve -- para que una tabla vacía o un registro que desapareció se pueda
+// chequear acá antes de tratarlo como una falsa alarma de pérdida de datos
+// (ver claude/ESTADO-ACTUAL.md: la tabla `piezas` apareció vacía y resultó
+// ser un borrado a propósito del usuario, sin nada que lo hubiera dejado
+// registrado). Sin login todavía (ver almacen.js más arriba, mismo motivo
+// por el que no hay RLS real), no hay un "quién" verificable -- solo
+// coleccion/accion/registroId/resumen/cuándo, nunca una identidad.
+//
+// Registrar un evento NUNCA hace fallar la operación real que describe: si
+// Supabase no puede escribir en `eventos` (por ejemplo, la tabla todavía no
+// existe porque no se corrió supabase-schema.sql), eso no puede tumbar un
+// guardado real de Pieza/Producto/etc -- se loguea a consola y se sigue.
+export async function registrarEvento(coleccion, accion, registroId, resumen) {
+  const evento = {
+    id: nanoid(),
+    coleccion,
+    accion, // 'crear' | 'actualizar' | 'borrar'
+    registroId,
+    resumen: resumen || null,
+    creadoEn: new Date().toISOString(),
+  };
+  const { error } = await supabase.from('eventos').insert({ id: evento.id, datos: evento });
+  if (error) {
+    console.error('No se pudo registrar el evento de auditoría (' + coleccion + '/' + accion + '/' + registroId + '): ' + error.message);
+  }
+}
+
+export async function leerEventos(limite) {
+  let consulta = supabase.from('eventos').select('datos').order('creado_en', { ascending: false });
+  if (limite) consulta = consulta.limit(limite);
+  const { data, error } = await consulta;
+  if (error) throw new Error('Supabase (leer eventos): ' + error.message);
+  return data.map((fila) => fila.datos);
 }

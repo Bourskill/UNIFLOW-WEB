@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
-import { leerColeccion, leerRegistro, crearRegistro, actualizarRegistro, borrarRegistro, subirArchivo } from '../dominio/almacen.js';
+import { leerColeccion, leerRegistro, crearRegistro, actualizarRegistro, borrarRegistro, subirArchivo, registrarEvento, leerEventos } from '../dominio/almacen.js';
 import { resolverPiezasDeGrupo, resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting } from '../motor/exportarPdf.js';
@@ -53,6 +53,13 @@ router.post('/archivos', async (req, res) => {
   }
 });
 
+// Nombre corto para identificar un registro en el historial de eventos sin
+// guardar el objeto entero (algunos traen archivos/geometría pesada) -- lo
+// que tenga a mano de más legible, o el id crudo si no hay nada mejor.
+function resumenDe(registro) {
+  return registro?.nombre || registro?.id || null;
+}
+
 function crudSimple(nombreColeccion) {
   router.get('/' + nombreColeccion, async (req, res) => {
     res.json(await leerColeccion(nombreColeccion));
@@ -61,6 +68,7 @@ function crudSimple(nombreColeccion) {
   router.post('/' + nombreColeccion, async (req, res) => {
     const registro = { id: nanoid(), ...req.body };
     await crearRegistro(nombreColeccion, registro);
+    await registrarEvento(nombreColeccion, 'crear', registro.id, resumenDe(registro));
     res.status(201).json(registro);
   });
 
@@ -69,11 +77,14 @@ function crudSimple(nombreColeccion) {
     if (!existente) return res.status(404).json({ error: 'No encontrado' });
     const registro = { ...existente, ...req.body, id: req.params.id };
     await actualizarRegistro(nombreColeccion, req.params.id, registro);
+    await registrarEvento(nombreColeccion, 'actualizar', req.params.id, resumenDe(registro));
     res.json(registro);
   });
 
   router.delete('/' + nombreColeccion + '/:id', async (req, res) => {
+    const existente = await leerRegistro(nombreColeccion, req.params.id);
     await borrarRegistro(nombreColeccion, req.params.id);
+    await registrarEvento(nombreColeccion, 'borrar', req.params.id, resumenDe(existente));
     res.status(204).end();
   });
 }
@@ -82,6 +93,14 @@ crudSimple('disenos');
 crudSimple('productos');
 crudSimple('pedidos');
 crudSimple('plantillas');
+
+// Historial de auditoría: qué se creó/actualizó/borró en cualquier colección,
+// más nuevo primero -- antes de tratar una tabla vacía o un registro que
+// desapareció como una posible pérdida de datos, revisar acá primero.
+router.get('/eventos', async (req, res) => {
+  const limite = req.query.limite ? Number(req.query.limite) : 200;
+  res.json(await leerEventos(limite));
+});
 
 // Empuja una nueva VersionPieza (ver dominio/modelos.js) y la vuelve la
 // actual -- se usa en los tres caminos que de verdad cambian geometría
@@ -211,6 +230,7 @@ router.post('/piezas', async (req, res) => {
     }],
   };
   await crearRegistro('piezas', registro);
+  await registrarEvento('piezas', 'crear', registro.id, registro.nombre);
   res.status(201).json(registro);
 });
 
@@ -231,11 +251,14 @@ router.put('/piezas/:id', async (req, res) => {
   // dos casos y arriesgaría usar la talla equivocada en silencio.
   if (tallaUnica !== undefined) pieza.tallaUnica = !!tallaUnica;
   await actualizarRegistro('piezas', req.params.id, pieza);
+  await registrarEvento('piezas', 'actualizar', req.params.id, pieza.nombre);
   res.json(pieza);
 });
 
 router.delete('/piezas/:id', async (req, res) => {
+  const pieza = await leerRegistro('piezas', req.params.id);
   await borrarRegistro('piezas', req.params.id);
+  await registrarEvento('piezas', 'borrar', req.params.id, pieza?.nombre);
   res.status(204).end();
 });
 
@@ -258,6 +281,7 @@ router.put('/piezas/:id/tallas/:talla', async (req, res) => {
   };
   agregarVersion(pieza, { geometriaPorTalla, dimensionesPorTalla, motivo: 'Talla ' + req.params.talla + ' corregida' });
   await actualizarRegistro('piezas', req.params.id, pieza);
+  await registrarEvento('piezas', 'actualizar', req.params.id, pieza.nombre + ' -- talla ' + req.params.talla + ' corregida');
   res.json(pieza);
 });
 
@@ -370,6 +394,7 @@ router.post('/piezas/:id/reprocesar', async (req, res) => {
   }
   agregarVersion(pieza, { geometriaPorTalla, dimensionesPorTalla, motivo: 'Reprocesada' });
   await actualizarRegistro('piezas', req.params.id, pieza);
+  await registrarEvento('piezas', 'actualizar', req.params.id, pieza.nombre + ' -- reprocesada');
   res.json({
     pieza,
     tallasReprocesadas: Object.keys(resuelto.geometriasPorTalla),
@@ -402,6 +427,7 @@ router.post('/piezas/:id/reemplazar-archivo', async (req, res) => {
     formatoOriginal: formatoOriginal || null, motivo: 'Molde reemplazado',
   });
   await actualizarRegistro('piezas', req.params.id, pieza);
+  await registrarEvento('piezas', 'actualizar', req.params.id, pieza.nombre + ' -- molde reemplazado');
   res.json(pieza);
 });
 
@@ -420,6 +446,7 @@ router.delete('/piezas/:id/versiones/:numero', async (req, res) => {
   pieza.versiones = (pieza.versiones || []).filter((v) => v.version !== numero);
   if (pieza.versiones.length === antes) return res.status(404).json({ error: 'Esa versión no existe.' });
   await actualizarRegistro('piezas', req.params.id, pieza);
+  await registrarEvento('piezas', 'actualizar', req.params.id, pieza.nombre + ' -- versión ' + numero + ' borrada del historial');
   res.json(pieza);
 });
 
@@ -445,11 +472,14 @@ router.post('/grupos', async (req, res) => {
 
   const grupo = { id: nanoid(), nombre, piezas };
   await crearRegistro('grupos', grupo);
+  await registrarEvento('grupos', 'crear', grupo.id, grupo.nombre);
   res.status(201).json(grupo);
 });
 
 router.delete('/grupos/:id', async (req, res) => {
+  const grupo = await leerRegistro('grupos', req.params.id);
   await borrarRegistro('grupos', req.params.id);
+  await registrarEvento('grupos', 'borrar', req.params.id, grupo?.nombre);
   res.status(204).end();
 });
 
