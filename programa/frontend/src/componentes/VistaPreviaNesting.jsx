@@ -30,10 +30,34 @@ function PiezaEnLienzo({ pieza }) {
   const imagen = useImagenCargada(pieza.imagenDataUrl);
   const tieneContenidoReal = imagen || (pieza.textos && pieza.textos.length > 0);
 
+  // Recorte real a la forma de la pieza, no al rectángulo -- mismo
+  // contornoCm (mismas coordenadas cm que zonas/textos) que exportarPdf.js
+  // usa para lo mismo en el backend. Sin él, se mantiene el estirado al
+  // rectángulo de siempre -- la vista previa nunca debe mostrar menos de
+  // lo que el PDF final va a mostrar, solo puede ser menos precisa.
+  const tieneContornoReal = pieza.contornoCm?.length >= 3;
+  const clipFunc = tieneContornoReal
+    ? (ctx) => {
+        ctx.beginPath();
+        pieza.contornoCm.forEach((v, i) => {
+          const px = v.x * PX_POR_CM, py = v.y * PX_POR_CM;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+      }
+    : undefined;
+
   return (
     <Group x={x} y={y}>
       {imagen ? (
-        <ImagenKonva image={imagen} width={ancho} height={alto} />
+        tieneContornoReal ? (
+          <Group clipFunc={clipFunc}>
+            <ImagenKonva image={imagen} width={ancho} height={alto} />
+          </Group>
+        ) : (
+          <ImagenKonva image={imagen} width={ancho} height={alto} />
+        )
       ) : (
         <Rect width={ancho} height={alto} fill={esRotada ? '#ffe0cc' : '#cce5ff'} stroke="#333" strokeWidth={1} />
       )}

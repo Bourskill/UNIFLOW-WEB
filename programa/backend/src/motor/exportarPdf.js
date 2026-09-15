@@ -6,7 +6,10 @@
 // rectángulo con etiqueta de antes (útil para el nesting "rápido" sin
 // personalización, ej. corte láser).
 
-import { PDFDocument, rgb, degrees, StandardFonts } from 'pdf-lib';
+import {
+  PDFDocument, rgb, degrees, StandardFonts,
+  pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath,
+} from 'pdf-lib';
 import ClipperLib from 'clipper-lib';
 
 const CM_A_PUNTOS = 28.3465;
@@ -124,7 +127,30 @@ export async function generarPdfNesting(resultadoNesting) {
 
     if (pieza.imagenDataUrl) {
       const imagen = await incrustarImagen(pdf, pieza.imagenDataUrl);
-      pagina.drawImage(imagen, { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt });
+      // Recorte real a la forma de la pieza, no al rectángulo del bounding
+      // box -- mismo contornoCm (mismas coordenadas cm que zonas/textos) que
+      // ya usa el borde de contraste/láser un poco más abajo. Sin él (pieza
+      // sin geometría real cargada todavía), se mantiene el estirado al
+      // rectángulo de siempre -- nunca deja de dibujarse el diseño por
+      // faltar el contorno.
+      if (pieza.contornoCm?.length >= 3) {
+        const puntos = pieza.contornoCm.map((v) => ({
+          x: xPt + v.x * CM_A_PUNTOS,
+          y: yPt + altoRectPt - v.y * CM_A_PUNTOS,
+        }));
+        pagina.pushOperators(
+          pushGraphicsState(),
+          moveTo(puntos[0].x, puntos[0].y),
+          ...puntos.slice(1).map((p) => lineTo(p.x, p.y)),
+          closePath(),
+          clip(),
+          endPath()
+        );
+        pagina.drawImage(imagen, { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt });
+        pagina.pushOperators(popGraphicsState());
+      } else {
+        pagina.drawImage(imagen, { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt });
+      }
     }
 
     // Con contorno para láser configurado, ESE es el corte real -- dibujar
