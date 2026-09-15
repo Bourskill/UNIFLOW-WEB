@@ -6,6 +6,7 @@ import {
   listarProductos,
   listarPiezas,
   crearDiseno,
+  editarDiseno,
   eliminarDiseno,
   crearProducto,
   editarProducto,
@@ -160,6 +161,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   const [nombreNuevoDiseno, setNombreNuevoDiseno] = useState('');
   const [imagenesNuevoDiseno, setImagenesNuevoDiseno] = useState({});
   const [errorDiseno, setErrorDiseno] = useState(null);
+  // Con id, el panel de "+ Crear diseño nuevo" (mismo panel, reusado) está
+  // editando ESE diseño en vez de armar uno nuevo -- ver abrirEdicionDiseno()/guardarDisenoNuevo().
+  const [editandoDisenoId, setEditandoDisenoId] = useState(null);
   // Ver el comentario igual en Piezas.jsx -- acá el caso era el peor de
   // los cinco: sin esto, la primera visita mostraba "Creá primero una
   // prenda (Piezas → Prendas)" mientras el fetch seguía en vuelo, aunque
@@ -270,6 +274,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setDisenoId('');
     setTallaTrabajoPorRol({});
     setCreandoDiseno(false);
+    setEditandoDisenoId(null);
     setNombreNuevoDiseno('');
     setImagenesNuevoDiseno({});
   }
@@ -278,13 +283,38 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setErrorDiseno(null);
     if (!nombreNuevoDiseno.trim()) { setErrorDiseno('Falta el nombre del diseño.'); return; }
     try {
-      const creado = await crearDiseno({ nombre: nombreNuevoDiseno, grupoIds, imagenesPorPieza: imagenesNuevoDiseno });
-      setDisenos((prev) => [...prev, creado]);
-      setDisenoId(creado.id);
+      if (editandoDisenoId) {
+        const actualizado = await editarDiseno(editandoDisenoId, { nombre: nombreNuevoDiseno, grupoIds, imagenesPorPieza: imagenesNuevoDiseno });
+        setDisenos((prev) => prev.map((d) => (d.id === editandoDisenoId ? actualizado : d)));
+        setDisenoId(editandoDisenoId);
+      } else {
+        const creado = await crearDiseno({ nombre: nombreNuevoDiseno, grupoIds, imagenesPorPieza: imagenesNuevoDiseno });
+        setDisenos((prev) => [...prev, creado]);
+        setDisenoId(creado.id);
+      }
       setCreandoDiseno(false);
+      setEditandoDisenoId(null);
       setNombreNuevoDiseno('');
       setImagenesNuevoDiseno({});
     } catch (e) { setErrorDiseno(e.message); }
+  }
+
+  function abrirEdicionDiseno() {
+    if (!disenoSeleccionado) return;
+    setEditandoDisenoId(disenoSeleccionado.id);
+    setNombreNuevoDiseno(disenoSeleccionado.nombre);
+    setImagenesNuevoDiseno(disenoSeleccionado.imagenesPorPieza || {});
+    setErrorDiseno(null);
+    setCreandoDiseno(true);
+  }
+
+  function alternarPanelDiseno() {
+    if (creandoDiseno) { setCreandoDiseno(false); return; }
+    setEditandoDisenoId(null);
+    setNombreNuevoDiseno('');
+    setImagenesNuevoDiseno({});
+    setErrorDiseno(null);
+    setCreandoDiseno(true);
   }
 
   async function eliminarDisenoActual() {
@@ -582,6 +612,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setModo(null);
     setTallaTrabajoPorRol({});
     setCreandoDiseno(false);
+    setEditandoDisenoId(null);
     setError(null);
   }
 
@@ -701,13 +732,17 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 <option value="">— Sin diseño —</option>
                 {disenosDeEstaCombinacion.map((d) => <option key={d.id} value={d.id}>{d.nombre}</option>)}
               </Select>
+              {disenoId && <Boton variante="fantasma" tamano="sm" type="button" onClick={abrirEdicionDiseno}>Editar este diseño</Boton>}
               {disenoId && <Boton variante="fantasma" tamano="sm" type="button" onClick={eliminarDisenoActual}>Eliminar este diseño</Boton>}
-              <Boton variante="fantasma" tamano="sm" type="button" onClick={() => setCreandoDiseno((v) => !v)}>
+              <Boton variante="fantasma" tamano="sm" type="button" onClick={alternarPanelDiseno}>
                 {creandoDiseno ? 'Cancelar' : '+ Crear diseño nuevo'}
               </Boton>
             </div>
             {creandoDiseno && (
               <div className="mt-3 flex flex-col gap-3 rounded-lg border border-dashed border-border p-3">
+                {editandoDisenoId && (
+                  <p className="text-xs font-semibold uppercase tracking-wide text-primary">Editando diseño existente</p>
+                )}
                 <Campo etiqueta="Nombre del diseño">
                   <Input value={nombreNuevoDiseno} onChange={(e) => setNombreNuevoDiseno(e.target.value)} placeholder="Kit titular 2026" />
                 </Campo>
@@ -719,7 +754,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                   ))}
                 </div>
                 {errorDiseno && <Aviso tono="error">{errorDiseno}</Aviso>}
-                <div><Boton variante="secundario" tamano="sm" type="button" onClick={guardarDisenoNuevo}>Guardar diseño</Boton></div>
+                <div><Boton variante="secundario" tamano="sm" type="button" onClick={guardarDisenoNuevo}>{editandoDisenoId ? 'Guardar cambios' : 'Guardar diseño'}</Boton></div>
               </div>
             )}
           </div>
