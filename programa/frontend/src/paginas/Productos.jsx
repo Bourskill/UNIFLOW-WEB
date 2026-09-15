@@ -8,6 +8,7 @@ import {
   crearDiseno,
   eliminarDiseno,
   crearProducto,
+  editarProducto,
   eliminarProducto,
   crearPlantilla,
   resolverAnclaje,
@@ -148,6 +149,12 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   const [recolocarInfo, setRecolocarInfo] = useState(null); // { anclaId, eje }
   const [resuelto, setResuelto] = useState(null);
   const [error, setError] = useState(null);
+  // Con id, el formulario de arriba (el mismo que arma uno nuevo) está
+  // editando ESE producto -- ver cargarParaEditar()/guardar(). Mismo
+  // mecanismo que ya existía para "Usar esta plantilla" (el useEffect de
+  // plantillaParaUsar más abajo): hidratar grupoIds/anclaje/disenoId en el
+  // mismo estado que ya maneja el lienzo, no un editor aparte.
+  const [editandoId, setEditandoId] = useState(null);
 
   const [creandoDiseno, setCreandoDiseno] = useState(false);
   const [nombreNuevoDiseno, setNombreNuevoDiseno] = useState('');
@@ -548,15 +555,51 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setError(null);
     if (!nombre.trim() || grupoIds.length === 0) { setError('Falta el nombre del producto o la prenda.'); return; }
     try {
-      await crearProducto({ nombre, grupoIds, disenoId: disenoId || null, anclaje, bordeContraste });
+      const datos = { nombre, grupoIds, disenoId: disenoId || null, anclaje, bordeContraste };
+      if (editandoId) await editarProducto(editandoId, datos);
+      else await crearProducto(datos);
       setNombre('');
       setAnclaje({ anclas: [], zonas: [] });
       setSeleccion(null);
+      setEditandoId(null);
       await recargar();
       onCambio?.();
     } catch (e) { setError(e.message); }
   }
-  async function borrar(id) { await eliminarProducto(id); await recargar(); onCambio?.(); }
+
+  // Carga un producto ya guardado de vuelta al mismo formulario/lienzo que
+  // arma uno nuevo -- no reconstruye nada por separado, así el editor que
+  // ya está probado (resolverAnclaje en vivo, PanelDock, etc.) se comporta
+  // exactamente igual para editar que para crear.
+  function cargarParaEditar(producto) {
+    setEditandoId(producto.id);
+    setNombre(producto.nombre);
+    setGrupoIds(producto.grupoIds || (producto.grupoId ? [producto.grupoId] : []));
+    setDisenoId(producto.disenoId || '');
+    setAnclaje(producto.anclaje || { anclas: [], zonas: [] });
+    setBordeContraste(producto.bordeContraste || BORDE_POR_DEFECTO);
+    setSeleccion(null);
+    setModo(null);
+    setTallaTrabajoPorRol({});
+    setCreandoDiseno(false);
+    setError(null);
+  }
+
+  function cancelarEdicionProducto() {
+    setEditandoId(null);
+    setNombre('');
+    setAnclaje({ anclas: [], zonas: [] });
+    setSeleccion(null);
+    setModo(null);
+    setError(null);
+  }
+
+  async function borrar(id) {
+    await eliminarProducto(id);
+    if (editandoId === id) cancelarEdicionProducto();
+    await recargar();
+    onCambio?.();
+  }
 
   async function guardarComoPlantilla() {
     setError(null);
@@ -850,8 +893,11 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
             </div>
           </div>
 
+          {editandoId && (
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Editando producto existente</p>
+          )}
           <div className="flex items-center gap-2">
-            <Boton variante="primario" type="submit">Guardar producto</Boton>
+            <Boton variante="primario" type="submit">{editandoId ? 'Guardar cambios' : 'Guardar producto'}</Boton>
             <Boton
               variante="fantasma" type="button"
               disabled={grupoIds.length === 0 || anclaje.zonas.length === 0}
@@ -860,6 +906,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
             >
               Guardar como plantilla
             </Boton>
+            {editandoId && (
+              <Boton variante="fantasma" type="button" onClick={cancelarEdicionProducto}>Cancelar edición</Boton>
+            )}
           </div>
           {error && <Aviso tono="error">{error}</Aviso>}
         </Tarjeta>
@@ -882,6 +931,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                       — {nombresPrendas || 'prenda eliminada'} · {disenos.find((d) => d.id === p.disenoId)?.nombre || 'sin diseño'} · {p.anclaje?.zonas?.length || 0} zona(s)
                     </span>
                   </div>
+                  <Boton tamano="sm" onClick={() => cargarParaEditar(p)}>Editar</Boton>
                   <Boton variante="fantasma" tamano="sm" onClick={() => borrar(p.id)}>Eliminar</Boton>
                 </div>
               );
