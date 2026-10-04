@@ -9,7 +9,7 @@ import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
 import { geometriaDelGrupo, geometriaParaAnclaje } from '../motor/geometriaAnclaje.js';
 import { generarDxfNesting } from '../motor/exportarDxf.js';
 import { verificarCobertura, CARACTERES_CRITICOS } from '../motor/fuentes.js';
-import { ajustarTexto, ajustarTextosDePiezas, calibrarCuerpo, REGLAS_TEXTO } from '../motor/ajusteTexto.js';
+import { ajustarTexto, ajustarTextosDePiezas, calibrarCuerpo, advertenciasDeTextos, REGLAS_TEXTO } from '../motor/ajusteTexto.js';
 import { obtenerMedidor, bytesFuenteBase } from '../motor/medidorFuentes.js';
 import fontkit from '@pdf-lib/fontkit';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
@@ -79,6 +79,14 @@ router.get('/fuentes', async (req, res) => {
   res.json(await leerColeccion('fuentes'));
 });
 
+// Respuesta de error de una ruta con try/catch propio: lo inesperado (sin
+// `estado`) también queda en el log del servidor -- si no, un 500 llegaba al
+// navegador y no dejaba rastro de qué falló.
+function responderError(res, error) {
+  if (!error.estado || error.estado >= 500) console.error('[api]', error);
+  res.status(error.estado || 500).json({ error: error.message });
+}
+
 // Guarda una fuente en el catálogo: la interpreta, calcula su cobertura de
 // ñ/acentos una sola vez, sube el archivo a Storage y crea el registro. Lo
 // comparten la subida a mano (POST /fuentes) y el banco gratuito
@@ -94,6 +102,11 @@ async function guardarFuente({ nombre, buffer, extension, contentType, extra = {
     throw falla;
   }
   const cobertura = verificarCobertura(fuenteParseada, CARACTERES_CRITICOS.join(''));
+
+  // Antes de subir nada: si la tabla no se puede leer (todavía no existe, o
+  // Supabase falla), se corta acá -- si no, el archivo quedaría huérfano en
+  // Storage con cada intento.
+  await leerColeccion('fuentes');
 
   const url = await subirArchivo(
     nombre.replace(/[^a-z0-9_-]/gi, '_') + '-' + nanoid() + extension,
@@ -128,7 +141,7 @@ router.post('/fuentes', async (req, res) => {
   try {
     res.status(201).json(await guardarFuente({ nombre, buffer, extension, contentType }));
   } catch (error) {
-    res.status(error.estado || 500).json({ error: error.message });
+    responderError(res, error);
   }
 });
 
@@ -142,6 +155,7 @@ const API_FONTSOURCE = 'https://api.fontsource.org/v1/fonts';
 const NOMBRE_PESO = { 100: 'Thin', 200: 'ExtraLight', 300: 'Light', 400: '', 500: 'Medium', 600: 'SemiBold', 700: 'Bold', 800: 'ExtraBold', 900: 'Black' };
 const TAMANO_PAGINA_BANCO = 24;
 let cacheBanco = null; // { cargadoEn, fuentes }
+const agregandoDelBanco = new Set(); // 'id|peso' de lo que se está bajando ahora
 
 function falloDeBanco(mensaje, estado = 502) {
   return Object.assign(new Error(mensaje), { estado });
@@ -179,7 +193,7 @@ function pesoPorDefecto(pesos) {
 router.get('/fuentes/banco', async (req, res) => {
   const q = String(req.query.q || '').trim().toLowerCase();
   const categoria = String(req.query.categoria || '');
-  const pagina = Math.max(0, Number(req.query.pagina) || 0);
+  const pagina = Math.max(0, Math.floor(Number(req.query.pagina)) || 0);
   try {
     const todas = await listaDelBanco();
     const filtradas = todas.filter(
@@ -194,7 +208,7 @@ router.get('/fuentes/banco', async (req, res) => {
         .map((f) => ({ ...f, pesoPorDefecto: pesoPorDefecto(f.weights) })),
     });
   } catch (error) {
-    res.status(error.estado || 500).json({ error: error.message });
+    responderError(res, error);
   }
 });
 
@@ -212,26 +226,38 @@ router.post('/fuentes/banco', async (req, res) => {
     if (!urlTtf) return res.status(404).json({ error: 'Esa fuente no tiene archivo .ttf para letras latinas en peso ' + peso });
 
     const nombre = info.family + (NOMBRE_PESO[peso] ? ' ' + NOMBRE_PESO[peso] : '');
-    const existentes = await leerColeccion('fuentes').catch(() => []);
-    if (existentes.some((f) => f.fontsourceId === id && f.peso === peso)) {
-      return res.status(409).json({ error: '"' + nombre + '" ya está en tu catálogo.' });
+    // Dos pedidos casi simultáneos de la misma fuente (dos pestañas, un
+    // reintento) pasarían los dos la comprobación del catálogo antes de que
+    // alguno guarde: el candado cubre lo que está en vuelo.
+    const enCurso = id + '|' + peso;
+    if (agregandoDelBanco.has(enCurso)) return res.status(409).json({ error: '"' + nombre + '" ya se está agregando.' });
+    agregandoDelBanco.add(enCurso);
+    try {
+      // Sin .catch: si el catálogo no se puede leer, se corta ACÁ con el
+      // motivo real, antes de bajar nada.
+      const existentes = await leerColeccion('fuentes');
+      if (existentes.some((f) => f.fontsourceId === id && f.peso === peso)) {
+        return res.status(409).json({ error: '"' + nombre + '" ya está en tu catálogo.' });
+      }
+
+      const descarga = await pedirAlBanco(urlTtf, 30000);
+      if (!descarga.ok) throw falloDeBanco('No se pudo bajar el archivo de la fuente (' + descarga.status + ')');
+      const buffer = Buffer.from(await descarga.arrayBuffer());
+
+      res.status(201).json(
+        await guardarFuente({
+          nombre,
+          buffer,
+          extension: '.ttf',
+          contentType: 'font/ttf',
+          extra: { origen: 'fontsource', fontsourceId: id, peso, licencia: info.license },
+        })
+      );
+    } finally {
+      agregandoDelBanco.delete(enCurso);
     }
-
-    const descarga = await pedirAlBanco(urlTtf, 30000);
-    if (!descarga.ok) throw falloDeBanco('No se pudo bajar el archivo de la fuente (' + descarga.status + ')');
-    const buffer = Buffer.from(await descarga.arrayBuffer());
-
-    res.status(201).json(
-      await guardarFuente({
-        nombre,
-        buffer,
-        extension: '.ttf',
-        contentType: 'font/ttf',
-        extra: { origen: 'fontsource', fontsourceId: id, peso, licencia: info.license },
-      })
-    );
   } catch (error) {
-    res.status(error.estado || 500).json({ error: error.message });
+    responderError(res, error);
   }
 });
 
@@ -249,9 +275,21 @@ router.get('/fuentes/base', async (req, res) => {
 // Cada zona llega con su caja en cm; el número se calibra contra la cadena de
 // referencia ("55") porque en Diseño todavía no hay un pedido real -- igual
 // que el panel de Illustrator cuando no hay datos.
+const MAX_ZONAS_AJUSTE = 50;
+const MAX_LARGO_TEXTO = 200;
+const MAX_MEDIDA_CM = 1000;
+
 router.post('/texto/ajustar', async (req, res) => {
   const { zonas } = req.body;
   if (!Array.isArray(zonas)) return res.status(400).json({ error: 'Falta la lista de zonas' });
+  if (zonas.length > MAX_ZONAS_AJUSTE) return res.status(400).json({ error: 'Demasiadas zonas (máximo ' + MAX_ZONAS_AJUSTE + ')' });
+  for (const z of zonas) {
+    const medidaValida = (n) => Number.isFinite(n) && n > 0 && n <= MAX_MEDIDA_CM;
+    if (!z || typeof z.id !== 'string' || typeof z.texto !== 'string' || z.texto.length > MAX_LARGO_TEXTO ||
+        !medidaValida(z.anchoCm) || !medidaValida(z.altoCm) || (z.fuenteUrl != null && typeof z.fuenteUrl !== 'string')) {
+      return res.status(400).json({ error: 'Una zona no es válida: necesita id, texto (hasta ' + MAX_LARGO_TEXTO + ' caracteres) y anchoCm/altoCm positivos' });
+    }
+  }
   const ajustes = {};
   for (const z of zonas) {
     const { medidor, fuenteUrl } = await obtenerMedidor(z.fuenteUrl || null);
@@ -888,7 +926,9 @@ router.post('/nesting/desde-pedido', async (req, res) => {
   piezasParaAnidar = await ajustarTextosDePiezas(piezasParaAnidar, obtenerMedidor);
 
   const resultado = anidarPiezas(piezasParaAnidar, { anchoLienzoCm, separacionCm });
-  res.json(resultado);
+  // Lo que conviene revisar ANTES de imprimir: un texto que no cabe en su
+  // zona, o con caracteres que su fuente no trae. Campo aparte e ignorable.
+  res.json({ ...resultado, advertencias: advertenciasDeTextos(piezasParaAnidar) });
 });
 
 // Genera el PDF final a partir de un layout ya anidado (normalmente el mismo

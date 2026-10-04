@@ -27,9 +27,16 @@ export function cargarFuenteWeb(url) {
   return cargas.get(url);
 }
 
+/** Un nombre de familia para usar en CSS/canvas: las nuestras van entre comillas, las genéricas no. */
+export function cssDeFamilia(familia) {
+  return familia.startsWith('uniflow-fuente-') ? '"' + familia + '"' : familia;
+}
+
 /**
  * Familias CSS ya listas para un conjunto de URLs: { url: familia }. Las que
- * todavía cargan (o fallaron) simplemente no aparecen en el mapa.
+ * todavía cargan no aparecen en el mapa; una que NO se pudo cargar (sin red,
+ * archivo borrado) queda como "sans-serif" -- el texto se ve con otra letra
+ * en vez de desaparecer sin avisar de la vista previa.
  */
 export function useFuentesWeb(urls) {
   const [listas, setListas] = useState({});
@@ -40,7 +47,7 @@ export function useFuentesWeb(urls) {
     for (const url of clave ? clave.split('\n') : []) {
       cargarFuenteWeb(url)
         .then((familia) => { if (vigente) setListas((prev) => (prev[url] === familia ? prev : { ...prev, [url]: familia })); })
-        .catch(() => {});
+        .catch(() => { if (vigente) setListas((prev) => (prev[url] ? prev : { ...prev, [url]: 'sans-serif' })); });
     }
     return () => { vigente = false; };
   }, [clave]);

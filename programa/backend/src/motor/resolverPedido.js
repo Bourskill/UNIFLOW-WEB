@@ -145,10 +145,10 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             // Cómo se ajusta al espacio de la zona (motor/ajusteTexto.js,
             // puerto del panel de Illustrator): el número se CALIBRA (todos
             // al mismo cuerpo), nombre y texto fijo LLENAN el alto. La clave
-            // agrupa los textos que comparten cuerpo: misma zona y misma
+            // agrupa los textos que comparten cuerpo: mismo producto, zona y
             // talla (la caja de la zona puede cambiar de talla a talla).
             modo: campo === 'numero' ? 'calibrado' : 'llenar',
-            zonaClave: zona.id + '|' + linea.talla,
+            zonaClave: (linea.productoId || '') + '|' + zona.id + '|' + linea.talla,
             colorHex: cruda?.colorHex || '#000000',
             rotacionGrados: cruda?.rotacion || 0,
             fuenteUrl: fuente?.archivoUrl || null,

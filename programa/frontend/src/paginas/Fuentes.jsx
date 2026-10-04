@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { listarFuentes, crearFuente, eliminarFuente, buscarEnBancoDeFuentes, agregarFuenteDelBanco } from '../api.js';
-import { useFuentesWeb } from '../componentes/useFuentesWeb.js';
+import { useFuentesWeb, cssDeFamilia } from '../componentes/useFuentesWeb.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
 
 function leerArchivoComoBase64(archivo) {
@@ -34,17 +34,18 @@ export function Fuentes({ onCambio }) {
   const [fuentes, setFuentes] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [subiendo, setSubiendo] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(null); // de la subida a mano
+  const [errorCatalogo, setErrorCatalogo] = useState(null); // de leer el catálogo
   const [nombrePendiente, setNombrePendiente] = useState(null); // {archivo, nombre} entre soltar y confirmar
   const [textoPrueba, setTextoPrueba] = useState(TEXTO_DE_PRUEBA);
 
   async function recargar() {
     setCargando(true);
-    setError(null);
+    setErrorCatalogo(null);
     try {
       setFuentes(await listarFuentes());
     } catch (e) {
-      setError(e.message);
+      setErrorCatalogo(e.message);
     } finally {
       setCargando(false);
     }
@@ -146,6 +147,11 @@ export function Fuentes({ onCambio }) {
         </h3>
         {cargando ? (
           <p className="text-sm text-muted-foreground">Cargando…</p>
+        ) : errorCatalogo ? (
+          <div className="flex max-w-xl flex-col items-start gap-2">
+            <Aviso tono="error">No se pudo leer tu catálogo: {errorCatalogo}</Aviso>
+            <Boton tamano="sm" type="button" onClick={recargar}>Reintentar</Boton>
+          </div>
         ) : fuentes.length === 0 ? (
           <p className="text-sm text-muted-foreground">Todavía no hay ninguna.</p>
         ) : (
@@ -156,9 +162,9 @@ export function Fuentes({ onCambio }) {
                   <span className="truncate font-medium">{f.nombre}</span>
                   <span
                     className="truncate text-2xl leading-tight"
-                    style={familias[f.archivoUrl] ? { fontFamily: '"' + familias[f.archivoUrl] + '"' } : undefined}
+                    style={familias[f.archivoUrl] ? { fontFamily: cssDeFamilia(familias[f.archivoUrl]) } : undefined}
                   >
-                    {textoPrueba}
+                    {textoPrueba || '\u00a0'}
                   </span>
                 </div>
                 {f.licencia && <span className="text-xs text-faint-foreground">{f.licencia}</span>}
@@ -192,6 +198,7 @@ function BancoDeFuentes({ fuentes, textoPrueba, onTextoPrueba, onAgregada }) {
   const [pesos, setPesos] = useState({}); // id -> peso elegido
   const [agregando, setAgregando] = useState(null);
   const [aviso, setAviso] = useState(null);
+  const [reintento, setReintento] = useState(0);
 
   useEffect(() => {
     let vigente = true;
@@ -209,7 +216,7 @@ function BancoDeFuentes({ fuentes, textoPrueba, onTextoPrueba, onAgregada }) {
       }
     }, 300);
     return () => { vigente = false; clearTimeout(temporizador); };
-  }, [q, categoria, pagina]);
+  }, [q, categoria, pagina, reintento]);
 
   const pesoDe = (f) => pesos[f.id] ?? f.pesoPorDefecto;
   const urlsMuestra = useMemo(() => (resultado?.fuentes || []).map((f) => urlDeMuestra(f.id, pesos[f.id] ?? f.pesoPorDefecto)), [resultado, pesos]);
@@ -264,6 +271,13 @@ function BancoDeFuentes({ fuentes, textoPrueba, onTextoPrueba, onAgregada }) {
       {error && <Aviso tono="error">{error}</Aviso>}
       {aviso && <Aviso tono="info">{aviso}</Aviso>}
 
+      {!resultado && buscando && <p className="text-sm text-muted-foreground">Buscando en el banco…</p>}
+      {!resultado && !buscando && error && (
+        <div>
+          <Boton tamano="sm" type="button" onClick={() => setReintento((n) => n + 1)}>Reintentar</Boton>
+        </div>
+      )}
+
       {resultado && (
         <>
           <p className="text-xs text-faint-foreground">
@@ -280,14 +294,15 @@ function BancoDeFuentes({ fuentes, textoPrueba, onTextoPrueba, onAgregada }) {
                     <Chip>{f.category}</Chip>
                   </div>
                   <div
-                    className="truncate text-3xl leading-tight"
-                    style={familia ? { fontFamily: '"' + familia + '"' } : { opacity: 0.3 }}
+                    className="min-h-[2.25rem] truncate text-3xl leading-tight"
+                    style={familia ? { fontFamily: cssDeFamilia(familia) } : { opacity: 0.3 }}
                   >
-                    {textoPrueba || ' '}
+                    {textoPrueba || '\u00a0'}
                   </div>
                   <div className="flex items-center gap-2">
                     {f.weights.length > 1 ? (
                       <Select
+                        aria-label={'Peso de ' + f.family}
                         className="max-w-[130px] py-1 text-xs"
                         value={peso}
                         onChange={(e) => setPesos((prev) => ({ ...prev, [f.id]: Number(e.target.value) }))}
@@ -301,7 +316,7 @@ function BancoDeFuentes({ fuentes, textoPrueba, onTextoPrueba, onAgregada }) {
                     {yaEsta(f) ? (
                       <Chip tono="activo">En tu catálogo</Chip>
                     ) : (
-                      <Boton tamano="sm" variante="acento" type="button" onClick={() => agregar(f)} disabled={agregando !== null}>
+                      <Boton tamano="sm" variante="acento" type="button" aria-label={'Agregar ' + f.family + ' ' + peso + ' al catálogo'} onClick={() => agregar(f)} disabled={agregando !== null}>
                         {agregando === f.id ? 'Agregando…' : 'Agregar'}
                       </Boton>
                     )}

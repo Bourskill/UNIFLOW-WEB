@@ -14,7 +14,8 @@ import {
 } from 'pdf-lib';
 import ClipperLib from 'clipper-lib';
 import fontkit from '@pdf-lib/fontkit';
-import { bytesDeFuente } from './medidorFuentes.js';
+import { bytesDeFuente, obtenerMedidor } from './medidorFuentes.js';
+import { ajustarTexto } from './ajusteTexto.js';
 
 const CM_A_PUNTOS = 28.3465;
 
@@ -217,13 +218,29 @@ export async function generarPdfNesting(resultadoNesting) {
     for (const texto of pieza.textos || []) {
       const color = hexARgb(texto.colorHex);
 
+      // Un texto de forma nueva (lleva `modo`) cuyo ajuste quedó en null no
+      // tiene nada que dibujar (vacío, o solo espacios): se omite. NO cae al
+      // camino viejo de abajo, que con otra fuente podía tumbar todo el PDF.
+      if (texto.modo !== undefined && !texto.ajuste) continue;
+
       // Texto ya ajustado a su zona (motor/ajusteTexto.js): cuerpo, tracking
       // y escala horizontal calculados con las medidas reales de la fuente.
       // Se dibuja por su línea de base, rotando alrededor del CENTRO de la
       // zona (no de la esquina del texto).
       if (texto.ajuste) {
-        const a = texto.ajuste;
-        const fontElegida = (await fuentePersonalizada(texto.fuenteUrl)) || (await fuenteBase());
+        let a = texto.ajuste;
+        let fontElegida = await fuentePersonalizada(texto.fuenteUrl);
+        if (!fontElegida) {
+          fontElegida = await fuenteBase();
+          if (texto.fuenteUrl) {
+            // La fuente con la que se midió ya no está disponible (por ejemplo
+            // una reposición con la fuente borrada de Storage): el ajuste
+            // calculado para OTRA letra no sirve, se vuelve a ajustar con la
+            // de base en vez de imprimir mal medido.
+            const { medidor } = await obtenerMedidor(null);
+            a = ajustarTexto({ medidor, texto: texto.texto, anchoCm: texto.anchoCm, altoCm: texto.altoCm, modo: 'llenar' }) || a;
+          }
+        }
         const rad = ((texto.rotacionGrados || 0) * Math.PI) / 180;
         const cxPt = xPt + texto.cxCm * CM_A_PUNTOS;
         const cyPt = yPt + altoRectPt - texto.cyCm * CM_A_PUNTOS;
@@ -244,7 +261,7 @@ export async function generarPdfNesting(resultadoNesting) {
           setCharacterSpacing((a.trackingMil / 1000) * tamanoPt),
           setCharacterSqueeze(a.escalaH),
           rotateAndSkewTextRadiansAndTranslate(rad, 0, 0, x, y),
-          showText(fontElegida.encodeText(texto.texto)),
+          showText(fontElegida.encodeText(a.texto ?? texto.texto)),
           endText(),
           popGraphicsState()
         );

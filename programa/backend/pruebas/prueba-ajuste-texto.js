@@ -7,7 +7,7 @@
 // Más una vuelta completa por exportarPdf.js, leyendo el PDF resultante con
 // pdfjs-dist para confirmar dónde quedó escrito el texto.
 
-import { ajustarTexto, calibrarCuerpo, ajustarTextosDePiezas, REGLAS_TEXTO } from '../src/motor/ajusteTexto.js';
+import { ajustarTexto, calibrarCuerpo, ajustarTextosDePiezas, normalizarTexto, advertenciasDeTextos, REGLAS_TEXTO } from '../src/motor/ajusteTexto.js';
 import { obtenerMedidor } from '../src/motor/medidorFuentes.js';
 import { generarPdfNesting } from '../src/motor/exportarPdf.js';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -148,6 +148,89 @@ console.log('\n--- Una generación guardada ANTES del ajuste (sin `ajuste`) se s
   const t = items.find((i) => i.str === 'VIEJO');
   comprobar('el texto sale', !!t);
   comprobar('con el cuerpo de siempre (alto de la zona)', !!t && cerca(Math.hypot(t.transform[0], t.transform[1]), 4 * 28.3465, 0.05));
+}
+
+console.log('\n--- Sentido de giro: grados POSITIVOS = ANTIHORARIO (como Illustrator, el PDF y el lienzo) ---');
+{
+  const textoBase = { colorHex: '#000000', fuenteUrl: null, xCm: 0, yCm: 0, cxCm: 25, cyCm: 35, anchoCm: 30, altoCm: 6, modo: 'llenar', zonaClave: 'g|m' };
+  const mk = (rot) => ({ id: 'r', piezaId: 'Espalda', talla: 'm', anchoCm: 50, altoCm: 70, posicion: { x: 0, y: 0 }, rotacionGrados: 0, imagenes: [],
+    textos: [{ ...textoBase, texto: 'GIRO', rotacionGrados: rot }] });
+  const leer = async (rot) => {
+    const [p] = await ajustarTextosDePiezas([mk(rot)], obtenerMedidor);
+    const bytes = await generarPdfNesting({ anchoLienzoCm: 50, altoLienzoCm: 70, piezas: [p] });
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes) }).promise;
+    const item = (await (await doc.getPage(1)).getTextContent()).items.find((i) => i.str === 'GIRO');
+    return { m: item.transform, a: p.textos[0].ajuste };
+  };
+  const cero = await leer(0), noventa = await leer(90);
+  comprobar('a 0° el texto se lee de izquierda a derecha', cero.m[0] > 0 && cerca(cero.m[1], 0, 1e-6));
+  comprobar('a +90° el texto se lee de ABAJO hacia ARRIBA (antihorario)', cerca(noventa.m[0], 0, 1e-6) && noventa.m[1] > 0, JSON.stringify(noventa.m));
+  // El origen rota alrededor del CENTRO de la zona: centro + R(+90°)·(dx, -dy), en cm de PDF (Y hacia arriba).
+  const PT = 28.3465, a = noventa.a;
+  const cx = 25 * PT, cy = (70 - 35) * PT, dx = a.dxCm * PT, dy = -a.dyCm * PT;
+  comprobar('y su origen cae donde la rotación alrededor del centro lo manda',
+    cerca(noventa.m[4], cx - dy, 0.05) && cerca(noventa.m[5], cy + dx, 0.05), noventa.m[4] + ',' + noventa.m[5] + ' vs ' + (cx - dy) + ',' + (cy + dx));
+}
+
+console.log('\n--- Texto con caracteres de control o sin glifo: se normaliza y se AVISA, no sale un cuadrito en silencio ---');
+{
+  comprobar('quita saltos de línea, tabulaciones y ancho cero', normalizarTexto(' ANA\nLUIS\t\u200bX  Y ') === 'ANA LUIS X Y', JSON.stringify(normalizarTexto(' ANA\nLUIS\t\u200bX  Y ')));
+  const r = ajustarTexto({ medidor, texto: 'JUAN ⚽', anchoCm: 20, altoCm: 5, modo: 'llenar' });
+  comprobar('detecta el carácter que la fuente no trae', JSON.stringify(r.sinGlifo) === JSON.stringify(['⚽']), JSON.stringify(r.sinGlifo));
+  comprobar('un nombre con ñ y acentos no reporta nada', ajustarTexto({ medidor, texto: 'MUÑOZ ÁLVAREZ', anchoCm: 20, altoCm: 5, modo: 'llenar' }).sinGlifo.length === 0);
+  comprobar('la fuente de base trae todo lo que traía la Helvetica estándar (Š Ž Ÿ Œ €) y el Latin Extended-A (Ć Č Ł Ş Đ Ğ İ Ő Ű)',
+    ajustarTexto({ medidor, texto: 'ŠKRTEL ŽUPAN ŸŒ € ĆČŁŞĐĞİŐŰ', anchoCm: 40, altoCm: 5, modo: 'llenar' }).sinGlifo.length === 0);
+
+  const base = { colorHex: '#000000', rotacionGrados: 0, fuenteUrl: null, xCm: 0, yCm: 0, cxCm: 10, cyCm: 5, anchoCm: 12, altoCm: 6, modo: 'calibrado', zonaClave: 'p|n|m' };
+  // Diez números normales y UNO con más dígitos de los que caben: con el
+  // percentil 85 el largo no manda sobre el cuerpo común, así que queda desbordado.
+  const normales = ['55', '10', '7', '23', '9', '11', '14', '8', '5', '12'].map((n, i) => ({ id: 'n' + i, piezaId: 'Espalda', talla: 'm', textos: [{ ...base, texto: n }] }));
+  const piezas = [
+    ...normales,
+    { id: '2', piezaId: 'Espalda', talla: 'm', textos: [{ ...base, texto: '5555555' }] }, // más dígitos de los que caben
+    { id: '3', piezaId: 'Espalda', talla: 'm', textos: [{ ...base, modo: 'llenar', zonaClave: 'p|nom|m', texto: 'LUIS ⚽' }] },
+    { id: '4', piezaId: 'Espalda', talla: 'm', textos: [{ ...base, modo: 'llenar', zonaClave: 'p|nom|m', texto: ' \u200b ' }] },
+  ];
+  const ajustadas = await ajustarTextosDePiezas(piezas, obtenerMedidor);
+  const avisos = advertenciasDeTextos(ajustadas);
+  const tipos = avisos.map((x) => x.tipo).sort().join();
+  comprobar('avisa del número que no cabe', avisos.some((x) => x.tipo === 'no-cabe' && /5555555/.test(x.mensaje)), JSON.stringify(avisos));
+  comprobar('avisa del carácter sin glifo', avisos.some((x) => x.tipo === 'sin-glifo' && /⚽/.test(x.mensaje)));
+  comprobar('avisa del texto sin nada que dibujar', avisos.some((x) => x.tipo === 'sin-tinta'));
+  comprobar('y no inventa avisos para el "55" que sí cabe', !avisos.some((x) => x.texto === '55'), tipos);
+
+  // El texto nuevo sin ajuste (nada que dibujar) se omite; antes caía al camino viejo y tumbaba todo el PDF.
+  const bytes = await generarPdfNesting({ anchoLienzoCm: 30, altoLienzoCm: 30, piezas: [{ ...ajustadas.find((x) => x.id === '4'), posicion: { x: 0, y: 0 }, anchoCm: 20, altoCm: 20, rotacionGrados: 0, imagenes: [] }] });
+  comprobar('un texto sin nada que dibujar no tumba la generación del PDF', bytes.length > 500);
+}
+
+console.log('\n--- Dos productos con el MISMO id de zona en un pedido no mezclan cajas ni fuentes ---');
+{
+  const textoBase = { colorHex: '#000000', rotacionGrados: 0, fuenteUrl: null, xCm: 0, yCm: 0, cxCm: 10, cyCm: 10, modo: 'calibrado', zonaClave: 'ZONA_1|M', texto: '10' };
+  const camiseta = { id: 'c', piezaId: 'Espalda', talla: 'm', textos: [{ ...textoBase, anchoCm: 20, altoCm: 30 }] };
+  const pantaloneta = { id: 'p', piezaId: 'Delantero', talla: 'm', textos: [{ ...textoBase, anchoCm: 6, altoCm: 8 }] };
+  const juntas = await ajustarTextosDePiezas([camiseta, pantaloneta], obtenerMedidor);
+  const sola = await ajustarTextosDePiezas([pantaloneta], obtenerMedidor);
+  const aJuntas = juntas[1].textos[0].ajuste, aSola = sola[0].textos[0].ajuste;
+  comprobar('la pantaloneta sale igual que si estuviera sola (a pesar de la clave repetida)', cerca(aJuntas.cuerpoCm, aSola.cuerpoCm, 1e-9) && aJuntas.cabe, aJuntas.cuerpoCm + ' vs ' + aSola.cuerpoCm);
+  comprobar('y cabe en su zona de 6 cm', aJuntas.tintaCm.ancho <= 6.02, String(aJuntas.tintaCm.ancho));
+}
+
+console.log('\n--- Una fuente propia que ya no se puede bajar: se reajusta con la de base, no se imprime mal medido ---');
+{
+  const textoBase = { colorHex: '#000000', rotacionGrados: 0, xCm: 0, yCm: 0, cxCm: 15, cyCm: 8, anchoCm: 24, altoCm: 6, modo: 'llenar', zonaClave: 'x|m', texto: 'PEÑA' };
+  // Un ajuste calculado "para otra letra" (muy distinta) con una URL que ya no existe en el Storage:
+  const ajusteAjeno = { texto: 'PEÑA', sinGlifo: [], cuerpoCm: 1, trackingMil: 0, escalaH: 100, dxCm: -1, dyCm: 0.5, cabe: true, pasos: [], tintaCm: { ancho: 3, alto: 1 } };
+  const bytes = await generarPdfNesting({
+    anchoLienzoCm: 40, altoLienzoCm: 30,
+    piezas: [{ id: 'f', piezaId: 'Espalda', talla: 'm', anchoCm: 30, altoCm: 20, posicion: { x: 0, y: 0 }, rotacionGrados: 0, imagenes: [],
+      textos: [{ ...textoBase, fuenteUrl: 'https://ejemplo.invalido/fuente-borrada.ttf', ajuste: ajusteAjeno }] }],
+  });
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes) }).promise;
+  const it = (await (await doc.getPage(1)).getTextContent()).items.find((i) => i.str === 'PEÑA');
+  const reajustado = ajustarTexto({ medidor, texto: 'PEÑA', anchoCm: 24, altoCm: 6, modo: 'llenar' });
+  comprobar('el PDF sale igual con el texto', !!it);
+  comprobar('con el cuerpo reajustado a la fuente de base (no el 1 cm del ajuste ajeno)', !!it && cerca(Math.hypot(it.transform[0], it.transform[1]), reajustado.cuerpoCm * 28.3465, 0.05));
 }
 
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');

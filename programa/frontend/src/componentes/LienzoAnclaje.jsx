@@ -257,7 +257,7 @@ function TextoAjustado({ z, ajuste, familia }) {
       transform={h !== 1 ? 'translate(' + x + ' ' + y + ') scale(' + h + ' 1) translate(' + -x + ' ' + -y + ')' : undefined}
       fill="#e6e9f0" stroke="#0d0f14" strokeWidth={ajuste.cuerpoCm / 40} paintOrder="stroke"
     >
-      {z.contenidoTexto}
+      {ajuste.texto ?? z.contenidoTexto}
     </text>
   );
 }
@@ -273,7 +273,9 @@ function pedidoDeAjuste(z) {
 }
 
 // Ajustes del backend para las zonas de texto con contenido: { id: {ajuste,
-// fuenteUrl} }. Con un respiro de 150 ms (cada tecla del "ejemplo" cambia el
+// fuenteUrl, firma} } -- `firma` es el pedido con el que se calculó: un ajuste
+// solo se dibuja si coincide con el texto/caja ACTUALES de la zona (si no,
+// mientras llega el nuevo se vería el texto nuevo con el tamaño del viejo). Con un respiro de 150 ms (cada tecla del "ejemplo" cambia el
 // pedido) y conservando la MISMA referencia de las zonas cuyo ajuste no
 // cambió -- así ZonaEnLienzo (memoizada) no se vuelve a dibujar de más.
 function useAjustesDeTexto(zonas) {
@@ -288,9 +290,12 @@ function useAjustesDeTexto(zonas) {
       ajustarTextos(pedidos)
         .then((r) => {
           if (!vigente) return;
+          const firmaPorId = {};
+          for (const pedido of pedidos) firmaPorId[pedido.id] = JSON.stringify(pedido);
           setAjustes((prev) => {
             const siguiente = {};
-            for (const [id, nuevo] of Object.entries(r.ajustes)) {
+            for (const [id, entrada] of Object.entries(r.ajustes)) {
+              const nuevo = { ...entrada, firma: firmaPorId[id] };
               siguiente[id] = JSON.stringify(prev[id]) === JSON.stringify(nuevo) ? prev[id] : nuevo;
             }
             return siguiente;
@@ -321,8 +326,11 @@ const ZonaEnLienzo = memo(function ZonaEnLienzo({
   const enCruz = esLogo && z.cruz !== false;
   // Girar (web-only, no viene del puerto): pivota sobre el CENTRO real de
   // la zona (z.cx/z.cy, que sí resuelve el motor), no sobre la esquina --
-  // así el punto de referencia no se corre al girar.
-  const transformZona = z.rotacion ? 'rotate(' + z.rotacion + ' ' + z.cx + ' ' + z.cy + ')' : undefined;
+  // así el punto de referencia no se corre al girar. Grados POSITIVOS =
+  // ANTIHORARIO, igual que Illustrator, el PDF (exportarPdf.js) y la vista
+  // previa de nesting; el `rotate` de SVG gira al revés (su Y va hacia
+  // abajo), de ahí el signo.
+  const transformZona = z.rotacion ? 'rotate(' + -z.rotacion + ' ' + z.cx + ' ' + z.cy + ')' : undefined;
   const natural = useTamanoNaturalDeImagen(esLogo ? z.logoRuta : null);
   const medida = esLogo && z.logoRuta
     ? medidaLogoAjustada({ cruz: enCruz, lado: z.ancho, ancho: z.ancho, alto: z.alto, natural })
@@ -705,6 +713,8 @@ export function LienzoAnclaje({
             ? { ...zOriginal, x: zOriginal.x + arrastre.delta.x, y: zOriginal.y + arrastre.delta.y,
                 cx: zOriginal.cx + arrastre.delta.x, cy: zOriginal.cy + arrastre.delta.y }
             : zOriginal;
+          const entradaAjuste = ajustes[zona.id];
+          const ajusteVigente = entradaAjuste && entradaAjuste.firma === JSON.stringify(pedidoDeAjuste(zona)) ? entradaAjuste : null;
           return (
             <ZonaEnLienzo
               key={zona.id}
@@ -717,8 +727,8 @@ export function LienzoAnclaje({
               mostrarMarco={leyenda.zonas !== false}
               onSeleccionarZona={onSeleccionarZona}
               iniciarArrastreZona={iniciarArrastreZona}
-              ajuste={ajustes[zona.id]?.ajuste || null}
-              familia={familias[ajustes[zona.id]?.fuenteUrl || URL_FUENTE_BASE] || null}
+              ajuste={ajusteVigente?.ajuste || null}
+              familia={familias[ajusteVigente?.fuenteUrl || URL_FUENTE_BASE] || null}
             />
           );
         })}

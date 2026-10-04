@@ -186,7 +186,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       if (gs.length > 0 && grupoIds.length === 0) setGrupoIds([gs[0].id]);
       // Nunca puede tumbar la carga de esta pantalla entera por faltar la
       // tabla `fuentes` (recién agregada) -- sin ella, el selector de
-      // fuente de cada zona simplemente no tiene más opción que Helvetica.
+      // fuente de cada zona simplemente no tiene más opción que la de base.
       setFuentes(await listarFuentes().catch(() => []));
     } finally {
       setCargando(false);
@@ -1386,7 +1386,7 @@ function PanelZona({ zona, fuentes, anclasDisponibles, anclasResueltas, onRenomb
         <LineaMedida etiqueta="Mover X" valor={zona.offset.x} onCambiar={(m) => onActualizar({ offset: { ...zona.offset, x: m } })} />
         <LineaMedida etiqueta="Mover Y" valor={zona.offset.y} onCambiar={(m) => onActualizar({ offset: { ...zona.offset, y: m } })} />
         <div className="flex items-center gap-2">
-          <span className="w-24 flex-none text-xs text-muted-foreground">Girar</span>
+          <span className="w-24 flex-none text-xs text-muted-foreground" title="Grados positivos giran en sentido antihorario, igual que en Illustrator y en el PDF">Girar ↺</span>
           <InputNumero className="w-20" step={1} value={zona.rotacion || 0}
             onChange={(n) => onActualizar({ rotacion: n })} />
           <span className="text-xs text-muted-foreground">°</span>
@@ -1411,7 +1411,7 @@ function PanelZona({ zona, fuentes, anclasDisponibles, anclasResueltas, onRenomb
         <div className="flex items-center gap-2 border-t border-border pt-3">
           <span className="text-xs text-muted-foreground">Fuente</span>
           <Select className="max-w-[180px]" value={zona.fuenteId || ''} onChange={(e) => onActualizar({ fuenteId: e.target.value || null })}>
-            <option value="">Helvetica (estándar)</option>
+            <option value="">Arimo Bold (base)</option>
             {fuentes.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.nombre}{!f.coberturaCompleta ? ' (sin ñ/acentos)' : ''}

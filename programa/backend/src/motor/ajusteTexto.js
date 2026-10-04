@@ -37,6 +37,20 @@ export const REGLAS_TEXTO = {
   referenciaNumero: '55', // el caso más exigente de dos dígitos
 };
 
+/**
+ * El texto tal como se va a medir Y escribir: sin saltos de línea, tabulaciones
+ * ni caracteres de ancho cero (una fuente no tiene glifo para ellos y saldrían
+ * como un cuadrito), con los espacios sueltos colapsados y sin espacios en los
+ * extremos. Siempre se usa ESTA versión para medir, dibujar y previsualizar.
+ */
+export function normalizarTexto(texto) {
+  return String(texto ?? '')
+    .replace(/[\u200B-\u200F\u2028-\u202E\u2060\uFEFF]/g, '')
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function limitarCuerpo(cm) {
   if (!(cm > 0)) return 0.01;
   return Math.min(cm, CUERPO_MAXIMO_CM);
@@ -60,6 +74,15 @@ export function medidorDeFontkit(fk) {
 
   return {
     banda,
+    /** Caracteres del texto que esta fuente NO trae (se imprimirían como un cuadrito vacío). */
+    sinGlifo(texto) {
+      const faltan = new Set();
+      for (const caracter of texto) {
+        if (/\s/.test(caracter)) continue;
+        if (!fk.hasGlyphForCodePoint(caracter.codePointAt(0))) faltan.add(caracter);
+      }
+      return [...faltan];
+    },
     // Posiciones de tinta de cada glifo, en em, a tracking 0 y escala 100.
     glifos(texto) {
       const { glyphs } = fk.layout(texto);
@@ -91,6 +114,7 @@ export function medidorDeFontkit(fk) {
 export function medidorDeAvances(fuentePdfLib, alturaMayuscula = 0.718) {
   return {
     banda: { minY: 0, maxY: alturaMayuscula },
+    sinGlifo() { return []; },
     glifos(texto) {
       const ancho = fuentePdfLib.widthOfTextAtSize(texto, 1);
       if (!(ancho > 0)) return [];
@@ -156,6 +180,7 @@ export function calibrarCuerpo({ medidor, candidatos, anchoCm, altoCm, reglas = 
  * @param {'llenar'|'calibrado'} p.modo
  * @param {number|null} [p.cuerpoCalibradoCm]  cuerpo común (modo calibrado)
  * @returns {{
+ *   texto: string, sinGlifo: string[],
  *   cuerpoCm: number, trackingMil: number, escalaH: number,
  *   dxCm: number, dyCm: number, cabe: boolean, pasos: string[],
  *   tintaCm: {ancho: number, alto: number}
@@ -170,7 +195,7 @@ export function calibrarCuerpo({ medidor, candidatos, anchoCm, altoCm, reglas = 
  * del centro de la zona exactamente la mitad de la banda de mayúsculas.
  */
 export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCalibradoCm = null, reglas = REGLAS_TEXTO }) {
-  const valor = String(texto ?? '');
+  const valor = normalizarTexto(texto);
   if (valor === '' || !(anchoCm > 0) || !(altoCm > 0)) return null;
   const glifos = medidor.glifos(valor);
   if (glifos.length === 0) return null;
@@ -220,6 +245,8 @@ export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCali
   // Colocación: tinta centrada en horizontal, banda de mayúsculas centrada en vertical.
   const centroBanda = ((medidor.banda.minY + medidor.banda.maxY) / 2) * cuerpo;
   return {
+    texto: valor, // el texto normalizado que se midió: es EL que hay que dibujar
+    sinGlifo: medidor.sinGlifo(valor),
     cuerpoCm: cuerpo,
     trackingMil: tracking,
     escalaH,
@@ -244,6 +271,13 @@ export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCali
  *   imprime con ella, no con una que no se midió)
  * @returns {Promise<object[]>} piezas nuevas; cada texto con `ajuste` (o null)
  */
+// Textos que comparten cuerpo: misma zona Y misma caja Y misma fuente. Aunque
+// dos zonas distintas llegaran con la misma clave, nunca se mezclan cajas ni
+// tipografías (la clave sola no basta como garantía).
+function grupoDeCalibracion(t) {
+  return [t.zonaClave, t.anchoCm, t.altoCm, t.fuenteUrl || ''].join('|');
+}
+
 export async function ajustarTextosDePiezas(piezas, obtenerMedidor, reglas = REGLAS_TEXTO) {
   const todos = piezas.flatMap((p) => p.textos || []);
   const medidores = new Map();
@@ -256,16 +290,18 @@ export async function ajustarTextosDePiezas(piezas, obtenerMedidor, reglas = REG
   const candidatosPorZona = new Map();
   for (const t of todos) {
     if (t.modo !== 'calibrado' || !t.zonaClave) continue;
-    if (!candidatosPorZona.has(t.zonaClave)) candidatosPorZona.set(t.zonaClave, []);
-    candidatosPorZona.get(t.zonaClave).push(t.texto);
+    const grupo = grupoDeCalibracion(t);
+    if (!candidatosPorZona.has(grupo)) candidatosPorZona.set(grupo, []);
+    candidatosPorZona.get(grupo).push(normalizarTexto(t.texto));
   }
   const cuerpoPorZona = new Map();
   for (const t of todos) {
-    if (t.modo !== 'calibrado' || !t.zonaClave || cuerpoPorZona.has(t.zonaClave)) continue;
+    const grupo = grupoDeCalibracion(t);
+    if (t.modo !== 'calibrado' || !t.zonaClave || cuerpoPorZona.has(grupo)) continue;
     const { medidor } = medidores.get(t.fuenteUrl || '');
     cuerpoPorZona.set(
-      t.zonaClave,
-      calibrarCuerpo({ medidor, candidatos: candidatosPorZona.get(t.zonaClave), anchoCm: t.anchoCm, altoCm: t.altoCm, reglas })
+      grupo,
+      calibrarCuerpo({ medidor, candidatos: candidatosPorZona.get(grupo), anchoCm: t.anchoCm, altoCm: t.altoCm, reglas })
     );
   }
 
@@ -279,10 +315,43 @@ export async function ajustarTextosDePiezas(piezas, obtenerMedidor, reglas = REG
         anchoCm: t.anchoCm,
         altoCm: t.altoCm,
         modo: t.modo,
-        cuerpoCalibradoCm: t.modo === 'calibrado' ? cuerpoPorZona.get(t.zonaClave) : null,
+        cuerpoCalibradoCm: t.modo === 'calibrado' ? cuerpoPorZona.get(grupoDeCalibracion(t)) : null,
         reglas,
       });
-      return { ...t, fuenteUrl, ajuste };
+      // El texto que se escribe en el PDF es el mismo que se midió.
+      return { ...t, texto: ajuste ? ajuste.texto : t.texto, fuenteUrl, ajuste };
     }),
   }));
+}
+
+/**
+ * Avisos para el usuario sobre textos YA ajustados (pieza por pieza, con el
+ * pedido a la vista antes de generar nada): un texto que no cabe en su zona
+ * aun con toda la escalera (el panel de Illustrator avisaba "NO cabe en su
+ * guía"), o que lleva caracteres que su fuente no trae (saldrían como un
+ * cuadrito vacío), o que quedó sin nada que dibujar.
+ *
+ * @param {object[]} piezas  salida de ajustarTextosDePiezas
+ * @returns {{tipo: string, pieza: string, texto: string, mensaje: string}[]}
+ */
+export function advertenciasDeTextos(piezas) {
+  const avisos = [];
+  for (const pieza of piezas) {
+    for (const t of pieza.textos || []) {
+      if (!t.modo) continue; // un texto de una generación guardada antes del ajuste
+      const donde = pieza.piezaId + (pieza.talla ? ' (' + String(pieza.talla).toUpperCase() + ')' : '');
+      const a = t.ajuste;
+      if (!a) {
+        avisos.push({ tipo: 'sin-tinta', pieza: donde, texto: String(t.texto ?? ''), mensaje: donde + ': el texto «' + String(t.texto ?? '') + '» no tiene nada que dibujar y se omite.' });
+        continue;
+      }
+      if (a.sinGlifo.length) {
+        avisos.push({ tipo: 'sin-glifo', pieza: donde, texto: a.texto, mensaje: donde + ': «' + a.texto + '» lleva ' + a.sinGlifo.join(' ') + ', que la fuente no trae -- saldría como un cuadrito vacío.' });
+      }
+      if (!a.cabe) {
+        avisos.push({ tipo: 'no-cabe', pieza: donde, texto: a.texto, mensaje: donde + ': «' + a.texto + '» no cabe en su zona (mide ' + a.tintaCm.ancho.toFixed(1) + ' cm de ancho, la zona ' + t.anchoCm.toFixed(1) + ' cm) -- revisalo antes de imprimir.' });
+      }
+    }
+  }
+  return avisos;
 }

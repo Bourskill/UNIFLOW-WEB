@@ -402,6 +402,14 @@ export function Pedidos({ recargarSenal }) {
               Lienzo {resultado.anchoLienzoCm}×{resultado.altoLienzoCm} cm · utilización {resultado.utilizacion}%
             </p>
           )}
+          {/* Lo que conviene revisar ANTES de imprimir: un texto que no cabe en
+              su zona, o con letras que su fuente no trae (backend:
+              ajusteTexto.js·advertenciasDeTextos). No bloquea nada. */}
+          {resultado?.advertencias?.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              {resultado.advertencias.map((a, i) => <Aviso key={i} tono="error">{a.mensaje}</Aviso>)}
+            </div>
+          )}
         </Tarjeta>
       )}
 

@@ -1,7 +1,14 @@
 Arimo-Bold.ttf -- fuente de base para nombre/número/texto de una zona cuando no
 se elige otra (ver src/motor/medidorFuentes.js).
 
-Arimo, subconjunto "latin" (incluye ñ, acentos, ¿ ¡), peso 700.
-Origen: Fontsource (https://fontsource.org/fonts/arimo), que la redistribuye
-desde Google Fonts. Licencia: SIL Open Font License 1.1 (permite uso comercial
-y redistribución junto con el programa).
+Arimo Bold (peso 700), subconjuntos "latin" + "latin-ext" de Fontsource
+(https://fontsource.org/fonts/arimo) fusionados en un solo archivo con
+fontTools.merge: cubre ñ, acentos, ¿ ¡ y todo lo que traía la Helvetica
+estándar (Š Ž Ÿ Œ € ...), más Latin Extended-A (Ć Č Ł Ş Đ Ğ İ Ő Ű...).
+Las métricas de las letras de "latin" quedan idénticas a las del original.
+Origen: Google Fonts. Licencia: SIL Open Font License 1.1 (permite uso
+comercial y redistribución junto con el programa).
+
+Para regenerarla: bajar latin-700-normal.ttf y latin-ext-700-normal.ttf de
+https://cdn.jsdelivr.net/fontsource/fonts/arimo@latest/ y correr
+  python -c "from fontTools.merge import Merger; Merger().merge(['latin.ttf','latin-ext.ttf']).save('Arimo-Bold.ttf')"

@@ -42,12 +42,16 @@ const CLASE_INPUT =
   'placeholder:text-faint-foreground outline-none transition-shadow ' +
   'focus:border-primary focus:ring-4 focus:ring-primary-soft';
 
-export function Input(props) {
-  return <input className={CLASE_INPUT + ' ' + (props.className || '')} {...props} />;
+// `className` se SUMA al estilo base. Antes se armaba la clase compuesta y
+// después `{...props}` la pisaba con el className suelto: todo Input/Select
+// que recibía una clase (para limitar su ancho, por ejemplo) perdía borde,
+// fondo y radio, y se veía como un campo del navegador sin estilo.
+export function Input({ className = '', ...props }) {
+  return <input className={CLASE_INPUT + ' ' + className} {...props} />;
 }
 
-export function Select(props) {
-  return <select className={CLASE_INPUT + ' ' + (props.className || '')} {...props} />;
+export function Select({ className = '', ...props }) {
+  return <select className={CLASE_INPUT + ' ' + className} {...props} />;
 }
 
 export function Tarjeta({ as: Etiqueta = 'div', className = '', ...props }) {

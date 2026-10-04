@@ -151,6 +151,8 @@
  * @property {string} [valorFijo]  solo si campoPedido === 'fijo'
  * @property {string} [valorEjemplo]  solo para previsualizar en el editor, nunca se produce con esto
  * @property {string} [colorHex]
+ * @property {string} [fuenteId]   id de una fuente del catálogo; sin él, la fuente de base (Arimo Bold)
+ * @property {number} [rotacion]   grados, propio de UNIFLOW WEB: POSITIVO = ANTIHORARIO (como Illustrator, el PDF y el lienzo), alrededor del centro de la zona
  *
  * @typedef {Object} Anclaje
  * @property {number} [version]

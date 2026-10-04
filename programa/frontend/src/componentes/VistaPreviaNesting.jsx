@@ -1,6 +1,6 @@
 import { Stage, Layer, Rect, Text, Image as ImagenKonva, Group, Shape } from 'react-konva';
 import { useImagenCargada } from './useImagenCargada.js';
-import { useFuentesWeb } from './useFuentesWeb.js';
+import { useFuentesWeb, cssDeFamilia } from './useFuentesWeb.js';
 import { URL_FUENTE_BASE } from '../api.js';
 
 // Un pixel por cm es suficiente para la vista previa; no es la resolución del
@@ -24,12 +24,12 @@ function TextoAjustado({ texto, familia }) {
         c.rotate(-((texto.rotacionGrados || 0) * Math.PI) / 180);
         c.translate(a.dxCm * PX_POR_CM, a.dyCm * PX_POR_CM);
         c.scale(a.escalaH / 100, 1);
-        c.font = a.cuerpoCm * PX_POR_CM + 'px "' + familia + '"';
+        c.font = a.cuerpoCm * PX_POR_CM + 'px ' + cssDeFamilia(familia);
         c.fontKerning = 'none';
         c.letterSpacing = (a.trackingMil / 1000) * a.cuerpoCm * PX_POR_CM + 'px';
         c.fillStyle = texto.colorHex;
         c.textBaseline = 'alphabetic';
-        c.fillText(texto.texto, 0, 0);
+        c.fillText(a.texto ?? texto.texto, 0, 0);
         c.restore();
       }}
     />
@@ -120,6 +120,7 @@ function PiezaEnLienzo({ pieza, familias }) {
             fontSize={texto.altoCm * PX_POR_CM}
             fontStyle="bold"
             fill={texto.colorHex}
+            rotation={-(texto.rotacionGrados || 0)}
           />
         )
       ))}
