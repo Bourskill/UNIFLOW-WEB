@@ -125,7 +125,7 @@ function App() {
                   { id: 'prendas', etiqueta: 'Prendas', contenido: <PrendasMemo recargarSenal={recargarSenal} /> },
                   { id: 'biblioteca', etiqueta: 'Biblioteca', contenido: <PiezasMemo recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
                   { id: 'plantillas', etiqueta: 'Plantillas', contenido: <PlantillasMemo recargarSenal={recargarSenal} onUsarPlantilla={usarPlantilla} /> },
-                  { id: 'fuentes', etiqueta: 'Fuentes', contenido: <FuentesMemo /> },
+                  { id: 'fuentes', etiqueta: 'Fuentes', contenido: <FuentesMemo onCambio={marcarCambio} /> },
                 ]}
               />
             </div>

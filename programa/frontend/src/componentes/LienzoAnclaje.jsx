@@ -1,5 +1,7 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import ClipperLib from 'clipper-lib';
+import { ajustarTextos, URL_FUENTE_BASE } from '../api.js';
+import { useFuentesWeb } from './useFuentesWeb.js';
 
 // Puerto FIEL del lienzo de Anclajes del panel de Illustrator
 // (programa/panel/js/main.js: dibujarLienzo/candidatosDe/sinMontonera) --
@@ -238,6 +240,71 @@ function medidaLogoAjustada({ cruz, lado, ancho, alto, natural }) {
   return { w: pw * escala, h: ph * escala };
 }
 
+// El texto de una zona de nombre/número/texto fijo, ajustado a su espacio
+// (motor/ajusteTexto.js, el mismo cálculo que usa el PDF): cuerpo, tracking y
+// escala horizontal ya resueltos por el backend con las medidas reales de la
+// fuente. Se dibuja por su línea de base, sin kerning (pdf-lib tampoco lo
+// aplica) para que el ancho coincida con el impreso.
+function TextoAjustado({ z, ajuste, familia }) {
+  const x = z.cx + ajuste.dxCm;
+  const y = z.cy + ajuste.dyCm;
+  const h = ajuste.escalaH / 100;
+  return (
+    <text
+      x={x} y={y}
+      fontSize={ajuste.cuerpoCm} fontFamily={familia}
+      style={{ letterSpacing: ajuste.trackingMil / 1000 + 'em', fontKerning: 'none' }}
+      transform={h !== 1 ? 'translate(' + x + ' ' + y + ') scale(' + h + ' 1) translate(' + -x + ' ' + -y + ')' : undefined}
+      fill="#e6e9f0" stroke="#0d0f14" strokeWidth={ajuste.cuerpoCm / 40} paintOrder="stroke"
+    >
+      {z.contenidoTexto}
+    </text>
+  );
+}
+
+// Una zona de texto con contenido, para pedirle al backend su ajuste. Solo
+// lo que NO cambia al arrastrar (el tamaño de la caja, no su posición).
+function pedidoDeAjuste(z) {
+  if (z.tipo === 'logo' || !z.contenidoTexto) return null;
+  return {
+    id: z.id, texto: z.contenidoTexto, anchoCm: z.ancho, altoCm: z.alto,
+    modo: z.campoPedido === 'numero' ? 'calibrado' : 'llenar', fuenteUrl: z.fuenteUrl || null,
+  };
+}
+
+// Ajustes del backend para las zonas de texto con contenido: { id: {ajuste,
+// fuenteUrl} }. Con un respiro de 150 ms (cada tecla del "ejemplo" cambia el
+// pedido) y conservando la MISMA referencia de las zonas cuyo ajuste no
+// cambió -- así ZonaEnLienzo (memoizada) no se vuelve a dibujar de más.
+function useAjustesDeTexto(zonas) {
+  const pedidos = useMemo(() => zonas.map(pedidoDeAjuste).filter(Boolean), [zonas]);
+  const clave = JSON.stringify(pedidos);
+  const [ajustes, setAjustes] = useState({});
+
+  useEffect(() => {
+    if (pedidos.length === 0) { setAjustes((prev) => (Object.keys(prev).length ? {} : prev)); return undefined; }
+    let vigente = true;
+    const temporizador = setTimeout(() => {
+      ajustarTextos(pedidos)
+        .then((r) => {
+          if (!vigente) return;
+          setAjustes((prev) => {
+            const siguiente = {};
+            for (const [id, nuevo] of Object.entries(r.ajustes)) {
+              siguiente[id] = JSON.stringify(prev[id]) === JSON.stringify(nuevo) ? prev[id] : nuevo;
+            }
+            return siguiente;
+          });
+        })
+        .catch(() => { if (vigente) setAjustes({}); }); // sin backend: cae al rótulo de siempre
+    }, 150);
+    return () => { vigente = false; clearTimeout(temporizador); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clave]);
+
+  return ajustes;
+}
+
 // Una zona, memoizada: durante un arrastre, la ÚNICA zona cuyas props
 // cambian de verdad cuadro a cuadro es la que se está arrastrando -- todas
 // las demás (y sus candidatos/anclas, ver más abajo) reciben exactamente
@@ -247,7 +314,7 @@ function medidaLogoAjustada({ cruz, lado, ancho, alto, natural }) {
 // que se sintiera con delay.
 const ZonaEnLienzo = memo(function ZonaEnLienzo({
   zona: z, seleccionada, arrastrando, modo, W, H, R, F, mostrarSola, mostrarMarco,
-  onSeleccionarZona, iniciarArrastreZona,
+  onSeleccionarZona, iniciarArrastreZona, ajuste, familia,
 }) {
   const fuera = z.x < 0 || z.y < 0 || z.x + z.ancho > W + 0.01 || z.y + z.alto > H + 0.01;
   const esLogo = z.tipo === 'logo';
@@ -268,7 +335,10 @@ const ZonaEnLienzo = memo(function ZonaEnLienzo({
   // perder de vista cómo queda el diseño real. Si una zona de texto
   // TODAVÍA no tiene un valor de ejemplo cargado, no hay contenido real que
   // conservar -- se oculta entera, igual que un logo sin archivo elegido.
-  const contenidoTexto = !esLogo ? (z.campoPedido === 'fijo' ? z.valorFijo : z.valorEjemplo) : null;
+  const contenidoTexto = z.contenidoTexto || null;
+  // Ajustado a su zona solo cuando el backend ya respondió y la fuente cargó;
+  // mientras tanto (o sin backend) queda el rótulo de siempre, nunca vacío.
+  const textoAjustado = contenidoTexto && ajuste && familia ? <TextoAjustado z={z} ajuste={ajuste} familia={familia} /> : null;
   if (!mostrarMarco) {
     if (esLogo) {
       if (z.logoRuta && medida) {
@@ -283,9 +353,11 @@ const ZonaEnLienzo = memo(function ZonaEnLienzo({
     if (!contenidoTexto) return null;
     return (
       <g transform={transformZona} onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }} style={{ cursor: 'pointer' }}>
-        <text x={z.cx} y={z.cy + F * 0.35} textAnchor="middle" fontSize={F} fill="#e6e9f0" stroke="#0d0f14" strokeWidth={F / 6} paintOrder="stroke">
-          {contenidoTexto}
-        </text>
+        {textoAjustado || (
+          <text x={z.cx} y={z.cy + F * 0.35} textAnchor="middle" fontSize={F} fill="#e6e9f0" stroke="#0d0f14" strokeWidth={F / 6} paintOrder="stroke">
+            {contenidoTexto}
+          </text>
+        )}
       </g>
     );
   }
@@ -329,7 +401,11 @@ const ZonaEnLienzo = memo(function ZonaEnLienzo({
       {esLogo && z.logoRuta && !enCruz && medida && (
         <image href={z.logoRuta} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
       )}
-      {(seleccionada || mostrarSola) && (!esLogo || !z.logoRuta) && (
+      {/* Con contenido real, el texto ocupa SU ZONA (siempre visible, como en
+          el PDF); el rótulo chico solo aparece para identificar una zona
+          todavía vacía, o si el ajuste no está disponible. */}
+      {textoAjustado}
+      {!textoAjustado && (seleccionada || mostrarSola) && (!esLogo || !z.logoRuta) && (
         <text x={z.cx} y={z.cy + F * 0.35} textAnchor="middle" fontSize={F} fill="#e6e9f0" stroke="#0d0f14" strokeWidth={F / 6} paintOrder="stroke">
           {esLogo ? 'LOGO' : z.etiqueta}
         </text>
@@ -415,6 +491,9 @@ export function LienzoAnclaje({
   // `arrastre` NO se limpia todavía -- ver el efecto de abajo sobre por
   // qué (el motivo real de que soltar la zona no se sintiera instantáneo).
   const arrastrandoRef = useRef(false);
+
+  const ajustes = useAjustesDeTexto(zonasResueltas);
+  const familias = useFuentesWeb([URL_FUENTE_BASE, ...Object.values(ajustes).map((a) => a.fuenteUrl)]);
 
   // Todos los hooks van ANTES de cualquier return condicionado a `geo` --
   // si `geo` pasa de null a un valor real (o al revés) sin desmontar este
@@ -638,6 +717,8 @@ export function LienzoAnclaje({
               mostrarMarco={leyenda.zonas !== false}
               onSeleccionarZona={onSeleccionarZona}
               iniciarArrastreZona={iniciarArrastreZona}
+              ajuste={ajustes[zona.id]?.ajuste || null}
+              familia={familias[ajustes[zona.id]?.fuenteUrl || URL_FUENTE_BASE] || null}
             />
           );
         })}

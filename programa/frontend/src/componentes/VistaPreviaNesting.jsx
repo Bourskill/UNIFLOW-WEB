@@ -1,27 +1,62 @@
-import { Stage, Layer, Rect, Text, Image as ImagenKonva, Group } from 'react-konva';
+import { Stage, Layer, Rect, Text, Image as ImagenKonva, Group, Shape } from 'react-konva';
 import { useImagenCargada } from './useImagenCargada.js';
+import { useFuentesWeb } from './useFuentesWeb.js';
+import { URL_FUENTE_BASE } from '../api.js';
 
 // Un pixel por cm es suficiente para la vista previa; no es la resolución del
 // PDF final (eso lo decide exportarPdf.js en el backend con puntos reales).
 const PX_POR_CM = 6;
 
+// Texto ya ajustado a su zona (motor/ajusteTexto.js): se dibuja por su línea
+// de base con el cuerpo, tracking y escala que calculó el backend -- las mismas
+// cifras con las que exportarPdf.js lo escribe. Rota alrededor del centro de
+// la zona, en el sentido del PDF (antihorario para grados positivos).
+function TextoAjustado({ texto, familia }) {
+  if (!familia) return null; // la fuente todavía carga: mejor nada que otra letra
+  const a = texto.ajuste;
+  return (
+    <Shape
+      listening={false}
+      sceneFunc={(ctx) => {
+        const c = ctx._context;
+        c.save();
+        c.translate(texto.cxCm * PX_POR_CM, texto.cyCm * PX_POR_CM);
+        c.rotate(-((texto.rotacionGrados || 0) * Math.PI) / 180);
+        c.translate(a.dxCm * PX_POR_CM, a.dyCm * PX_POR_CM);
+        c.scale(a.escalaH / 100, 1);
+        c.font = a.cuerpoCm * PX_POR_CM + 'px "' + familia + '"';
+        c.fontKerning = 'none';
+        c.letterSpacing = (a.trackingMil / 1000) * a.cuerpoCm * PX_POR_CM + 'px';
+        c.fillStyle = texto.colorHex;
+        c.textBaseline = 'alphabetic';
+        c.fillText(texto.texto, 0, 0);
+        c.restore();
+      }}
+    />
+  );
+}
+
 export function VistaPreviaNesting({ resultado }) {
   const ancho = resultado.anchoLienzoCm * PX_POR_CM;
   const alto = resultado.altoLienzoCm * PX_POR_CM;
+  const familias = useFuentesWeb([
+    URL_FUENTE_BASE,
+    ...resultado.piezas.flatMap((p) => (p.textos || []).map((t) => t.fuenteUrl)),
+  ]);
 
   return (
     <Stage width={ancho} height={alto} className="rounded-lg border border-border">
       <Layer>
         <Rect x={0} y={0} width={ancho} height={alto} fill="#f5f5f0" stroke="#999" />
         {resultado.piezas.map((pieza) => (
-          <PiezaEnLienzo key={pieza.id} pieza={pieza} />
+          <PiezaEnLienzo key={pieza.id} pieza={pieza} familias={familias} />
         ))}
       </Layer>
     </Stage>
   );
 }
 
-function PiezaEnLienzo({ pieza }) {
+function PiezaEnLienzo({ pieza, familias }) {
   const x = pieza.posicion.x * PX_POR_CM;
   const y = pieza.posicion.y * PX_POR_CM;
   const ancho = pieza.anchoCm * PX_POR_CM;
@@ -73,15 +108,20 @@ function PiezaEnLienzo({ pieza }) {
       )}
 
       {(pieza.textos || []).map((texto, indice) => (
-        <Text
-          key={indice}
-          x={texto.xCm * PX_POR_CM}
-          y={texto.yCm * PX_POR_CM}
-          text={texto.texto}
-          fontSize={texto.altoCm * PX_POR_CM}
-          fontStyle="bold"
-          fill={texto.colorHex}
-        />
+        texto.ajuste ? (
+          <TextoAjustado key={indice} texto={texto} familia={familias[texto.fuenteUrl || URL_FUENTE_BASE]} />
+        ) : (
+          // Una generación guardada antes del ajuste a la zona: se ve como se imprimió.
+          <Text
+            key={indice}
+            x={texto.xCm * PX_POR_CM}
+            y={texto.yCm * PX_POR_CM}
+            text={texto.texto}
+            fontSize={texto.altoCm * PX_POR_CM}
+            fontStyle="bold"
+            fill={texto.colorHex}
+          />
+        )
       ))}
     </Group>
   );

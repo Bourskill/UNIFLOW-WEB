@@ -60,6 +60,26 @@ export function eliminarFuente(id) {
   return pedirJson('/fuentes/' + id, { method: 'DELETE' });
 }
 
+// La fuente que se usa cuando una zona no elige ninguna -- el navegador la
+// carga de acá para dibujar la vista previa con la misma letra que el PDF.
+export const URL_FUENTE_BASE = BASE_URL + '/fuentes/base';
+
+// Banco de fuentes gratuitas (Fontsource, ~2000 familias de licencia libre).
+export function buscarEnBancoDeFuentes({ q = '', categoria = '', pagina = 0 }) {
+  const parametros = new URLSearchParams({ q, categoria, pagina: String(pagina) });
+  return pedirJson('/fuentes/banco?' + parametros.toString());
+}
+
+export function agregarFuenteDelBanco({ id, peso }) {
+  return pedirJson('/fuentes/banco', { method: 'POST', body: JSON.stringify({ id, peso }) });
+}
+
+// Ajuste de texto al espacio de su zona (mismo cálculo que usa el PDF). Cada
+// zona: { id, texto, anchoCm, altoCm, modo: 'llenar'|'calibrado', fuenteUrl }.
+export function ajustarTextos(zonas) {
+  return pedirJson('/texto/ajustar', { method: 'POST', body: JSON.stringify({ zonas }) });
+}
+
 // --- Piezas (biblioteca) ---------------------------------------------------
 
 export function listarPiezas() {

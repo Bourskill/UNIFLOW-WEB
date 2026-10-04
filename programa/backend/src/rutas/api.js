@@ -9,6 +9,8 @@ import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
 import { geometriaDelGrupo, geometriaParaAnclaje } from '../motor/geometriaAnclaje.js';
 import { generarDxfNesting } from '../motor/exportarDxf.js';
 import { verificarCobertura, CARACTERES_CRITICOS } from '../motor/fuentes.js';
+import { ajustarTexto, ajustarTextosDePiezas, calibrarCuerpo, REGLAS_TEXTO } from '../motor/ajusteTexto.js';
+import { obtenerMedidor, bytesFuenteBase } from '../motor/medidorFuentes.js';
 import fontkit from '@pdf-lib/fontkit';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
 import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf } from '../motor/importarPdf.js';
@@ -77,22 +79,19 @@ router.get('/fuentes', async (req, res) => {
   res.json(await leerColeccion('fuentes'));
 });
 
-router.post('/fuentes', async (req, res) => {
-  const { nombre, base64, contentType } = req.body;
-  if (!nombre || !base64 || !contentType) {
-    return res.status(400).json({ error: 'Faltan nombre, base64 o contentType' });
-  }
-  const buffer = Buffer.from(base64, 'base64');
-  const extension = EXTENSION_POR_TIPO[contentType];
-  if (!extension || !['.ttf', '.otf'].includes(extension)) {
-    return res.status(400).json({ error: 'Solo se aceptan archivos .ttf o .otf' });
-  }
-
+// Guarda una fuente en el catálogo: la interpreta, calcula su cobertura de
+// ñ/acentos una sola vez, sube el archivo a Storage y crea el registro. Lo
+// comparten la subida a mano (POST /fuentes) y el banco gratuito
+// (POST /fuentes/banco) -- una fuente baja del banco queda idéntica a una
+// subida: mismo registro, mismo chequeo, mismas pantallas.
+async function guardarFuente({ nombre, buffer, extension, contentType, extra = {} }) {
   let fuenteParseada;
   try {
     fuenteParseada = fontkit.create(buffer);
   } catch (error) {
-    return res.status(400).json({ error: 'No se pudo leer el archivo de fuente: ' + error.message });
+    const falla = new Error('No se pudo leer el archivo de fuente: ' + error.message);
+    falla.estado = 400;
+    throw falla;
   }
   const cobertura = verificarCobertura(fuenteParseada, CARACTERES_CRITICOS.join(''));
 
@@ -109,10 +108,163 @@ router.post('/fuentes', async (req, res) => {
     formatoOriginal: extension.slice(1),
     coberturaCompleta: cobertura.soportado,
     caracteresFaltantes: cobertura.faltantes,
+    ...extra,
   };
   await crearRegistro('fuentes', registro);
   await registrarEvento('fuentes', 'crear', registro.id, registro.nombre);
-  res.status(201).json(registro);
+  return registro;
+}
+
+router.post('/fuentes', async (req, res) => {
+  const { nombre, base64, contentType } = req.body;
+  if (!nombre || !base64 || !contentType) {
+    return res.status(400).json({ error: 'Faltan nombre, base64 o contentType' });
+  }
+  const buffer = Buffer.from(base64, 'base64');
+  const extension = EXTENSION_POR_TIPO[contentType];
+  if (!extension || !['.ttf', '.otf'].includes(extension)) {
+    return res.status(400).json({ error: 'Solo se aceptan archivos .ttf o .otf' });
+  }
+  try {
+    res.status(201).json(await guardarFuente({ nombre, buffer, extension, contentType }));
+  } catch (error) {
+    res.status(error.estado || 500).json({ error: error.message });
+  }
+});
+
+// --- Banco de fuentes gratuitas (Fontsource) -------------------------------
+// Fontsource (https://fontsource.org) redistribuye ~2000 familias de Google
+// Fonts y otras, todas con licencia libre (OFL / Apache / MIT), con una API
+// pública SIN clave. Se usa su subconjunto "latin" -- trae ñ, acentos, ¿ y ¡
+// -- en el peso pedido. La lista completa pesa ~500 KB, así que se guarda en
+// memoria una hora en vez de bajarla en cada búsqueda.
+const API_FONTSOURCE = 'https://api.fontsource.org/v1/fonts';
+const NOMBRE_PESO = { 100: 'Thin', 200: 'ExtraLight', 300: 'Light', 400: '', 500: 'Medium', 600: 'SemiBold', 700: 'Bold', 800: 'ExtraBold', 900: 'Black' };
+const TAMANO_PAGINA_BANCO = 24;
+let cacheBanco = null; // { cargadoEn, fuentes }
+
+function falloDeBanco(mensaje, estado = 502) {
+  return Object.assign(new Error(mensaje), { estado });
+}
+
+async function pedirAlBanco(url, tiempoMs = 20000) {
+  try {
+    return await fetch(url, { signal: AbortSignal.timeout(tiempoMs) });
+  } catch (error) {
+    throw falloDeBanco('No se pudo consultar el banco de fuentes (¿hay internet?): ' + error.message);
+  }
+}
+
+async function listaDelBanco() {
+  if (cacheBanco && Date.now() - cacheBanco.cargadoEn < 60 * 60 * 1000) return cacheBanco.fuentes;
+  const respuesta = await pedirAlBanco(API_FONTSOURCE);
+  if (!respuesta.ok) throw falloDeBanco('El banco de fuentes respondió ' + respuesta.status);
+  const todas = await respuesta.json();
+  // Solo las que tienen letras latinas con ñ/acentos y un estilo normal --
+  // y no las de íconos (Material Icons...), que no sirven para escribir.
+  const fuentes = todas
+    .filter((f) => f.category !== 'icons' && f.subsets?.includes('latin') && f.styles?.includes('normal') && f.weights?.length)
+    .map((f) => ({ id: f.id, family: f.family, category: f.category, weights: f.weights, license: f.license }));
+  cacheBanco = { cargadoEn: Date.now(), fuentes };
+  return fuentes;
+}
+
+// Peso por defecto: Bold (lo que se usa para nombres y números); si la
+// familia no lo tiene, el más cercano a Bold entre los que sí tiene.
+function pesoPorDefecto(pesos) {
+  if (pesos.includes(700)) return 700;
+  return pesos.slice().sort((a, b) => Math.abs(a - 700) - Math.abs(b - 700))[0];
+}
+
+router.get('/fuentes/banco', async (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const categoria = String(req.query.categoria || '');
+  const pagina = Math.max(0, Number(req.query.pagina) || 0);
+  try {
+    const todas = await listaDelBanco();
+    const filtradas = todas.filter(
+      (f) => (!q || f.family.toLowerCase().includes(q)) && (!categoria || f.category === categoria)
+    );
+    const categorias = [...new Set(todas.map((f) => f.category))].sort();
+    res.json({
+      total: filtradas.length,
+      categorias,
+      fuentes: filtradas
+        .slice(pagina * TAMANO_PAGINA_BANCO, (pagina + 1) * TAMANO_PAGINA_BANCO)
+        .map((f) => ({ ...f, pesoPorDefecto: pesoPorDefecto(f.weights) })),
+    });
+  } catch (error) {
+    res.status(error.estado || 500).json({ error: error.message });
+  }
+});
+
+router.post('/fuentes/banco', async (req, res) => {
+  const { id } = req.body;
+  if (!id || typeof id !== 'string') return res.status(400).json({ error: 'Falta el id de la fuente' });
+  try {
+    const respuesta = await pedirAlBanco(API_FONTSOURCE + '/' + encodeURIComponent(id));
+    if (respuesta.status === 404) return res.status(404).json({ error: 'Esa fuente no existe en el banco' });
+    if (!respuesta.ok) throw falloDeBanco('El banco de fuentes respondió ' + respuesta.status);
+    const info = await respuesta.json();
+
+    const peso = info.weights.includes(Number(req.body.peso)) ? Number(req.body.peso) : pesoPorDefecto(info.weights);
+    const urlTtf = info.variants?.[String(peso)]?.normal?.latin?.url?.ttf;
+    if (!urlTtf) return res.status(404).json({ error: 'Esa fuente no tiene archivo .ttf para letras latinas en peso ' + peso });
+
+    const nombre = info.family + (NOMBRE_PESO[peso] ? ' ' + NOMBRE_PESO[peso] : '');
+    const existentes = await leerColeccion('fuentes').catch(() => []);
+    if (existentes.some((f) => f.fontsourceId === id && f.peso === peso)) {
+      return res.status(409).json({ error: '"' + nombre + '" ya está en tu catálogo.' });
+    }
+
+    const descarga = await pedirAlBanco(urlTtf, 30000);
+    if (!descarga.ok) throw falloDeBanco('No se pudo bajar el archivo de la fuente (' + descarga.status + ')');
+    const buffer = Buffer.from(await descarga.arrayBuffer());
+
+    res.status(201).json(
+      await guardarFuente({
+        nombre,
+        buffer,
+        extension: '.ttf',
+        contentType: 'font/ttf',
+        extra: { origen: 'fontsource', fontsourceId: id, peso, licencia: info.license },
+      })
+    );
+  } catch (error) {
+    res.status(error.estado || 500).json({ error: error.message });
+  }
+});
+
+// La fuente de base (la que se usa cuando una zona no elige ninguna). La
+// vista previa del navegador la carga de acá para dibujar EXACTAMENTE la misma
+// tipografía con la que el PDF mide y escribe el texto.
+router.get('/fuentes/base', async (req, res) => {
+  res.setHeader('Content-Type', 'font/ttf');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(await bytesFuenteBase());
+});
+
+// Ajuste de texto para la vista previa de Diseño (lienzo): MISMA función que
+// usa el PDF (motor/ajusteTexto.js), así lo que se ve es lo que se imprime.
+// Cada zona llega con su caja en cm; el número se calibra contra la cadena de
+// referencia ("55") porque en Diseño todavía no hay un pedido real -- igual
+// que el panel de Illustrator cuando no hay datos.
+router.post('/texto/ajustar', async (req, res) => {
+  const { zonas } = req.body;
+  if (!Array.isArray(zonas)) return res.status(400).json({ error: 'Falta la lista de zonas' });
+  const ajustes = {};
+  for (const z of zonas) {
+    const { medidor, fuenteUrl } = await obtenerMedidor(z.fuenteUrl || null);
+    const modo = z.modo === 'calibrado' ? 'calibrado' : 'llenar';
+    const cuerpoCalibradoCm = modo === 'calibrado'
+      ? calibrarCuerpo({ medidor, candidatos: [REGLAS_TEXTO.referenciaNumero], anchoCm: z.anchoCm, altoCm: z.altoCm })
+      : null;
+    ajustes[z.id] = {
+      fuenteUrl,
+      ajuste: ajustarTexto({ medidor, texto: z.texto, anchoCm: z.anchoCm, altoCm: z.altoCm, modo, cuerpoCalibradoCm }),
+    };
+  }
+  res.json({ ajustes });
 });
 
 router.delete('/fuentes/:id', async (req, res) => {
@@ -730,6 +882,10 @@ router.post('/nesting/desde-pedido', async (req, res) => {
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
+
+  // Cada texto se ajusta al espacio de su zona (cuerpo, tracking, escala) con
+  // las medidas reales de su fuente -- ver motor/ajusteTexto.js.
+  piezasParaAnidar = await ajustarTextosDePiezas(piezasParaAnidar, obtenerMedidor);
 
   const resultado = anidarPiezas(piezasParaAnidar, { anchoLienzoCm, separacionCm });
   res.json(resultado);

@@ -1,0 +1,7 @@
+Arimo-Bold.ttf -- fuente de base para nombre/número/texto de una zona cuando no
+se elige otra (ver src/motor/medidorFuentes.js).
+
+Arimo, subconjunto "latin" (incluye ñ, acentos, ¿ ¡), peso 700.
+Origen: Fontsource (https://fontsource.org/fonts/arimo), que la redistribuye
+desde Google Fonts. Licencia: SIL Open Font License 1.1 (permite uso comercial
+y redistribución junto con el programa).

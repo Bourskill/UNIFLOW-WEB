@@ -76,8 +76,10 @@ function tallaDeTrabajoPorDefecto(pieza) {
 function etiquetaZona(zona) {
   if (zona.tipo === 'logo') return zona.logoRuta ? 'Logo · ' + nombreDeArchivo(zona.logoRuta) : 'Logo (sin elegir)';
   if (zona.campoPedido === 'fijo') return zona.valorFijo || zona.id;
-  if (zona.campoPedido === 'numero') return zona.valorEjemplo ? 'N° · ' + zona.valorEjemplo : 'Número';
-  return zona.valorEjemplo ? 'Nombre · ' + zona.valorEjemplo : 'Nombre';
+  // Con ejemplo cargado, el rótulo ES el ejemplo (sin prefijo "Nombre · ");
+  // sin él, queda el nombre del campo para identificar la zona vacía.
+  if (zona.campoPedido === 'numero') return zona.valorEjemplo || 'Número';
+  return zona.valorEjemplo || 'Nombre';
 }
 
 function nombreDeArchivo(url) {
@@ -666,6 +668,10 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       // El lienzo los necesita para poder mostrar el contenido real (no un
       // marcador genérico) cuando el toggle "zona" oculta el cuadrito.
       valorFijo: cruda?.valorFijo, valorEjemplo: cruda?.valorEjemplo,
+      // Lo que se escribe en la zona (el lienzo lo ajusta a su espacio) y la
+      // tipografía elegida -- sin ninguna, el lienzo usa la de base.
+      contenidoTexto: z.tipo === 'logo' ? null : ((cruda?.campoPedido === 'fijo' ? cruda?.valorFijo : cruda?.valorEjemplo) || null),
+      fuenteUrl: cruda?.fuenteId ? (fuentes.find((f) => f.id === cruda.fuenteId)?.archivoUrl || null) : null,
     };
   });
 

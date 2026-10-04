@@ -9,9 +9,12 @@
 import {
   PDFDocument, rgb, degrees, StandardFonts,
   pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath,
+  beginText, endText, setFontAndSize, setFillingColor, showText,
+  setCharacterSpacing, setCharacterSqueeze, rotateAndSkewTextRadiansAndTranslate,
 } from 'pdf-lib';
 import ClipperLib from 'clipper-lib';
 import fontkit from '@pdf-lib/fontkit';
+import { bytesDeFuente } from './medidorFuentes.js';
 
 const CM_A_PUNTOS = 28.3465;
 
@@ -117,25 +120,30 @@ export async function generarPdfNesting(resultadoNesting) {
   const fuenteTexto = await pdf.embedFont(StandardFonts.HelveticaBold);
 
   // Fuente propia elegida para una zona puntual (pasada 34, catálogo de
-  // tipografías) -- se descarga y embebe UNA sola vez por URL aunque la
-  // misma fuente se use en muchas piezas/textos del mismo PDF. Si falla
-  // (red, archivo corrupto), cae a la Helvetica de siempre -- una fuente
-  // rota nunca puede tumbar la generación real de un pedido.
+  // tipografías) -- se embebe UNA sola vez por URL aunque la misma fuente se
+  // use en muchas piezas/textos del mismo PDF (los bytes ya vienen en la
+  // memoria compartida de medidorFuentes.js, la misma con la que se midió el
+  // texto). Si falla, devuelve null: una fuente rota nunca puede tumbar la
+  // generación real de un pedido.
   const cacheFuentes = new Map();
   async function fuentePersonalizada(url) {
     if (!url) return null;
     if (cacheFuentes.has(url)) return cacheFuentes.get(url);
     let embebida = null;
     try {
-      const respuesta = await fetch(url);
-      if (!respuesta.ok) throw new Error('HTTP ' + respuesta.status);
-      const bytes = Buffer.from(await respuesta.arrayBuffer());
-      embebida = await pdf.embedFont(bytes);
+      embebida = await pdf.embedFont(await bytesDeFuente(url));
     } catch (error) {
-      console.error('No se pudo usar la fuente personalizada (' + url + '): ' + error.message + ' -- se usa Helvetica.');
+      console.error('No se pudo usar la fuente personalizada (' + url + '): ' + error.message + ' -- se usa la de base.');
     }
     cacheFuentes.set(url, embebida);
     return embebida;
+  }
+  // La fuente de base de los textos AJUSTADOS (ver ajusteTexto.js): con
+  // contornos reales, para poder medirla igual que se dibuja.
+  let fuenteBaseEmbebida = null;
+  async function fuenteBase() {
+    if (!fuenteBaseEmbebida) fuenteBaseEmbebida = await pdf.embedFont(await bytesDeFuente(null));
+    return fuenteBaseEmbebida;
   }
 
   const anchoPt = resultadoNesting.anchoLienzoCm * CM_A_PUNTOS;
@@ -207,8 +215,46 @@ export async function generarPdfNesting(resultadoNesting) {
     }
 
     for (const texto of pieza.textos || []) {
-      const tamanoPt = Math.max(texto.altoCm, 0.3) * CM_A_PUNTOS;
       const color = hexARgb(texto.colorHex);
+
+      // Texto ya ajustado a su zona (motor/ajusteTexto.js): cuerpo, tracking
+      // y escala horizontal calculados con las medidas reales de la fuente.
+      // Se dibuja por su línea de base, rotando alrededor del CENTRO de la
+      // zona (no de la esquina del texto).
+      if (texto.ajuste) {
+        const a = texto.ajuste;
+        const fontElegida = (await fuentePersonalizada(texto.fuenteUrl)) || (await fuenteBase());
+        const rad = ((texto.rotacionGrados || 0) * Math.PI) / 180;
+        const cxPt = xPt + texto.cxCm * CM_A_PUNTOS;
+        const cyPt = yPt + altoRectPt - texto.cyCm * CM_A_PUNTOS;
+        // Origen del texto respecto del centro de la zona, con Y hacia arriba
+        // (PDF) -- la Y del ajuste crece hacia abajo.
+        const dx = a.dxCm * CM_A_PUNTOS;
+        const dy = -a.dyCm * CM_A_PUNTOS;
+        const x = cxPt + dx * Math.cos(rad) - dy * Math.sin(rad);
+        const y = cyPt + dx * Math.sin(rad) + dy * Math.cos(rad);
+        const tamanoPt = a.cuerpoCm * CM_A_PUNTOS;
+
+        pagina.setFont(fontElegida);
+        pagina.pushOperators(
+          pushGraphicsState(),
+          setFillingColor(rgb(color.r, color.g, color.b)),
+          beginText(),
+          setFontAndSize(pagina.fontKey, tamanoPt),
+          setCharacterSpacing((a.trackingMil / 1000) * tamanoPt),
+          setCharacterSqueeze(a.escalaH),
+          rotateAndSkewTextRadiansAndTranslate(rad, 0, 0, x, y),
+          showText(fontElegida.encodeText(texto.texto)),
+          endText(),
+          popGraphicsState()
+        );
+        continue;
+      }
+
+      // Texto de una generación guardada ANTES del ajuste a la zona (sin
+      // `ajuste`): se reproduce tal cual salió entonces -- una reposición
+      // tiene que dar la misma pieza que se imprimió.
+      const tamanoPt = Math.max(texto.altoCm, 0.3) * CM_A_PUNTOS;
       // xCm/yCm del elemento se miden desde la esquina superior izquierda de
       // LA PIEZA (no del lienzo) — por eso se sitúan relativos a xPt/yPt.
       const anclaX = xPt + texto.xCm * CM_A_PUNTOS;
