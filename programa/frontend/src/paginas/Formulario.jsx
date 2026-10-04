@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { listarPiezas, crearPieza, crearGrupo, analizarPieza, resolverPieza, subirArchivo } from '../api.js';
+import { crearPieza, crearGrupo, analizarPieza, resolverPieza, subirArchivo } from '../api.js';
 import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
@@ -34,16 +34,18 @@ const TIPO_MIME_POR_FORMATO = { dxf: 'application/dxf', pdf: 'application/pdf' }
 
 // Una ficha por archivo soltado: analiza y calcula la geometría sola (mismo
 // motor que antes -- una capa por talla, editor manual solo si hay una
-// ambigüedad real), y además pide acá mismo el nombre/categoría/tela/ángulos
-// de ESA pieza, para no tener que ir a otra pantalla después. Reporta su
+// ambigüedad real), y además pide acá mismo el nombre/giros de ESA pieza --
+// y, si el padre está armando una prenda, su ROL en ella (en vez de pedir
+// categoría/tela, que se definen después: categoría en Biblioteca, tela en
+// Producción). Reporta su
 // estado hacia arriba en cada cambio -- el formulario padre decide cuándo
 // está todo listo para guardar.
 // Exportada: Piezas.jsx la reusa tal cual para "Reemplazar moldería" (mismo
 // análisis/resolución de acá, terminando en reemplazarArchivoPieza() en vez
-// de crearPieza()) -- nombre/categoría/tela que pide de paso se ignoran en
+// de crearPieza()) -- nombre/rol que pide de paso se ignoran en
 // ese flujo (la pieza ya existente conserva los suyos), solo importa
 // geometriaPorTalla/archivoOriginal/formatoOriginal.
-export function FichaPieza({ archivo, onQuitar, onCambio }) {
+export function FichaPieza({ archivo, onQuitar, onCambio, modoPrenda = false, rolRepetido = false }) {
   const [estado, setEstado] = useState('analizando'); // analizando | revisando | resuelto | error
   const [archivoTexto, setArchivoTexto] = useState(null);
   const [archivoUrl, setArchivoUrl] = useState(null);
@@ -58,8 +60,8 @@ export function FichaPieza({ archivo, onQuitar, onCambio }) {
   const [resolviendo, setResolviendo] = useState(false);
 
   const [nombre, setNombre] = useState(archivo.name.replace(/\.(dxf|pdf)$/i, ''));
-  const [categoria, setCategoria] = useState('');
-  const [tela, setTela] = useState('');
+  // null = el rol acompaña al nombre hasta que se lo edite a mano.
+  const [rolEditado, setRolEditado] = useState(null);
   const [presetAngulos, setPresetAngulos] = useState(PRESETS_ANGULOS[0].id);
 
   useEffect(() => {
@@ -144,20 +146,20 @@ export function FichaPieza({ archivo, onQuitar, onCambio }) {
 
   // Reporta hacia arriba en cada cambio relevante -- el padre decide cuándo
   // hay algo guardable, no esta ficha.
+  const rol = (rolEditado ?? nombre).trim();
   useEffect(() => {
     const preset = PRESETS_ANGULOS.find((p) => p.id === presetAngulos);
     onCambio({
       listo: estado === 'resuelto' && !!geometrias && nombre.trim().length > 0,
       nombre: nombre.trim(),
-      categoria: categoria.trim() || null,
-      tela: tela.trim() || null,
+      rol,
       angulosPermitidos: preset.valores,
       geometriaPorTalla: geometrias,
       archivoOriginal: archivoUrl,
       formatoOriginal: formato,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estado, nombre, categoria, tela, presetAngulos, geometrias, archivoUrl, formato]);
+  }, [estado, nombre, rol, presetAngulos, geometrias, archivoUrl, formato]);
 
   return (
     <Tarjeta className="flex gap-4">
@@ -173,28 +175,25 @@ export function FichaPieza({ archivo, onQuitar, onCambio }) {
 
         {(estado === 'revisando' || estado === 'resuelto') && analisis && (
           <>
-            <div className="flex flex-wrap gap-2">
-              <Input
-                className="max-w-[220px]"
-                placeholder="Nombre de la pieza"
-                value={nombre}
-                onChange={(e) => setNombre(e.target.value)}
-              />
-              <Input
-                className="max-w-[160px]"
-                placeholder="Categoría (opc.)"
-                value={categoria}
-                onChange={(e) => setCategoria(e.target.value)}
-              />
-              <Input
-                className="max-w-[140px]"
-                placeholder="Tela (opc.)"
-                value={tela}
-                onChange={(e) => setTela(e.target.value)}
-              />
-              <Select className="max-w-[190px]" value={presetAngulos} onChange={(e) => setPresetAngulos(e.target.value)}>
-                {PRESETS_ANGULOS.map((p) => <option key={p.id} value={p.id}>{p.etiqueta}</option>)}
-              </Select>
+            <div className="flex flex-wrap gap-3">
+              <Campo etiqueta="Nombre" className="w-[220px]">
+                <Input placeholder="Nombre de la pieza" value={nombre} onChange={(e) => setNombre(e.target.value)} />
+              </Campo>
+              {modoPrenda && (
+                <Campo etiqueta="Rol en la prenda" className="w-[200px]">
+                  <Input
+                    placeholder="Ej. Manga izquierda"
+                    value={rolEditado ?? nombre}
+                    onChange={(e) => setRolEditado(e.target.value)}
+                  />
+                  {rolRepetido && <span className="text-xs text-danger">Otra pieza ya usa este rol</span>}
+                </Campo>
+              )}
+              <Campo etiqueta="Giros permitidos" className="w-[230px]">
+                <Select value={presetAngulos} onChange={(e) => setPresetAngulos(e.target.value)}>
+                  {PRESETS_ANGULOS.map((p) => <option key={p.id} value={p.id}>{p.etiqueta}</option>)}
+                </Select>
+              </Campo>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5">
@@ -259,24 +258,14 @@ export function FichaPieza({ archivo, onQuitar, onCambio }) {
   );
 }
 
-function filaRolVacia() {
-  return { id: crypto.randomUUID(), rol: '', origen: '' }; // origen: "nueva:<indiceFicha>" o "existente:<piezaId>"
-}
-
 export function Formulario({ onCambio }) {
   const [fichas, setFichas] = useState([]); // [{ id, archivo }]
   const [datosPorFicha, setDatosPorFicha] = useState({}); // id -> snapshot reportado por FichaPieza
-  const [piezasExistentes, setPiezasExistentes] = useState([]);
   const [armarPrenda, setArmarPrenda] = useState(false);
   const [nombrePrenda, setNombrePrenda] = useState('');
-  const [filasRol, setFilasRol] = useState([filaRolVacia()]);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState(null);
   const [exito, setExito] = useState(null);
-
-  useEffect(() => {
-    listarPiezas().then(setPiezasExistentes);
-  }, [exito]);
 
   const onDrop = useCallback((archivos) => {
     setExito(null);
@@ -295,90 +284,72 @@ export function Formulario({ onCambio }) {
       const { [id]: _quitada, ...resto } = prev;
       return resto;
     });
-    setFilasRol((prev) => prev.map((f) => (f.origen === 'nueva:' + id ? { ...f, origen: '' } : f)));
-  }
-
-  function actualizarFilaRol(id, cambios) {
-    setFilasRol((prev) => prev.map((f) => (f.id === id ? { ...f, ...cambios } : f)));
-  }
-
-  function agregarFilaRol() {
-    setFilasRol((prev) => [...prev, filaRolVacia()]);
-  }
-
-  function quitarFilaRol(id) {
-    setFilasRol((prev) => prev.filter((f) => f.id !== id));
-  }
-
-  // Nombre "para mostrar" de una opción del selector de rol -- puede ser una
-  // pieza ya guardada o una recién subida en esta misma pantalla, todavía sin
-  // id real.
-  function elegirOrigen(filaId, origen) {
-    const fila = filasRol.find((f) => f.id === filaId);
-    let nombreSugerido = '';
-    if (origen.startsWith('nueva:')) nombreSugerido = datosPorFicha[origen.slice(6)]?.nombre || '';
-    else if (origen.startsWith('existente:')) nombreSugerido = piezasExistentes.find((p) => p.id === origen.slice(10))?.nombre || '';
-    actualizarFilaRol(filaId, { origen, rol: fila.rol || nombreSugerido });
   }
 
   const fichasListas = fichas.filter((f) => datosPorFicha[f.id]?.listo);
-  const hayAlgoAnalizando = fichas.some((f) => !datosPorFicha[f.id]?.listo);
+  const faltanListas = fichas.length - fichasListas.length;
+
+  // Límites de una prenda: las piezas de la prenda SON las fichas de esta
+  // pantalla (ni más ni menos), cada una con un rol propio -- el rol es la
+  // llave contra la que se ancla el diseño, dos piezas con el mismo rol
+  // dentro de una misma prenda se pisarían entre sí.
+  const conteoRoles = {};
+  for (const f of fichasListas) {
+    const r = (datosPorFicha[f.id].rol || '').toLowerCase();
+    if (r) conteoRoles[r] = (conteoRoles[r] || 0) + 1;
+  }
+  const rolRepetido = (id) => {
+    const r = (datosPorFicha[id]?.rol || '').toLowerCase();
+    return armarPrenda && !!r && conteoRoles[r] > 1;
+  };
+  const sinRol = fichasListas.filter((f) => !datosPorFicha[f.id].rol).length;
+  const hayRolesRepetidos = Object.values(conteoRoles).some((n) => n > 1);
+
+  // Tallas distintas entre piezas de una misma prenda: no se bloquea (una
+  // pieza de talla única puede serlo a propósito), pero se muestra.
+  const tallasPorFicha = fichasListas.map((f) => ({
+    nombre: datosPorFicha[f.id].nombre,
+    tallas: ordenarTallasNatural(Object.keys(datosPorFicha[f.id].geometriaPorTalla || {})),
+  }));
+  const tallasDispares =
+    armarPrenda && tallasPorFicha.length > 1 &&
+    new Set(tallasPorFicha.map((t) => t.tallas.join('|'))).size > 1;
+
+  const pendientes = [];
+  if (faltanListas > 0) pendientes.push(faltanListas === 1 ? '1 pieza sin terminar (o quitala)' : faltanListas + ' piezas sin terminar (o quitalas)');
+  if (armarPrenda && !nombrePrenda.trim()) pendientes.push('nombre de la prenda');
+  if (armarPrenda && sinRol > 0) pendientes.push('rol en ' + sinRol + (sinRol === 1 ? ' pieza' : ' piezas'));
+  if (armarPrenda && hayRolesRepetidos) pendientes.push('roles repetidos');
+  const puedeGuardar = fichas.length > 0 && pendientes.length === 0;
 
   async function guardarTodo() {
+    if (!puedeGuardar) return;
     setError(null);
     setExito(null);
-    if (fichasListas.length === 0) {
-      setError('Subí y completá al menos una pieza (nombre + tallas calculadas) antes de guardar.');
-      return;
-    }
-    if (armarPrenda && !nombrePrenda.trim()) {
-      setError('Falta el nombre de la prenda.');
-      return;
-    }
     setGuardando(true);
     try {
-      // 1) Crear las piezas nuevas -- se necesita su id real antes de armar el grupo.
-      const idRealPorFicha = {};
+      const piezasDelGrupo = [];
       for (const f of fichasListas) {
         const datos = datosPorFicha[f.id];
         const creada = await crearPieza({
           nombre: datos.nombre,
-          categoria: datos.categoria,
-          tela: datos.tela,
           angulosPermitidos: datos.angulosPermitidos,
           geometriaPorTalla: datos.geometriaPorTalla,
           archivoOriginal: datos.archivoOriginal,
           formatoOriginal: datos.formatoOriginal,
         });
-        idRealPorFicha[f.id] = creada.id;
+        piezasDelGrupo.push({ piezaId: creada.id, rol: datos.rol });
       }
-
-      // 2) Si corresponde, armar la prenda referenciando lo recién creado +
-      // cualquier pieza ya existente que se haya elegido en las filas de rol.
-      if (armarPrenda) {
-        const piezasDelGrupo = filasRol
-          .filter((f) => f.rol.trim() && f.origen)
-          .map((f) => {
-            const piezaId = f.origen.startsWith('nueva:')
-              ? idRealPorFicha[f.origen.slice(6)]
-              : f.origen.slice(10);
-            return piezaId ? { piezaId, rol: f.rol.trim() } : null;
-          })
-          .filter(Boolean);
-        if (piezasDelGrupo.length > 0) {
-          await crearGrupo({ nombre: nombrePrenda.trim(), piezas: piezasDelGrupo });
-        }
-      }
+      if (armarPrenda) await crearGrupo({ nombre: nombrePrenda.trim(), piezas: piezasDelGrupo });
 
       setExito(
         fichasListas.length + (fichasListas.length === 1 ? ' pieza guardada' : ' piezas guardadas') +
-          (armarPrenda ? ', prenda "' + nombrePrenda.trim() + '" armada.' : ', sin agrupar.')
+          (armarPrenda ? ' · prenda "' + nombrePrenda.trim() + '" armada.' : '.')
       );
       setFichas([]);
       setDatosPorFicha({});
       setArmarPrenda(false);
       setNombrePrenda('');
-      setFilasRol([filaRolVacia()]);
       onCambio?.();
     } catch (e) {
       setError(e.message);
@@ -387,20 +358,18 @@ export function Formulario({ onCambio }) {
     }
   }
 
-  const opcionesOrigen = [
-    ...fichasListas.map((f) => ({ valor: 'nueva:' + f.id, etiqueta: (datosPorFicha[f.id]?.nombre || '(sin nombre)') + ' (nueva)' })),
-    ...piezasExistentes.map((p) => ({ valor: 'existente:' + p.id, etiqueta: p.nombre + ' (biblioteca)' })),
-  ];
-
   return (
     <div className="pagina flex flex-col gap-6">
       <div>
         <h2 className="text-lg font-semibold">Subir piezas</h2>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Soltá uno o varios archivos <strong>.dxf o .pdf</strong> (una capa por talla en cada uno,
-          piquetes sueltos incluidos en su misma capa). Cada archivo es una pieza — después decidís
-          si quedan sueltas o forman una prenda nueva.
-        </p>
+        <div className="mt-1 flex max-w-2xl items-center gap-1.5 text-sm text-muted-foreground">
+          Un archivo por pieza, con una capa por talla.
+          <Ayuda>
+            Acepta .dxf o .pdf. Los piquetes sueltos van dentro de la misma capa de su talla. Cada
+            archivo se guarda como una pieza de la biblioteca; si querés, las juntás en una prenda
+            acá mismo. Categoría y tela se definen después (Biblioteca y Producción).
+          </Ayuda>
+        </div>
       </div>
 
       <div
@@ -411,9 +380,25 @@ export function Formulario({ onCambio }) {
         }
       >
         <input {...getInputProps()} />
-        Arrastrá acá uno o varios archivos .dxf/.pdf — una pieza entera de la prenda (ej. toda la
-        moldería) o solo una pieza suelta, lo que tengas a mano.
+        Soltá acá tus .dxf o .pdf
       </div>
+
+      {fichas.length > 0 && (
+        <Tarjeta className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <input type="checkbox" checked={armarPrenda} onChange={(e) => setArmarPrenda(e.target.checked)} />
+            Juntar en una prenda
+          </label>
+          {armarPrenda && (
+            <Input
+              value={nombrePrenda}
+              onChange={(e) => setNombrePrenda(e.target.value)}
+              placeholder="Nombre de la prenda (ej. Remera titular)"
+              className="max-w-[320px]"
+            />
+          )}
+        </Tarjeta>
+      )}
 
       {fichas.length > 0 && (
         <div className="flex flex-col gap-3">
@@ -421,6 +406,8 @@ export function Formulario({ onCambio }) {
             <FichaPieza
               key={f.id}
               archivo={f.archivo}
+              modoPrenda={armarPrenda}
+              rolRepetido={rolRepetido(f.id)}
               onQuitar={() => quitarFicha(f.id)}
               onCambio={(datos) => setDatosPorFicha((prev) => ({ ...prev, [f.id]: datos }))}
             />
@@ -428,62 +415,27 @@ export function Formulario({ onCambio }) {
         </div>
       )}
 
-      {fichas.length > 0 && (
-        <Tarjeta className="flex flex-col gap-4">
-          <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-            <input type="checkbox" checked={armarPrenda} onChange={(e) => setArmarPrenda(e.target.checked)} />
-            Armar una prenda con estas piezas
-          </label>
-
-          {armarPrenda && (
-            <div className="flex flex-col gap-3">
-              <Campo etiqueta="Nombre de la prenda">
-                <Input value={nombrePrenda} onChange={(e) => setNombrePrenda(e.target.value)} placeholder="Remera titular" className="max-w-[280px]" />
-              </Campo>
-
-              <div className="flex flex-col gap-2">
-                {filasRol.map((f) => (
-                  <div key={f.id} className="flex flex-wrap items-center gap-2">
-                    <Select value={f.origen} onChange={(e) => elegirOrigen(f.id, e.target.value)} className="max-w-[240px]">
-                      <option value="">— Elegir pieza —</option>
-                      {opcionesOrigen.map((o) => <option key={o.valor} value={o.valor}>{o.etiqueta}</option>)}
-                    </Select>
-                    <Input
-                      placeholder="Rol en esta prenda (ej. Manga izquierda)"
-                      value={f.rol}
-                      onChange={(e) => actualizarFilaRol(f.id, { rol: e.target.value })}
-                      className="max-w-[220px]"
-                    />
-                    {filasRol.length > 1 && (
-                      <Boton variante="fantasma" tamano="sm" type="button" onClick={() => quitarFilaRol(f.id)}>Quitar</Boton>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <div>
-                <Boton type="button" tamano="sm" onClick={agregarFilaRol}>+ Agregar pieza a la prenda</Boton>
-              </div>
-            </div>
-          )}
-        </Tarjeta>
+      {tallasDispares && (
+        <Aviso tono="info">
+          Las piezas no tienen las mismas tallas:{' '}
+          {tallasPorFicha.map((t) => t.nombre + ' (' + t.tallas.join(' ').toUpperCase() + ')').join(' · ')}
+        </Aviso>
       )}
 
       {fichas.length > 0 && (
         <div className="flex flex-col gap-2">
-          <div>
-            <Boton variante="primario" type="button" onClick={guardarTodo} disabled={guardando || fichasListas.length === 0}>
-              {guardando ? 'Guardando…' : 'Guardar'}
+          <div className="flex flex-wrap items-center gap-3">
+            <Boton variante="primario" type="button" onClick={guardarTodo} disabled={guardando || !puedeGuardar}>
+              {guardando ? 'Guardando…' : armarPrenda ? 'Guardar prenda' : fichas.length === 1 ? 'Guardar pieza' : 'Guardar ' + fichas.length + ' piezas'}
             </Boton>
-            {hayAlgoAnalizando && (
-              <span className="ml-3 text-xs text-faint-foreground">
-                {fichasListas.length} de {fichas.length} piezas listas para guardar.
-              </span>
+            {pendientes.length > 0 && (
+              <span className="text-xs text-faint-foreground">Falta: {pendientes.join(' · ')}</span>
             )}
           </div>
           {error && <Aviso tono="error">{error}</Aviso>}
-          {exito && <Aviso tono="info">{exito}</Aviso>}
         </div>
       )}
+      {exito && <Aviso tono="info">{exito}</Aviso>}
     </div>
   );
 }
