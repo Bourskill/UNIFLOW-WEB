@@ -83,3 +83,28 @@ grant select, insert, update, delete on
   piezas, grupos, disenos, productos, pedidos, generaciones, plantillas, fuentes
   to anon, authenticated;
 grant select, insert on eventos to anon, authenticated;
+
+-- ============================================================================
+-- Endurecer permisos (correr UNA vez, DESPUÉS de cargar SUPABASE_SERVICE_KEY
+-- en Render): el backend ya usa la service_role para las tablas (ver
+-- almacen.js), así que la clave anon/publishable deja de necesitar acceso.
+-- Esa clave está pensada para ser pública: con RLS apagado y los GRANT de
+-- arriba, cualquiera que la tuviera podía leer y borrar todo directo contra
+-- Supabase, sin pasar por la clave de acceso del backend.
+--
+-- RLS activado SIN políticas = anon/authenticated no ven ni tocan nada; la
+-- service_role se lo salta por diseño. Nota: la service_role también puede
+-- hacer update/delete en `eventos` -- el append-only ahora lo garantiza el
+-- código del backend (almacen.js nunca lo pide), no un permiso de Postgres.
+-- ============================================================================
+revoke all on piezas, grupos, disenos, productos, pedidos, generaciones, plantillas, fuentes, eventos
+  from anon, authenticated;
+alter table piezas enable row level security;
+alter table grupos enable row level security;
+alter table disenos enable row level security;
+alter table productos enable row level security;
+alter table pedidos enable row level security;
+alter table generaciones enable row level security;
+alter table plantillas enable row level security;
+alter table fuentes enable row level security;
+alter table eventos enable row level security;

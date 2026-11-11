@@ -14,7 +14,7 @@ import {
 } from 'pdf-lib';
 import ClipperLib from 'clipper-lib';
 import fontkit from '@pdf-lib/fontkit';
-import { bytesDeFuente, obtenerMedidor } from './medidorFuentes.js';
+import { bytesDeFuente, obtenerMedidor, urlDeStoragePermitida, leerConTope } from './medidorFuentes.js';
 import { ajustarTexto } from './ajusteTexto.js';
 
 const CM_A_PUNTOS = 28.3465;
@@ -361,10 +361,13 @@ async function incrustarImagen(pdf, urlODataUrl) {
     contentType = urlODataUrl.slice(5, separador);
     bytes = Buffer.from(urlODataUrl.slice(separador + 1), 'base64');
   } else {
-    const respuesta = await fetch(urlODataUrl);
+    if (!urlDeStoragePermitida(urlODataUrl)) {
+      throw new Error('URL de imagen del diseño no permitida (solo el Storage de este proyecto)');
+    }
+    const respuesta = await fetch(urlODataUrl, { redirect: 'error', signal: AbortSignal.timeout(30000) });
     if (!respuesta.ok) throw new Error('No se pudo bajar la imagen del diseño (' + respuesta.status + ')');
     contentType = respuesta.headers.get('content-type') || '';
-    bytes = Buffer.from(await respuesta.arrayBuffer());
+    bytes = await leerConTope(respuesta, 60 * 1024 * 1024); // arte de sublimación en alta: más margen que una fuente
   }
   return contentType.includes('png') ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
 }

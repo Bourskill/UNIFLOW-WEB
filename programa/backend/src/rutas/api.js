@@ -803,19 +803,37 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-// Anida un conjunto de líneas de pedido y devuelve el layout (sin generar PDF
-// todavía) — es la vista previa antes de imprimir. Recibe las piezas ya
-// resueltas (ancho/alto/rotable) en vez de recalcularlas acá, porque esa
-// resolución cruza moldería + diseño + calibración y todavía no hay un único
-// punto que lo arme.
-router.post('/nesting/vista-previa', async (req, res) => {
-  const { piezas, anchoLienzoCm, separacionCm } = req.body;
-  if (!Array.isArray(piezas) || !anchoLienzoCm) {
-    return res.status(400).json({ error: 'Faltan piezas o anchoLienzoCm' });
+// Error con código HTTP propio: lo lanzan anidarGrupo/anidarPedido (que no
+// conocen `res`) y cada ruta lo traduce con responderError. Cualquier otro
+// error sigue de largo al manejador 500 de server.js.
+class ErrorPeticion extends Error {
+  constructor(status, mensaje) {
+    super(mensaje);
+    this.status = status;
   }
-  const resultado = anidarPiezas(piezas, { anchoLienzoCm, separacionCm });
-  res.json(resultado);
-});
+}
+
+function responderError(res, error) {
+  if (error instanceof ErrorPeticion) return res.status(error.status).json({ error: error.message });
+  throw error;
+}
+
+function validarAnchoLienzo(anchoLienzoCm) {
+  const ancho = Number(anchoLienzoCm);
+  if (!Number.isFinite(ancho) || ancho <= 0 || ancho > 1000) {
+    throw new ErrorPeticion(400, 'anchoLienzoCm tiene que ser un número entre 0 y 1000');
+  }
+  return ancho;
+}
+
+function validarSeparacion(separacionCm) {
+  if (separacionCm === undefined || separacionCm === null || separacionCm === '') return undefined;
+  const separacion = Number(separacionCm);
+  if (!Number.isFinite(separacion) || separacion < 0 || separacion > 50) {
+    throw new ErrorPeticion(400, 'separacionCm tiene que ser un número entre 0 y 50');
+  }
+  return separacion;
+}
 
 // Resuelve piezas reales de un grupo (multiplicadas por talla y cantidad) y
 // las anida, SIN personalización — el camino corto para corte láser o para
@@ -823,23 +841,37 @@ router.post('/nesting/vista-previa', async (req, res) => {
 // la dimensión de una talla, falla explícito: no se asume nada (ver
 // claude/README.md — nunca dar una talla por buena).
 router.post('/nesting/desde-grupo', async (req, res) => {
-  const { grupoId, lineas, anchoLienzoCm, separacionCm } = req.body;
-  if (!grupoId || !Array.isArray(lineas) || lineas.length === 0 || !anchoLienzoCm) {
-    return res.status(400).json({ error: 'Faltan grupoId, lineas o anchoLienzoCm' });
+  try {
+    res.json(await anidarGrupo(req.body));
+  } catch (error) {
+    responderError(res, error);
   }
+});
+
+// El layout de corte láser se arma SIEMPRE acá, en el servidor, a partir de
+// la moldería guardada -- tanto para la vista previa como para el DXF final
+// (/nesting/generar-dxf). Nunca se acepta un layout armado por el cliente.
+async function anidarGrupo({ grupoId, lineas, anchoLienzoCm, separacionCm }) {
+  if (!grupoId || !Array.isArray(lineas) || lineas.length === 0 || !anchoLienzoCm) {
+    throw new ErrorPeticion(400, 'Faltan grupoId, lineas o anchoLienzoCm');
+  }
+  anchoLienzoCm = validarAnchoLienzo(anchoLienzoCm);
+  separacionCm = validarSeparacion(separacionCm);
+  const totalCopias = lineas.reduce((suma, l) => suma + (Number(l.cantidad) || 0), 0);
+  if (totalCopias > 2000) throw new ErrorPeticion(400, 'Demasiadas prendas en un solo lote (máximo 2000)');
 
   const [grupos, piezas] = await Promise.all([leerColeccion('grupos'), leerColeccion('piezas')]);
   const grupo = grupos.find((g) => g.id === grupoId);
-  if (!grupo) return res.status(404).json({ error: 'Grupo no encontrado' });
+  if (!grupo) throw new ErrorPeticion(404, 'Grupo no encontrado');
   if (!Array.isArray(grupo.piezas) || grupo.piezas.length === 0) {
-    return res.status(400).json({ error: 'Ese grupo todavía no tiene piezas cargadas' });
+    throw new ErrorPeticion(400, 'Ese grupo todavía no tiene piezas cargadas');
   }
 
   let piezasDelGrupo;
   try {
     piezasDelGrupo = resolverPiezasDeGrupo(grupo, piezas);
   } catch (error) {
-    return res.status(400).json({ error: error.message });
+    throw new ErrorPeticion(400, error.message);
   }
 
   const piezasParaAnidar = [];
@@ -854,10 +886,9 @@ router.post('/nesting/desde-grupo', async (req, res) => {
         const tallaReal = tallaRealDePieza(pieza, linea.talla);
         const dimension = pieza.dimensionesPorTalla?.[tallaReal];
         if (!dimension) {
-          return res.status(400).json({
-            error: 'La pieza "' + pieza.nombre + '" no tiene dimensión cargada para la talla ' +
-              linea.talla + '. No se genera nada hasta que esté completa.',
-          });
+          throw new ErrorPeticion(400,
+            'La pieza "' + pieza.nombre + '" no tiene dimensión cargada para la talla ' +
+              linea.talla + '. No se genera nada hasta que esté completa.');
         }
         // El contorno real (no solo ancho/alto) es lo que hace falta para
         // que el corte láser de verdad recorte la forma de la pieza --
@@ -880,9 +911,8 @@ router.post('/nesting/desde-grupo', async (req, res) => {
     }
   }
 
-  const resultado = anidarPiezas(piezasParaAnidar, { anchoLienzoCm, separacionCm });
-  res.json(resultado);
-});
+  return anidarPiezas(piezasParaAnidar, { anchoLienzoCm, separacionCm });
+}
 
 // Anida un pedido REAL: cada línea es una prenda con talla + nombre + número.
 // Resuelve producto → moldería (dimensiones) + diseño (arte) + elementos
@@ -890,10 +920,24 @@ router.post('/nesting/desde-grupo', async (req, res) => {
 // ya calibrado — esto es lo que hace que la vista previa muestre la camiseta
 // real en vez de un rectángulo con el nombre de la pieza.
 router.post('/nesting/desde-pedido', async (req, res) => {
-  const { pedidoId, anchoLienzoCm, separacionCm } = req.body;
-  if (!pedidoId || !anchoLienzoCm) {
-    return res.status(400).json({ error: 'Faltan pedidoId o anchoLienzoCm' });
+  try {
+    res.json(await anidarPedido(req.body));
+  } catch (error) {
+    responderError(res, error);
   }
+});
+
+// Igual que anidarGrupo: el layout de un pedido se arma SIEMPRE en el
+// servidor desde los datos guardados, tanto para la vista previa como para
+// el PDF final (/nesting/generar) y su registro de reposición. Antes el PDF
+// se generaba con el layout que mandaba el navegador, así que lo impreso y
+// lo registrado dependían de lo que llegara en el body, no del pedido real.
+async function anidarPedido({ pedidoId, anchoLienzoCm, separacionCm }) {
+  if (!pedidoId || !anchoLienzoCm) {
+    throw new ErrorPeticion(400, 'Faltan pedidoId o anchoLienzoCm');
+  }
+  anchoLienzoCm = validarAnchoLienzo(anchoLienzoCm);
+  separacionCm = validarSeparacion(separacionCm);
 
   const [pedidos, productos, grupos, piezas, disenos] = await Promise.all([
     leerColeccion('pedidos'),
@@ -909,16 +953,16 @@ router.post('/nesting/desde-pedido', async (req, res) => {
   const fuentes = await leerColeccion('fuentes').catch(() => []);
 
   const pedido = pedidos.find((p) => p.id === pedidoId);
-  if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+  if (!pedido) throw new ErrorPeticion(404, 'Pedido no encontrado');
   if (!Array.isArray(pedido.lineas) || pedido.lineas.length === 0) {
-    return res.status(400).json({ error: 'Ese pedido todavía no tiene ninguna línea (prenda) cargada' });
+    throw new ErrorPeticion(400, 'Ese pedido todavía no tiene ninguna línea (prenda) cargada');
   }
 
   let piezasParaAnidar;
   try {
     piezasParaAnidar = resolverPiezasDePedido({ pedido, productos, grupos, piezas, disenos, fuentes });
   } catch (error) {
-    return res.status(400).json({ error: error.message });
+    throw new ErrorPeticion(400, error.message);
   }
 
   // Cada texto se ajusta al espacio de su zona (cuerpo, tracking, escala) con
@@ -928,17 +972,21 @@ router.post('/nesting/desde-pedido', async (req, res) => {
   const resultado = anidarPiezas(piezasParaAnidar, { anchoLienzoCm, separacionCm });
   // Lo que conviene revisar ANTES de imprimir: un texto que no cabe en su
   // zona, o con caracteres que su fuente no trae. Campo aparte e ignorable.
-  res.json({ ...resultado, advertencias: advertenciasDeTextos(piezasParaAnidar) });
-});
+  return { ...resultado, advertencias: advertenciasDeTextos(piezasParaAnidar) };
+}
 
-// Genera el PDF final a partir de un layout ya anidado (normalmente el mismo
-// que devolvió /nesting/vista-previa, después de que el usuario lo confirmó).
-// Guarda el registro de generación pieza por pieza para poder hacer
-// reposición más adelante sin rehacer el lote completo.
+// Genera el PDF final de un pedido. Recibe lo mismo que la vista previa
+// (pedidoId + ancho/separación), NO un layout: lo vuelve a armar acá con
+// anidarPedido, que es determinista, así que sale igual a lo que se vio en
+// pantalla si el pedido no cambió entre medio. Guarda el registro de
+// generación pieza por pieza para poder hacer reposición más adelante sin
+// rehacer el lote completo.
 router.post('/nesting/generar', async (req, res) => {
-  const resultadoNesting = req.body;
-  if (!Array.isArray(resultadoNesting?.piezas)) {
-    return res.status(400).json({ error: 'Falta el resultado de nesting a generar' });
+  let resultadoNesting;
+  try {
+    resultadoNesting = await anidarPedido(req.body);
+  } catch (error) {
+    return responderError(res, error);
   }
 
   const pdfBytes = await generarPdfNesting(resultadoNesting);
@@ -946,6 +994,7 @@ router.post('/nesting/generar', async (req, res) => {
   const generacion = {
     id: nanoid(),
     creadoEn: new Date().toISOString(),
+    pedidoId: req.body.pedidoId,
     anchoLienzoCm: resultadoNesting.anchoLienzoCm,
     altoLienzoCm: resultadoNesting.altoLienzoCm,
     utilizacion: resultadoNesting.utilizacion,
@@ -958,8 +1007,9 @@ router.post('/nesting/generar', async (req, res) => {
   res.send(Buffer.from(pdfBytes));
 });
 
-// Genera el DXF de corte láser a partir de un layout ya anidado (normalmente
-// el de /nesting/desde-grupo) -- el camino SIN personalizar, moldería +
+// Genera el DXF de corte láser de una prenda (grupoId + líneas de
+// talla/cantidad + ancho), armando el layout acá con anidarGrupo -- nunca
+// con uno que mande el cliente. El camino SIN personalizar, moldería +
 // talla + cantidad, contorno real de corte. A diferencia de /nesting/generar
 // (PDF), no guarda un registro en `generaciones`: reposición asume un lote
 // personalizado (nombre/número por pieza), que un lote de corte sin
@@ -967,9 +1017,11 @@ router.post('/nesting/generar', async (req, res) => {
 // láser, se vuelve a generar el DXF entero (es liviano, no hay imagen que
 // re-descargar ni texto que recalibrar).
 router.post('/nesting/generar-dxf', async (req, res) => {
-  const resultadoNesting = req.body;
-  if (!Array.isArray(resultadoNesting?.piezas)) {
-    return res.status(400).json({ error: 'Falta el resultado de nesting a generar' });
+  let resultadoNesting;
+  try {
+    resultadoNesting = await anidarGrupo(req.body);
+  } catch (error) {
+    return responderError(res, error);
   }
   let dxfTexto;
   try {

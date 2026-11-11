@@ -83,8 +83,11 @@ export function CorteLaser() {
     }
     setAnidando(true);
     try {
-      const datos = await anidarDesdeGrupo(grupoId, lineas, Number(anchoLienzoCm));
-      setResultado(datos);
+      const parametros = { grupoId, lineas, anchoLienzoCm: Number(anchoLienzoCm) };
+      const datos = await anidarDesdeGrupo(parametros.grupoId, parametros.lineas, parametros.anchoLienzoCm);
+      // El DXF lo arma el servidor de nuevo con ESTOS mismos parámetros, no
+      // con lo que haya en el formulario al apretar descargar.
+      setResultado({ ...datos, parametros });
     } catch (e) {
       setError(e.message);
     } finally {
@@ -97,7 +100,8 @@ export function CorteLaser() {
     setGenerando(true);
     setError(null);
     try {
-      await generarDxf(resultado);
+      const { grupoId: g, lineas: l, anchoLienzoCm: a } = resultado.parametros;
+      await generarDxf(g, l, a);
     } catch (e) {
       setError(e.message);
     } finally {

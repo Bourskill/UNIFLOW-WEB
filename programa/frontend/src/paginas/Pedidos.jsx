@@ -219,8 +219,11 @@ export function Pedidos({ recargarSenal }) {
     setResultado(null);
     setCargando(true);
     try {
-      const datos = await anidarDesdePedido(pedidoParaGenerar, Number(anchoLienzoCm));
-      setResultado(datos);
+      const parametros = { pedidoId: pedidoParaGenerar, anchoLienzoCm: Number(anchoLienzoCm) };
+      const datos = await anidarDesdePedido(parametros.pedidoId, parametros.anchoLienzoCm);
+      // El PDF lo arma el servidor de nuevo con ESTOS mismos parámetros, no
+      // con lo que haya en los inputs al apretar "Generar PDF".
+      setResultado({ ...datos, parametros });
     } catch (e) {
       setErrorGenerar(e.message);
     } finally {
@@ -229,7 +232,13 @@ export function Pedidos({ recargarSenal }) {
   }
 
   async function descargarPdf() {
-    if (resultado) await generarPdf(resultado);
+    if (!resultado) return;
+    setErrorGenerar(null);
+    try {
+      await generarPdf(resultado.parametros.pedidoId, resultado.parametros.anchoLienzoCm);
+    } catch (e) {
+      setErrorGenerar(e.message);
+    }
   }
 
   return (

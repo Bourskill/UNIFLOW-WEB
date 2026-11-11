@@ -26,13 +26,18 @@ npm install
 npm run dev
 ```
 
-El frontend busca el backend en `http://localhost:4000/api` por defecto. Para apuntar a otro
+El backend necesita un `programa/backend/.env` (copiar `.env.example`) con las claves de Supabase y
+`CLAVE_ACCESO`; la web pide esa clave al entrar. El frontend busca el backend en `http://localhost:4000/api` por defecto. Para apuntar a otro
 backend, copiá `programa/frontend/.env.example` a `.env.local` y ajustá `VITE_API_URL`.
 
 ## Deploy
 
 - **Backend → Render**: hay un `render.yaml` en la raíz (Blueprint). Apunta a `programa/backend`,
-  build `npm install`, start `npm start`, health check `/api/salud`.
+  build `npm install`, start `npm start`, health check `/api/salud`. Variables obligatorias:
+  `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_KEY`, `CLAVE_ACCESO` (la clave que pide la web,
+  mínimo 12 caracteres; sin ella el backend no arranca) y `ORIGENES_PERMITIDOS` (la URL de Netlify).
+  Después de cargar `SUPABASE_SERVICE_KEY`, correr una vez el bloque "Endurecer permisos" de
+  `programa/backend/supabase-schema.sql` para cerrar el acceso directo con la clave anon.
 - **Frontend → Netlify**: hay un `netlify.toml` en la raíz (`base = programa/frontend`,
   `publish = dist`). Configurar la variable de entorno `VITE_API_URL` en Netlify apuntando a la URL
   pública que dé Render (ej. `https://uniflow-web-backend.onrender.com/api`).

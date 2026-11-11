@@ -14,3 +14,7 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_KEY
         sync: false
+      - key: CLAVE_ACCESO
+        sync: false
+      - key: ORIGENES_PERMITIDOS
+        sync: false

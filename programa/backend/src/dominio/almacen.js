@@ -28,7 +28,13 @@ if (!url || !key) {
   );
 }
 
-const supabase = createClient(url, key);
+// Las tablas usan la service_role cuando está configurada (la de Storage, más
+// abajo) y solo caen a SUPABASE_KEY si falta. Así se le pueden revocar los
+// permisos de tablas a la clave anon/publishable en Supabase (ver el bloque
+// "Endurecer permisos" de supabase-schema.sql): esa clave está pensada para
+// ser pública, y con RLS apagado y GRANT completo, cualquiera que la tuviera
+// podía leer y borrar todo directo contra Supabase, sin pasar por este backend.
+const supabase = createClient(url, process.env.SUPABASE_SERVICE_KEY || key);
 
 // Storage necesita su PROPIA clave: la de arriba (anon/publishable) puede
 // leer y escribir las tablas porque se le dieron permisos explícitos por

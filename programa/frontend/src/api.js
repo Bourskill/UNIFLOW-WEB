@@ -8,10 +8,73 @@ const ORIGEN = (import.meta.env.VITE_API_URL || 'http://localhost:4000')
   .replace(/\/api$/, '');
 const BASE_URL = ORIGEN + '/api';
 
-async function pedirJson(ruta, opciones) {
+// --- Clave de acceso -----------------------------------------------------------
+// El backend exige una clave compartida del taller (ver backend/src/acceso.js).
+// Se pide una vez en la pantalla de entrada (componentes/Acceso.jsx) y queda
+// guardada en este navegador. Si el servidor la rechaza (401), se borra y se
+// avisa con un evento para que Acceso.jsx vuelva a pedirla.
+const CLAVE_STORAGE = 'uniflow.claveAcceso';
+export const EVENTO_SIN_CLAVE = 'uniflow:sin-clave';
+
+export function leerClaveGuardada() {
+  try {
+    return localStorage.getItem(CLAVE_STORAGE) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function olvidarClave() {
+  try {
+    localStorage.removeItem(CLAVE_STORAGE);
+  } catch {
+    // sin almacenamiento disponible: no hay nada que borrar
+  }
+}
+
+// Comprueba la clave contra el servidor y, si sirve, la guarda.
+// Devuelve true/false; tira solo si el servidor no responde.
+export async function entrarConClave(clave) {
+  const respuesta = await fetch(BASE_URL + '/acceso', { headers: { Authorization: 'Bearer ' + clave } });
+  if (respuesta.status === 401) return false;
+  if (!respuesta.ok) {
+    const cuerpo = await respuesta.json().catch(() => ({}));
+    throw new Error(cuerpo.error || 'Error de red (' + respuesta.status + ')');
+  }
+  try {
+    localStorage.setItem(CLAVE_STORAGE, clave);
+  } catch {
+    // sin almacenamiento: la clave no se recuerda, pero esta sesión sigue sirviendo
+    claveEnMemoria = clave;
+  }
+  return true;
+}
+
+let claveEnMemoria = '';
+
+function encabezadosConClave(extra = {}) {
+  const clave = leerClaveGuardada() || claveEnMemoria;
+  return clave ? { ...extra, Authorization: 'Bearer ' + clave } : extra;
+}
+
+// fetch con la clave puesta; un 401 dispara la pantalla de entrada.
+async function pedir(ruta, opciones = {}) {
   const respuesta = await fetch(BASE_URL + ruta, {
-    headers: { 'Content-Type': 'application/json' },
     ...opciones,
+    headers: encabezadosConClave(opciones.headers),
+  });
+  if (respuesta.status === 401) {
+    olvidarClave();
+    claveEnMemoria = '';
+    window.dispatchEvent(new Event(EVENTO_SIN_CLAVE));
+  }
+  return respuesta;
+}
+
+async function pedirJson(ruta, opciones = {}) {
+  const respuesta = await pedir(ruta, {
+    ...opciones,
+    headers: { 'Content-Type': 'application/json', ...opciones.headers },
   });
   if (!respuesta.ok) {
     const cuerpo = await respuesta.json().catch(() => ({}));
@@ -256,42 +319,38 @@ export function anidarDesdePedido(pedidoId, anchoLienzoCm) {
   });
 }
 
-export async function generarPdf(resultadoNesting) {
-  const respuesta = await fetch(BASE_URL + '/nesting/generar', {
+// Pide un archivo al servidor (POST) y lo descarga en el navegador.
+async function descargar(ruta, cuerpo, nombreArchivo, mensajeError) {
+  const respuesta = await pedir(ruta, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(resultadoNesting),
-  });
-  if (!respuesta.ok) throw new Error('Falló la generación del PDF');
-  const blob = await respuesta.blob();
-  const url = URL.createObjectURL(blob);
-  const enlace = document.createElement('a');
-  enlace.href = url;
-  enlace.download = 'nesting.pdf';
-  enlace.click();
-  URL.revokeObjectURL(url);
-}
-
-// Corte láser: moldería + talla + cantidad, SIN personalización -- ver
-// rutas/api.js·POST /nesting/generar-dxf. Descarga directa, mismo patrón
-// que generarPdf.
-export async function generarDxf(resultadoNesting) {
-  const respuesta = await fetch(BASE_URL + '/nesting/generar-dxf', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(resultadoNesting),
+    body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
   });
   if (!respuesta.ok) {
-    const cuerpo = await respuesta.json().catch(() => ({}));
-    throw new Error(cuerpo.error || 'Falló la generación del DXF');
+    const datos = await respuesta.json().catch(() => ({}));
+    throw new Error(datos.error || mensajeError);
   }
   const blob = await respuesta.blob();
   const url = URL.createObjectURL(blob);
   const enlace = document.createElement('a');
   enlace.href = url;
-  enlace.download = 'corte-laser.dxf';
+  enlace.download = nombreArchivo;
   enlace.click();
-  URL.revokeObjectURL(url);
+  // Revocar en el acto puede cortar la descarga en algunos navegadores.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+// El PDF se arma en el servidor desde el pedido guardado (mismos datos que
+// la vista previa de anidarDesdePedido) -- ya no se manda el layout.
+export function generarPdf(pedidoId, anchoLienzoCm) {
+  return descargar('/nesting/generar', { pedidoId, anchoLienzoCm }, 'nesting.pdf', 'Falló la generación del PDF');
+}
+
+// Corte láser: moldería + talla + cantidad, SIN personalización -- ver
+// rutas/api.js·POST /nesting/generar-dxf. Igual que el PDF, el servidor
+// vuelve a armar el layout con los mismos datos de anidarDesdeGrupo.
+export function generarDxf(grupoId, lineas, anchoLienzoCm) {
+  return descargar('/nesting/generar-dxf', { grupoId, lineas, anchoLienzoCm }, 'corte-laser.dxf', 'Falló la generación del DXF');
 }
 
 // --- Historial de producción -------------------------------------------------
@@ -300,14 +359,6 @@ export function listarGeneraciones() {
   return pedirJson('/generaciones');
 }
 
-export async function reponerPieza(generacionId, piezaId) {
-  const respuesta = await fetch(BASE_URL + '/nesting/' + generacionId + '/reposicion/' + piezaId, { method: 'POST' });
-  if (!respuesta.ok) throw new Error('Falló la reposición');
-  const blob = await respuesta.blob();
-  const url = URL.createObjectURL(blob);
-  const enlace = document.createElement('a');
-  enlace.href = url;
-  enlace.download = 'reposicion.pdf';
-  enlace.click();
-  URL.revokeObjectURL(url);
+export function reponerPieza(generacionId, piezaId) {
+  return descargar('/nesting/' + generacionId + '/reposicion/' + piezaId, undefined, 'reposicion.pdf', 'Falló la reposición');
 }

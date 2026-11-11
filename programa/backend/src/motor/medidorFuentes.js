@@ -66,14 +66,20 @@ export function urlDeFuentePermitida(url) {
   }
 }
 
-async function leerConTope(respuesta) {
+// Mismo criterio para cualquier archivo que el servidor baja por URL (las
+// imágenes de Diseño en exportarPdf.js también): solo el Storage público de
+// este proyecto. Las URLs guardadas en un Diseño vienen del cliente, así que
+// sin esto el servidor bajaría cualquier dirección que alguien guardara ahí.
+export const urlDeStoragePermitida = urlDeFuentePermitida;
+
+export async function leerConTope(respuesta, tope = TOPE_BYTES) {
   const declarado = Number(respuesta.headers.get('content-length'));
-  if (declarado > TOPE_BYTES) throw new Error('el archivo pesa más de ' + TOPE_BYTES / 1024 / 1024 + ' MB');
+  if (declarado > tope) throw new Error('el archivo pesa más de ' + tope / 1024 / 1024 + ' MB');
   const partes = [];
   let total = 0;
   for await (const trozo of respuesta.body) {
     total += trozo.length;
-    if (total > TOPE_BYTES) throw new Error('el archivo pesa más de ' + TOPE_BYTES / 1024 / 1024 + ' MB');
+    if (total > tope) throw new Error('el archivo pesa más de ' + tope / 1024 / 1024 + ' MB');
     partes.push(trozo);
   }
   return Buffer.concat(partes);
