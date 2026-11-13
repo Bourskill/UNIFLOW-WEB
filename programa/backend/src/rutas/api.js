@@ -804,18 +804,13 @@ function round2(n) {
 }
 
 // Error con código HTTP propio: lo lanzan anidarGrupo/anidarPedido (que no
-// conocen `res`) y cada ruta lo traduce con responderError. Cualquier otro
-// error sigue de largo al manejador 500 de server.js.
+// conocen `res`) y cada ruta lo traduce con responderError (más arriba), que
+// lee `estado` -- sin él, responde 500 y lo deja en el log.
 class ErrorPeticion extends Error {
-  constructor(status, mensaje) {
+  constructor(estado, mensaje) {
     super(mensaje);
-    this.status = status;
+    this.estado = estado;
   }
-}
-
-function responderError(res, error) {
-  if (error instanceof ErrorPeticion) return res.status(error.status).json({ error: error.message });
-  throw error;
 }
 
 function validarAnchoLienzo(anchoLienzoCm) {
