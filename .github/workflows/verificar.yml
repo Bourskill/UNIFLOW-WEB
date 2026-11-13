@@ -1,0 +1,80 @@
+# Verifica cada push y pull request ANTES de que importe: Render y Netlify
+# despliegan solos desde main, así que lo que no pase acá conviene verlo en
+# GitHub y no como un deploy caído.
+#
+# - Backend: las pruebas del motor (npm run prueba) y un arranque real del
+#   servidor con variables de mentira, consultando /api/salud. El arranque
+#   atrapa lo que las pruebas no cubren porque no importan server.js ni
+#   rutas/api.js (ej. una función declarada dos veces, que tumbó un deploy).
+# - Frontend: las pruebas propias y el build de Vite (el mismo que corre
+#   Netlify).
+#
+# Ningún paso usa claves reales ni toca Supabase.
+
+name: Verificar
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: programa/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: programa/backend/package-lock.json
+      - run: npm ci
+      - name: Pruebas del motor
+        run: npm run prueba
+      - name: Arranque real del servidor
+        env:
+          SUPABASE_URL: https://ejemplo.supabase.co
+          SUPABASE_KEY: clave-de-mentira
+          SUPABASE_SERVICE_KEY: clave-de-mentira
+          CLAVE_ACCESO: clave-de-prueba-ci-123
+          PORT: 4000
+        run: |
+          node src/server.js > servidor.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:4000/api/salud; then
+              echo
+              codigo=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:4000/api/piezas)
+              if [ "$codigo" != "401" ]; then
+                echo "Sin clave, /api/piezas devolvió $codigo en vez de 401"
+                cat servidor.log
+                exit 1
+              fi
+              echo "Arrancó, y la API rechaza pedidos sin clave (401)."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "El servidor no arrancó en 30 s:"
+          cat servidor.log
+          exit 1
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: programa/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: programa/frontend/package-lock.json
+      - run: npm ci
+      - name: Pruebas
+        run: npm run prueba
+      - name: Build
+        run: npm run build
