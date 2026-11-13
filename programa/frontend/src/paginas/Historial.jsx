@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { listarGeneraciones, reponerPieza } from '../api.js';
-import { Boton, Tarjeta, Chip, Aviso } from '../componentes/ui.jsx';
+import { Boton, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 
 function formatoFecha(iso) {
   return new Date(iso).toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' });
@@ -77,10 +77,15 @@ export function Historial({ recargarSenal }) {
   // vuelo, indistinguible de que de verdad no haya ninguno.
   const [cargando, setCargando] = useState(true);
 
+  const [errorCarga, setErrorCarga] = useState(null);
+
   async function recargar() {
     setCargando(true);
+    setErrorCarga(null);
     try {
       setGeneraciones(await listarGeneraciones());
+    } catch (e) {
+      setErrorCarga(e.message);
     } finally {
       setCargando(false);
     }
@@ -108,6 +113,8 @@ export function Historial({ recargarSenal }) {
 
       {cargando ? (
         <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : errorCarga ? (
+        <ErrorCarga mensaje={errorCarga} onReintentar={recargar} />
       ) : generaciones.length === 0 ? (
         <p className="text-sm text-muted-foreground">Todavía no se generó ningún lote.</p>
       ) : (

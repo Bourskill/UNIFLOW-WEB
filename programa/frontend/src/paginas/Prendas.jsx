@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { listarGrupos, listarPiezas, eliminarGrupo, editarGrupo } from '../api.js';
-import { Boton, Tarjeta, Chip, Campo, Input, Select, Aviso } from '../componentes/ui.jsx';
+import { Boton, Tarjeta, Chip, Campo, Input, Select, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
 import { ordenarTallasNatural } from '../constantes.js';
 
@@ -214,13 +214,17 @@ export function Prendas({ recargarSenal }) {
   // muestra "Todavía no hay ninguna prenda armada" mientras el fetch sigue
   // en vuelo -- indistinguible de que de verdad no haya ninguna.
   const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState(null);
 
   async function recargar() {
     setCargando(true);
+    setErrorCarga(null);
     try {
       const [gs, ps] = await Promise.all([listarGrupos(), listarPiezas()]);
       setGrupos(gs);
       setPiezas(ps);
+    } catch (e) {
+      setErrorCarga(e.message);
     } finally {
       setCargando(false);
     }
@@ -259,6 +263,8 @@ export function Prendas({ recargarSenal }) {
 
       {cargando ? (
         <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : errorCarga ? (
+        <ErrorCarga mensaje={errorCarga} onReintentar={recargar} />
       ) : grupos.length === 0 ? (
         <p className="text-sm text-muted-foreground">Todavía no hay ninguna prenda armada.</p>
       ) : (

@@ -5,7 +5,7 @@ import {
   reemplazarArchivoPieza, eliminarVersionPieza, editarProducto,
 } from '../api.js';
 import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
-import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
+import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
 import { FichaPieza } from './Formulario.jsx';
 
@@ -385,6 +385,7 @@ export function Piezas({ recargarSenal, onCambio }) {
   // el apartado" (más aún si el backend gratis estaba dormido, hasta un
   // minuto para despertar).
   const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState(null);
 
   // Sin este split: cualquier acción DENTRO de una fila (reprocesar,
   // reemplazar molderia, editar) llamaba a `recargar()`, que ponía
@@ -404,8 +405,11 @@ export function Piezas({ recargarSenal, onCambio }) {
 
   async function recargar() {
     setCargando(true);
+    setErrorCarga(null);
     try {
       await actualizarDatos();
+    } catch (e) {
+      setErrorCarga(e.message);
     } finally {
       setCargando(false);
     }
@@ -500,6 +504,8 @@ export function Piezas({ recargarSenal, onCambio }) {
 
       {cargando ? (
         <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : errorCarga ? (
+        <ErrorCarga mensaje={errorCarga} onReintentar={recargar} />
       ) : piezasFiltradas.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {piezas.length === 0 ? 'Todavía no hay ninguna — subí una en "Subir piezas".' : 'Ninguna coincide con el filtro.'}

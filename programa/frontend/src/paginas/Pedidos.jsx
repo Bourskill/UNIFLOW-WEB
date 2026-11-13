@@ -12,7 +12,7 @@ import {
 } from '../api.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
-import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso } from '../componentes/ui.jsx';
+import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 
 // Las tallas válidas para un pedido son las que tienen TODAS las piezas del
 // grupo del producto -- no una lista fija (XS/S/M/L/XL/XXL en mayúscula):
@@ -102,9 +102,11 @@ export function Pedidos({ recargarSenal }) {
   // primera visita mostraba "Creá primero un producto (Diseño → Productos)"
   // mientras el fetch inicial seguía en vuelo, aunque ya hubiera productos.
   const [cargandoInicial, setCargandoInicial] = useState(true);
+  const [errorCarga, setErrorCarga] = useState(null);
 
   async function recargar() {
     setCargandoInicial(true);
+    setErrorCarga(null);
     try {
       const [ps, gs, pzs, peds] = await Promise.all([listarProductos(), listarGrupos(), listarPiezas(), listarPedidos()]);
       setProductos(ps);
@@ -114,6 +116,8 @@ export function Pedidos({ recargarSenal }) {
       if (ps.length > 0 && lineas.length === 0) {
         setLineas([lineaVacia(ps[0].id, tallasDelProducto(ps[0].id, ps, gs, pzs)[0])]);
       }
+    } catch (e) {
+      setErrorCarga(e.message);
     } finally {
       setCargandoInicial(false);
     }
@@ -253,6 +257,8 @@ export function Pedidos({ recargarSenal }) {
 
       {cargandoInicial ? (
         <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : errorCarga ? (
+        <ErrorCarga mensaje={errorCarga} onReintentar={recargar} />
       ) : productos.length === 0 ? (
         <p className="text-sm text-muted-foreground">Creá primero un producto (Diseño → Productos).</p>
       ) : (
@@ -360,7 +366,11 @@ export function Pedidos({ recargarSenal }) {
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground">
           Pedidos cargados
         </h3>
-        {pedidos.length === 0 ? (
+        {cargandoInicial ? (
+          <p className="text-sm text-muted-foreground">Cargando…</p>
+        ) : errorCarga ? (
+          <p className="text-sm text-danger">No se pudieron leer los pedidos (ver el error de arriba).</p>
+        ) : pedidos.length === 0 ? (
           <p className="text-sm text-muted-foreground">Todavía no hay ninguno.</p>
         ) : (
           <div className="flex max-w-2xl flex-col gap-2">

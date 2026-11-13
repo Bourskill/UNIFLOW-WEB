@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { listarGrupos, listarPiezas, anidarDesdeGrupo, generarDxf } from '../api.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
-import { Boton, Campo, Input, Select, Tarjeta, Aviso } from '../componentes/ui.jsx';
+import { Boton, Campo, Input, Select, Tarjeta, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 
 // Talla válida para cortar TODAS las piezas de la prenda a la vez: la
 // intersección de tallas cargadas, no la unión -- mismo criterio que
@@ -40,8 +40,12 @@ export function CorteLaser() {
   const [generando, setGenerando] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    (async () => {
+  const [errorCarga, setErrorCarga] = useState(null);
+
+  async function cargar() {
+    setCargandoInicial(true);
+    setErrorCarga(null);
+    try {
       const [gs, ps] = await Promise.all([listarGrupos(), listarPiezas()]);
       setGrupos(gs);
       setPiezas(ps);
@@ -49,8 +53,16 @@ export function CorteLaser() {
         setGrupoId(gs[0].id);
         setLineas([lineaVacia(tallasDelGrupo(gs[0], ps)[0])]);
       }
+    } catch (e) {
+      setErrorCarga(e.message);
+    } finally {
       setCargandoInicial(false);
-    })();
+    }
+  }
+
+  useEffect(() => {
+    cargar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const grupo = grupos.find((g) => g.id === grupoId);
@@ -121,6 +133,8 @@ export function CorteLaser() {
 
       {cargandoInicial ? (
         <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : errorCarga ? (
+        <ErrorCarga mensaje={errorCarga} onReintentar={cargar} />
       ) : grupos.length === 0 ? (
         <p className="text-sm text-muted-foreground">Armá primero una prenda (Moldería → Prendas).</p>
       ) : (

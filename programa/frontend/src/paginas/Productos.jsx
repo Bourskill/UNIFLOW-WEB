@@ -17,7 +17,7 @@ import {
   listarFuentes,
 } from '../api.js';
 import { ordenarTallasNatural } from '../constantes.js';
-import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
+import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { InputNumero } from '../componentes/InputNumero.jsx';
 import { PanelDock } from '../componentes/PanelDock.jsx';
 import { LienzoAnclaje, COLOR } from '../componentes/LienzoAnclaje.jsx';
@@ -174,9 +174,11 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // el usuario YA tuviera prendas armadas -- le decía que le faltaba algo
   // que en realidad ya tenía.
   const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState(null);
 
   async function recargar() {
     setCargando(true);
+    setErrorCarga(null);
     try {
       const [gs, ds, ps, pzs] = await Promise.all([listarGrupos(), listarDisenos(), listarProductos(), listarPiezas()]);
       setGrupos(gs);
@@ -188,6 +190,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       // tabla `fuentes` (recién agregada) -- sin ella, el selector de
       // fuente de cada zona simplemente no tiene más opción que la de base.
       setFuentes(await listarFuentes().catch(() => []));
+    } catch (e) {
+      setErrorCarga(e.message);
     } finally {
       setCargando(false);
     }
@@ -699,6 +703,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
 
       {cargando ? (
         <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : errorCarga ? (
+        <ErrorCarga mensaje={errorCarga} onReintentar={recargar} />
       ) : grupos.length === 0 ? (
         <p className="text-sm text-muted-foreground">Creá primero una prenda (Moldería → Prendas).</p>
       ) : (

@@ -90,6 +90,21 @@ export function Aviso({ tono = 'info', children }) {
   );
 }
 
+// Una pantalla que no pudo leer sus datos lo dice, con la causa y un botón
+// para reintentar -- nunca cae al mensaje de "todavía no hay ninguno", que
+// es indistinguible de una base de datos vacía (pasó de verdad: con
+// Supabase pausado, Pedidos decía "Todavía no hay ninguno").
+export function ErrorCarga({ mensaje, onReintentar }) {
+  return (
+    <div className="flex max-w-xl flex-col items-start gap-2">
+      <Aviso tono="error">No se pudieron cargar los datos: {mensaje}</Aviso>
+      {onReintentar && (
+        <Boton tamano="sm" type="button" onClick={onReintentar}>Reintentar</Boton>
+      )}
+    </div>
+  );
+}
+
 // El "por qué" de algo puntual va detrás de un "?", no como párrafo siempre
 // visible -- la pantalla se lee sola, y el detalle está ahí para quien lo
 // necesite. <details> nativo: sin JS propio, se cierra solo con Escape/foco.
