@@ -8,16 +8,17 @@ import {
   editarProducto,
   eliminarProducto,
   crearPlantilla,
+  eliminarPlantilla,
   resolverAnclaje,
   subirArchivo,
 } from '../api.js';
-import { obtener } from '../datos/index.js';
+import { obtener, confirmarGuardado, borrarRegistro } from '../datos/index.js';
+import { conjuntoDeZona, importarConjunto } from '../utilidades/conjuntosZonas.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { InputNumero } from '../componentes/InputNumero.jsx';
 import { PanelDock } from '../componentes/PanelDock.jsx';
 import { LienzoAnclaje, COLOR } from '../componentes/LienzoAnclaje.jsx';
-import { SlotImagenDiseno } from '../componentes/SlotImagenDiseno.jsx';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
 
 const BORDE_POR_DEFECTO = { activo: false, colorHex: '#000000', grosorCm: 0.03, desplazamientoCm: 0 };
@@ -157,13 +158,17 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // mismo estado que ya maneja el lienzo, no un editor aparte.
   const [editandoId, setEditandoId] = useState(null);
 
-  const [creandoDiseno, setCreandoDiseno] = useState(false);
-  const [nombreNuevoDiseno, setNombreNuevoDiseno] = useState('');
-  const [imagenesNuevoDiseno, setImagenesNuevoDiseno] = useState({});
+  // El diseño ya no se arma en un panel aparte: se suelta la imagen sobre el
+  // molde (LienzoAnclaje·onSoltarImagen) y queda en el diseño de este
+  // producto -- ver ponerImagenEnPieza().
+  const [subiendoImagen, setSubiendoImagen] = useState(false);
   const [errorDiseno, setErrorDiseno] = useState(null);
-  // Con id, el panel de "+ Crear diseño nuevo" (mismo panel, reusado) está
-  // editando ESE diseño en vez de armar uno nuevo -- ver abrirEdicionDiseno()/guardarDisenoNuevo().
-  const [editandoDisenoId, setEditandoDisenoId] = useState(null);
+  const [nombreDiseno, setNombreDiseno] = useState('');
+  // Conjuntos de zonas guardados (plantillas con tipo 'conjuntoZonas', ver
+  // utilidades/conjuntosZonas.js) y el que se está por pegar en la pieza.
+  const [conjuntos, setConjuntos] = useState([]);
+  const [mostrandoConjuntos, setMostrandoConjuntos] = useState(false);
+  const [conjuntoAImportar, setConjuntoAImportar] = useState(null);
   // Ver el comentario igual en Piezas.jsx -- acá el caso era el peor de
   // los cinco: sin esto, la primera visita mostraba "Creá primero una
   // prenda (Piezas → Prendas)" mientras el fetch seguía en vuelo, aunque
@@ -186,6 +191,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       // tabla `fuentes` (recién agregada) -- sin ella, el selector de
       // fuente de cada zona simplemente no tiene más opción que la de base.
       setFuentes(await obtener('fuentes').catch(() => []));
+      const plantillas = await obtener('plantillas').catch(() => []);
+      setConjuntos(plantillas.filter((p) => p.tipo === 'conjuntoZonas'));
     } catch (e) {
       setErrorCarga(e.message);
     } finally {
@@ -281,55 +288,82 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setModo(null);
     setDisenoId('');
     setTallaTrabajoPorRol({});
-    setCreandoDiseno(false);
-    setEditandoDisenoId(null);
-    setNombreNuevoDiseno('');
-    setImagenesNuevoDiseno({});
   }
 
-  async function guardarDisenoNuevo() {
+  // El nombre del diseño se edita en su campo y se guarda al salir de él.
+  useEffect(() => { setNombreDiseno(disenoSeleccionado?.nombre || ''); }, [disenoSeleccionado?.id, disenoSeleccionado?.nombre]);
+
+  function guardarDisenoLocal(diseno) {
+    confirmarGuardado('disenos', diseno);
+    setDisenos((prev) => (prev.some((d) => d.id === diseno.id) ? prev.map((d) => (d.id === diseno.id ? diseno : d)) : [...prev, diseno]));
+  }
+
+  // Soltar una imagen sobre el molde: se sube a Storage y queda como el arte
+  // de ESTA pieza en el diseño del producto. Sin diseño elegido, se crea uno
+  // nuevo para esta combinación de prendas (con un nombre que se puede
+  // cambiar después); con uno elegido, se le suma o reemplaza esta pieza.
+  async function ponerImagenEnPieza(archivo, motivoRechazo) {
     setErrorDiseno(null);
-    if (!nombreNuevoDiseno.trim()) { setErrorDiseno('Falta el nombre del diseño.'); return; }
+    if (!archivo) { setErrorDiseno(motivoRechazo || 'Ese archivo no es una imagen PNG o JPG.'); return; }
+    if (!piezaActiva) return;
+    const clave = piezaActiva;
+    setSubiendoImagen(true);
     try {
-      if (editandoDisenoId) {
-        const actualizado = await editarDiseno(editandoDisenoId, { nombre: nombreNuevoDiseno, grupoIds, imagenesPorPieza: imagenesNuevoDiseno });
-        setDisenos((prev) => prev.map((d) => (d.id === editandoDisenoId ? actualizado : d)));
-        setDisenoId(editandoDisenoId);
+      const base64 = await new Promise((resolve, reject) => {
+        const lector = new FileReader();
+        lector.onload = () => resolve(String(lector.result).split(',')[1]);
+        lector.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+        lector.readAsDataURL(archivo);
+      });
+      const url = await subirArchivo(base64, archivo.type, 'diseno-' + clave);
+      if (disenoSeleccionado) {
+        const actualizado = await editarDiseno(disenoSeleccionado.id, {
+          imagenesPorPieza: { ...(disenoSeleccionado.imagenesPorPieza || {}), [clave]: url },
+        });
+        guardarDisenoLocal(actualizado);
       } else {
-        const creado = await crearDiseno({ nombre: nombreNuevoDiseno, grupoIds, imagenesPorPieza: imagenesNuevoDiseno });
-        setDisenos((prev) => [...prev, creado]);
+        const nombrePrendas = gruposSeleccionados.map((g) => g.nombre).join(' + ');
+        const creado = await crearDiseno({
+          nombre: 'Diseño ' + (nombre.trim() || nombrePrendas || 'nuevo'),
+          grupoIds,
+          imagenesPorPieza: { [clave]: url },
+        });
+        guardarDisenoLocal(creado);
         setDisenoId(creado.id);
       }
-      setCreandoDiseno(false);
-      setEditandoDisenoId(null);
-      setNombreNuevoDiseno('');
-      setImagenesNuevoDiseno({});
+    } catch (e) {
+      setErrorDiseno(e.message);
+    } finally {
+      setSubiendoImagen(false);
+    }
+  }
+
+  async function quitarImagenDePieza(clave) {
+    if (!disenoSeleccionado) return;
+    const { [clave]: _quitada, ...resto } = disenoSeleccionado.imagenesPorPieza || {};
+    try {
+      guardarDisenoLocal(await editarDiseno(disenoSeleccionado.id, { imagenesPorPieza: resto }));
     } catch (e) { setErrorDiseno(e.message); }
   }
 
-  function abrirEdicionDiseno() {
-    if (!disenoSeleccionado) return;
-    setEditandoDisenoId(disenoSeleccionado.id);
-    setNombreNuevoDiseno(disenoSeleccionado.nombre);
-    setImagenesNuevoDiseno(disenoSeleccionado.imagenesPorPieza || {});
-    setErrorDiseno(null);
-    setCreandoDiseno(true);
-  }
-
-  function alternarPanelDiseno() {
-    if (creandoDiseno) { setCreandoDiseno(false); return; }
-    setEditandoDisenoId(null);
-    setNombreNuevoDiseno('');
-    setImagenesNuevoDiseno({});
-    setErrorDiseno(null);
-    setCreandoDiseno(true);
+  async function renombrarDiseno() {
+    const limpio = nombreDiseno.trim();
+    if (!disenoSeleccionado || !limpio || limpio === disenoSeleccionado.nombre) return;
+    try {
+      guardarDisenoLocal(await editarDiseno(disenoSeleccionado.id, { nombre: limpio }));
+    } catch (e) { setErrorDiseno(e.message); }
   }
 
   async function eliminarDisenoActual() {
     if (!disenoId) return;
+    const usadoPor = productos.filter((p) => p.disenoId === disenoId && p.id !== editandoId);
+    const aviso = usadoPor.length
+      ? '¿Eliminar el diseño «' + disenoSeleccionado?.nombre + '»? Lo usan también: ' + usadoPor.map((p) => p.nombre).join(', ') + '.'
+      : '¿Eliminar el diseño «' + disenoSeleccionado?.nombre + '»?';
+    if (!window.confirm(aviso)) return;
     await eliminarDiseno(disenoId);
+    setDisenos((prev) => prev.filter((d) => d.id !== disenoId));
     setDisenoId('');
-    await recargar();
   }
 
   function nodoDe(tipo, id) {
@@ -386,6 +420,16 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       const idZona = crearZonaDesde(anclaNueva.id);
       setSeleccion({ tipo: 'zona', id: idZona });
       setModo(null);
+      return;
+    }
+    if (modo === 'importar' && conjuntoAImportar) {
+      // El conjunto se pega con su raíz en el punto elegido; el resto de
+      // sus zonas, colgando de ella como estaban (utilidades/conjuntosZonas.js).
+      const { anclaje: nuevo, idsZonasNuevas } = importarConjunto(anclaje, conjuntoAImportar.anclaje, piezaActiva, cand.ref);
+      setAnclaje(nuevo);
+      if (idsZonasNuevas.length) setSeleccion({ tipo: 'zona', id: idsZonasNuevas[0] });
+      setModo(null);
+      setConjuntoAImportar(null);
       return;
     }
     if (modo === 'cruzar' && cruzandoZonaId) {
@@ -619,8 +663,6 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setSeleccion(null);
     setModo(null);
     setTallaTrabajoPorRol({});
-    setCreandoDiseno(false);
-    setEditandoDisenoId(null);
     setError(null);
   }
 
@@ -638,6 +680,41 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     if (editandoId === id) cancelarEdicionProducto();
     await recargar();
     onCambio?.();
+  }
+
+  // Guarda el conjunto al que pertenece la zona elegida (ella + las zonas
+  // encadenadas con ella) para pegarlo después en otra pieza u otro
+  // producto. Se guarda con su contenido (logo, textos) -- es lo que se
+  // quiere repetir. Vive junto a las plantillas, marcado con su tipo.
+  async function guardarConjunto(zonaId) {
+    const conjunto = conjuntoDeZona(anclaje, zonaId);
+    if (!conjunto) return;
+    const nombreConjunto = window.prompt(
+      'Nombre del conjunto (' + conjunto.zonas.length + ' zonas: ' + conjunto.zonas.map((z) => z.nombre || z.id).join(', ') + '):'
+    );
+    if (!nombreConjunto || !nombreConjunto.trim()) return;
+    setError(null);
+    try {
+      const creado = await crearPlantilla({
+        tipo: 'conjuntoZonas', nombre: nombreConjunto.trim(), anclaje: conjunto, creadoEn: new Date().toISOString(),
+      });
+      confirmarGuardado('plantillas', creado);
+      setConjuntos((prev) => [...prev, creado]);
+      setMostrandoConjuntos(true);
+    } catch (e) { setError(e.message); }
+  }
+
+  async function borrarConjunto(conjunto) {
+    if (!window.confirm('¿Eliminar el conjunto «' + conjunto.nombre + '»? Las zonas ya pegadas en productos no se tocan.')) return;
+    setConjuntos((prev) => prev.filter((c) => c.id !== conjunto.id));
+    if (conjuntoAImportar?.id === conjunto.id) { setConjuntoAImportar(null); setModo(null); }
+    await borrarRegistro('plantillas', conjunto.id, () => eliminarPlantilla(conjunto.id), 'el conjunto "' + conjunto.nombre + '"');
+  }
+
+  function empezarImportacion(conjunto) {
+    setConjuntoAImportar(conjunto);
+    setSeleccion(null);
+    setModo('importar');
   }
 
   async function guardarComoPlantilla() {
@@ -736,41 +813,41 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
             <div className="mb-2 flex items-center gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">Diseño</h3>
               <Ayuda>
-                El diseño es el arte real de esta prenda (una imagen por pieza). Podés reusar uno ya
-                cargado o crear uno nuevo sin salir de esta pantalla. Sin diseño, la pieza sale en
-                blanco en la vista previa y el PDF.
+                El diseño es el arte real de esta prenda: una imagen por pieza. Para ponerla,
+                arrastrá la imagen (PNG o JPG) desde tu carpeta y soltala sobre el molde de la pieza
+                en el lienzo de abajo. Si el producto no tiene diseño, se crea uno solo. También
+                podés reusar un diseño ya cargado de estas mismas prendas. Sin diseño, la pieza
+                sale en blanco en la vista previa y el PDF.
               </Ayuda>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Select className="max-w-xs" value={disenoId} onChange={(e) => setDisenoId(e.target.value)}>
-                <option value="">— Sin diseño —</option>
+                <option value="">{disenosDeEstaCombinacion.length ? '— Sin diseño (o elegí uno) —' : '— Sin diseño —'}</option>
                 {disenosDeEstaCombinacion.map((d) => <option key={d.id} value={d.id}>{d.nombre}</option>)}
               </Select>
-              {disenoId && <Boton variante="fantasma" tamano="sm" type="button" onClick={abrirEdicionDiseno}>Editar este diseño</Boton>}
-              {disenoId && <Boton variante="fantasma" tamano="sm" type="button" onClick={eliminarDisenoActual}>Eliminar este diseño</Boton>}
-              <Boton variante="fantasma" tamano="sm" type="button" onClick={alternarPanelDiseno}>
-                {creandoDiseno ? 'Cancelar' : '+ Crear diseño nuevo'}
-              </Boton>
+              {disenoSeleccionado && (
+                <>
+                  <Input
+                    className="max-w-[240px]"
+                    value={nombreDiseno}
+                    onChange={(e) => setNombreDiseno(e.target.value)}
+                    onBlur={renombrarDiseno}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+                    aria-label="Nombre del diseño"
+                    title="Nombre del diseño (se guarda al salir del campo)"
+                  />
+                  <Boton variante="fantasma" tamano="sm" type="button" className="text-danger" onClick={eliminarDisenoActual}>Eliminar diseño</Boton>
+                </>
+              )}
             </div>
-            {creandoDiseno && (
-              <div className="mt-3 flex flex-col gap-3 rounded-lg border border-dashed border-border p-3">
-                {editandoDisenoId && (
-                  <p className="text-xs font-semibold uppercase tracking-wide text-primary">Editando diseño existente</p>
-                )}
-                <Campo etiqueta="Nombre del diseño">
-                  <Input value={nombreNuevoDiseno} onChange={(e) => setNombreNuevoDiseno(e.target.value)} placeholder="Kit titular 2026" />
-                </Campo>
-                <div className="flex flex-wrap gap-3">
-                  {piezasDisponibles.map((pd) => (
-                    <SlotImagenDiseno key={pd.clave} rol={pd.clave} etiqueta={namespacear ? pd.grupoNombre + ' · ' + pd.rol : pd.rol}
-                      url={imagenesNuevoDiseno[pd.clave]}
-                      onElegir={(clave, url) => setImagenesNuevoDiseno((prev) => ({ ...prev, [clave]: url }))} />
-                  ))}
-                </div>
-                {errorDiseno && <Aviso tono="error">{errorDiseno}</Aviso>}
-                <div><Boton variante="secundario" tamano="sm" type="button" onClick={guardarDisenoNuevo}>{editandoDisenoId ? 'Guardar cambios' : 'Guardar diseño'}</Boton></div>
-              </div>
-            )}
+            <p className="mt-1.5 text-xs text-faint-foreground">
+              {disenoSeleccionado
+                ? 'Con imagen: ' + (Object.keys(disenoSeleccionado.imagenesPorPieza || {}).length
+                    ? piezasDisponibles.filter((pd) => disenoSeleccionado.imagenesPorPieza?.[pd.clave]).map((pd) => pd.rol).join(', ')
+                    : 'ninguna pieza todavía') + ' — arrastrá una imagen sobre el molde para sumar o cambiar la de esa pieza.'
+                : 'Arrastrá una imagen PNG o JPG sobre el molde de abajo para ponerle diseño a esa pieza.'}
+            </p>
+            {errorDiseno && <div className="mt-2"><Aviso tono="error">{errorDiseno}</Aviso></div>}
           </div>
 
           {/* ============ 1. PIEZA ============ */}
@@ -800,6 +877,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                       <button key={clave} type="button" onClick={() => { setPiezaActiva(clave); setSeleccion(null); setModo(null); }}
                         className={'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ' +
                           (clave === piezaActiva ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface text-muted-foreground hover:border-primary')}>
+                        {disenoSeleccionado?.imagenesPorPieza?.[clave] && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" title="Tiene imagen de diseño" />
+                        )}
                         {gp.rol}
                         {n > 0 && <span className="rounded-full bg-primary/20 px-1.5 text-[10px]">{n}</span>}
                       </button>
@@ -832,6 +912,11 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                   onChange={(e) => setTallaTrabajoPorRol((prev) => ({ ...prev, [piezaActiva]: e.target.value }))}>
                   {tallasDePieza.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
                 </Select>
+                {disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] && (
+                  <Boton variante="fantasma" tamano="sm" type="button" className="ml-auto" onClick={() => quitarImagenDePieza(piezaActiva)}>
+                    Quitar imagen de esta pieza
+                  </Boton>
+                )}
               </div>
 
               <div className="mb-2 flex flex-wrap items-center gap-3 text-xs">
@@ -859,11 +944,15 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 senalServidor={resuelto}
                 imagenUrl={disenoSeleccionado?.imagenesPorPieza?.[piezaActiva]}
                 borde={bordeContraste}
+                onSoltarImagen={ponerImagenEnPieza}
+                subiendoImagen={subiendoImagen}
+                idVista={piezaActiva}
               />
               <p className="mt-1 text-xs text-faint-foreground">
                 {modo === 'zona' && 'Hacé clic sobre la pieza: ahí nace la zona, enganchada al rasgo más cercano.'}
                 {modo === 'cruzar' && 'Hacé clic en el segundo punto: entre los dos vas a poder elegir la esquina del cruce, o el punto medio.'}
                 {modo === 'recolocar' && 'Hacé clic en el punto al que querés pegar ' + (recolocarInfo?.eje === 'x' ? 'la posición horizontal' : 'la posición vertical') + '.'}
+                {modo === 'importar' && 'Hacé clic en el punto de la pieza donde va a quedar «' + (conjuntoAImportar?.nombre || '') + '»: su primera zona se pega ahí y las demás la siguen.'}
                 {!modo && 'Elegí «+ Nueva zona» (panel de la derecha) y hacé clic sobre la pieza para crear una.'}
               </p>
 
@@ -1007,6 +1096,45 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 <span className="text-base leading-none">+</span> Nueva zona
               </Boton>
 
+              {/* Conjuntos de zonas: guardados desde una zona encadenada,
+                  se pegan en esta pieza eligiendo el punto en el lienzo. */}
+              <div className="flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setMostrandoConjuntos((v) => !v)}
+                  className="flex items-center justify-between rounded-lg px-1 py-1 text-xs font-semibold uppercase tracking-wide text-faint-foreground hover:text-foreground"
+                >
+                  <span>Conjuntos guardados · {conjuntos.length}</span>
+                  <span>{mostrandoConjuntos ? '▾' : '▸'}</span>
+                </button>
+                {modo === 'importar' && conjuntoAImportar && (
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/40 bg-primary-soft px-3 py-2 text-xs text-primary">
+                    <span>Clic en la pieza para pegar «{conjuntoAImportar.nombre}»</span>
+                    <button type="button" className="font-medium hover:underline" onClick={() => { setModo(null); setConjuntoAImportar(null); }}>Cancelar</button>
+                  </div>
+                )}
+                {mostrandoConjuntos && (
+                  conjuntos.length === 0 ? (
+                    <p className="px-1 text-xs text-faint-foreground">
+                      Todavía no hay. Elegí una zona que esté pegada a otra y usá «Guardar conjunto».
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      {conjuntos.map((c) => (
+                        <div key={c.id} className={'flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ' + (conjuntoAImportar?.id === c.id ? 'border-primary bg-primary-soft/50' : 'border-border')}>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-medium text-foreground">{c.nombre}</div>
+                            <div className="truncate text-faint-foreground">{(c.anclaje?.zonas || []).map((z) => z.nombre || z.id).join(' · ')}</div>
+                          </div>
+                          <Boton variante="acento" tamano="sm" type="button" onClick={() => empezarImportacion(c)}>Pegar</Boton>
+                          <button type="button" className="text-faint-foreground hover:text-danger" title="Eliminar conjunto" onClick={() => borrarConjunto(c)}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                )}
+              </div>
+
               <div className="flex flex-col gap-1.5 border-t border-border pt-3">
                 <span className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">Zonas de esta pieza</span>
                 {zonasDeEstaPieza.length === 0 ? (
@@ -1043,6 +1171,26 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                     motivo={resuelto?.sinResolver.find((s) => s.id === seleccionado.id)?.motivo}
                   />
                 )}
+                {seleccionado && seleccion.tipo === 'zona' && (() => {
+                  const conjunto = conjuntoDeZona(anclaje, seleccionado.id);
+                  return (
+                    <div className="mb-3">
+                      <Boton
+                        variante="secundario" tamano="sm" type="button" className="w-full"
+                        disabled={!conjunto}
+                        onClick={() => guardarConjunto(seleccionado.id)}
+                        title={conjunto ? undefined : 'Para guardar un conjunto, esta zona tiene que estar pegada a otra (o tener otra pegada a ella).'}
+                      >
+                        {conjunto ? 'Guardar conjunto (' + conjunto.zonas.length + ' zonas)' : 'Guardar conjunto'}
+                      </Boton>
+                      {!conjunto && (
+                        <p className="mt-1 text-[11px] text-faint-foreground">
+                          Solo zonas encadenadas: pegá otra zona a esta (o esta a otra) para poder guardarlas juntas.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
                 {seleccionado && seleccion.tipo === 'zona' && (
                   <PanelZona
                     zona={seleccionado}
@@ -1145,7 +1293,7 @@ function LineaMedida({ etiqueta, valor, onCambiar }) {
 }
 
 // Sube el archivo del logo a Storage apenas se suelta (mismo mecanismo que
-// SlotImagenDiseno.jsx) y guarda solo su URL en la zona -- el archivo real
+// soltar una imagen en el lienzo) y guarda solo su URL en la zona -- el archivo real
 // nunca viaja dentro del anclaje.
 function SelectorLogo({ url, onElegir }) {
   const [subiendo, setSubiendo] = useState(false);

@@ -467,14 +467,29 @@ const AnclasCapa = memo(function AnclasCapa({ anclasResueltas, anclaSeleccionada
   });
 });
 
+// Tipos de imagen que se pueden soltar como diseño: los que el PDF de
+// producción sabe incrustar (exportarPdf.js usa pdf-lib, que solo acepta
+// PNG y JPG).
+const TIPOS_IMAGEN = ['image/png', 'image/jpeg'];
+
+// Zoom: hasta 20 veces más cerca que "toda la pieza a la vista", y hasta 4
+// veces más lejos (para ver el molde con aire alrededor).
+const ZOOM_MAX = 20;
+const ZOOM_MIN = 0.25;
+
 export function LienzoAnclaje({
   geo, anclasResueltas, zonasResueltas, anclaSeleccionadaId, zonaSeleccionadaId,
   onSeleccionarAncla, onSeleccionarZona,
   leyenda, modo, onElegirCandidato, onArrastrarZona, senalServidor,
   imagenUrl, borde,
+  // Nuevo: soltar una imagen sobre el molde la pone como diseño de esta
+  // pieza (Productos.jsx decide dónde se guarda). `idVista` = la pieza que
+  // se está viendo: al cambiar de pieza, el zoom vuelve a "toda la pieza".
+  onSoltarImagen, subiendoImagen = false, idVista,
 }) {
   const svgRef = useRef(null);
   const idRecorte = 'recorte-' + useId().replace(/[^a-zA-Z0-9]/g, '');
+  const idCuadricula = 'cuadricula-' + useId().replace(/[^a-zA-Z0-9]/g, '');
   // Arrastrar una zona sobre el molde (además de "Mover X/Y" en el panel,
   // no en vez de -- pedido explícito del usuario: posicionar a ojo y
   // corregir el decimal a mano si hace falta). Es puramente visual hasta
@@ -500,6 +515,19 @@ export function LienzoAnclaje({
   // qué (el motivo real de que soltar la zona no se sintiera instantáneo).
   const arrastrandoRef = useRef(false);
 
+  // ---- zoom y paneo: el viewBox (en cm) que se está mirando --------------
+  // null = "toda la pieza a la vista" (el encuadre de siempre). Se vuelve a
+  // eso al cambiar de pieza.
+  const [vista, setVista] = useState(null); // { x, y, w, h } en cm
+  const vistaRef = useRef(null);
+  vistaRef.current = vista;
+  const [paneo, setPaneo] = useState(null); // { inicioPx: {x,y}, vistaInicial, cmPorPx }
+  const panearonRef = useRef(false); // para que soltar un paneo no cuente como clic
+  const [anchoPx, setAnchoPx] = useState(800);
+  const [archivoEncima, setArchivoEncima] = useState(false);
+  useEffect(() => { setVista(null); }, [idVista]);
+  const hayGeo = !!geo;
+
   const ajustes = useAjustesDeTexto(zonasResueltas);
   const familias = useFuentesWeb([URL_FUENTE_BASE, ...Object.values(ajustes).map((a) => a.fuenteUrl)]);
 
@@ -524,6 +552,13 @@ export function LienzoAnclaje({
       : puntos
   ), [geo, borde?.activo, borde?.desplazamientoCm, puntos]);
 
+  const W = geo ? geo.pieza.ancho_cm : 1;
+  const H = geo ? geo.pieza.alto_cm : 1;
+  const margenEncuadre = Math.max(W, H) * 0.06;
+  const encuadre = { x: -margenEncuadre, y: -margenEncuadre, w: W + margenEncuadre * 2, h: H + margenEncuadre * 2 };
+  const vistaActual = vista || encuadre;
+  const zoom = encuadre.w / vistaActual.w;
+
   const puntoEnCm = useCallback((ev) => {
     const svg = svgRef.current;
     try {
@@ -535,6 +570,70 @@ export function LienzoAnclaje({
       return { x: r1(r.x), y: r1(r.y) };
     } catch { return null; }
   }, []);
+
+  // El ancho real en pantalla: el grosor de la cuadrícula se calcula en cm
+  // para que se vea siempre igual de fino (≈1px) con cualquier zoom.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => setAnchoPx(svg.clientWidth || 800));
+    ro.observe(svg);
+    setAnchoPx(svg.clientWidth || 800);
+    return () => ro.disconnect();
+  }, [hayGeo]);
+
+  // Zoom con la rueda, hacia donde está el puntero. Listener propio y NO
+  // pasivo: con onWheel de React no se puede evitar que la página haga
+  // scroll a la vez.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return undefined;
+    function alRodar(ev) {
+      ev.preventDefault();
+      const p = puntoEnCm(ev);
+      if (!p) return;
+      const factor = Math.exp(ev.deltaY * 0.0015);
+      setVista((v) => acercar(v || encuadreRef.current, factor, p, encuadreRef.current));
+    }
+    svg.addEventListener('wheel', alRodar, { passive: false });
+    return () => svg.removeEventListener('wheel', alRodar);
+  }, [hayGeo, puntoEnCm]);
+  const encuadreRef = useRef(encuadre);
+  encuadreRef.current = encuadre;
+
+  function zoomBoton(factor) {
+    const v = vistaActual;
+    setVista(acercar(v, factor, { x: v.x + v.w / 2, y: v.y + v.h / 2 }, encuadre));
+  }
+
+  // Paneo: arrastrar el FONDO (no una zona ni un punto) mueve la vista; con
+  // el botón del medio, en cualquier lado. En modo crear/recolocar/cruzar,
+  // el clic izquierdo es para elegir el punto, así que ahí solo el del medio.
+  function alApretarSvg(ev) {
+    const esFondo = ev.target?.dataset?.fondo === '1' || ev.target === svgRef.current;
+    if (!(ev.button === 1 || (ev.button === 0 && !modo && esFondo))) return;
+    const ctm = svgRef.current?.getScreenCTM();
+    if (!ctm) return;
+    ev.preventDefault();
+    panearonRef.current = false;
+    setPaneo({ inicioPx: { x: ev.clientX, y: ev.clientY }, vistaInicial: vistaActual, cmPorPx: 1 / ctm.a });
+  }
+  useEffect(() => {
+    if (!paneo) return undefined;
+    function alMover(ev) {
+      const dx = (ev.clientX - paneo.inicioPx.x) * paneo.cmPorPx;
+      const dy = (ev.clientY - paneo.inicioPx.y) * paneo.cmPorPx;
+      if (Math.abs(ev.clientX - paneo.inicioPx.x) + Math.abs(ev.clientY - paneo.inicioPx.y) > 3) panearonRef.current = true;
+      setVista({ ...paneo.vistaInicial, x: paneo.vistaInicial.x - dx, y: paneo.vistaInicial.y - dy });
+    }
+    function alSoltar() { setPaneo(null); }
+    window.addEventListener('mousemove', alMover);
+    window.addEventListener('mouseup', alSoltar);
+    return () => {
+      window.removeEventListener('mousemove', alMover);
+      window.removeEventListener('mouseup', alSoltar);
+    };
+  }, [paneo]);
 
   useEffect(() => {
     if (!arrastre) return undefined;
@@ -640,7 +739,7 @@ export function LienzoAnclaje({
     // Clicar el vacío del lienzo YA NO cierra la zona/ancla que se está
     // editando -- pedido explícito: "si yo quiero salirme presiono el
     // nombre de la zona y ya" (ver el toggle-select en Productos.jsx).
-    if (!modo) return;
+    if (!modo || panearonRef.current) return;
     const p = puntoEnCm(ev);
     if (!p) return;
     let mejor = null, mejorD = -1;
@@ -651,6 +750,30 @@ export function LienzoAnclaje({
     if (mejor) onElegirCandidato(mejor, r1(mejorD));
   }
 
+  // ---- soltar una imagen encima del molde ---------------------------------
+  function imagenDe(ev) {
+    const archivo = ev.dataTransfer?.files?.[0];
+    return archivo && TIPOS_IMAGEN.includes(archivo.type) ? archivo : null;
+  }
+  const aceptaImagen = !!onSoltarImagen;
+  function alArrastrarEncima(ev) {
+    if (!aceptaImagen || !ev.dataTransfer?.types?.includes('Files')) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'copy';
+    if (!archivoEncima) setArchivoEncima(true);
+  }
+  function alSalirArrastre(ev) {
+    if (ev.currentTarget.contains(ev.relatedTarget)) return;
+    setArchivoEncima(false);
+  }
+  function alSoltarArchivo(ev) {
+    if (!aceptaImagen) return;
+    ev.preventDefault();
+    setArchivoEncima(false);
+    const archivo = imagenDe(ev);
+    onSoltarImagen(archivo, archivo ? null : 'Solo se puede soltar una imagen PNG o JPG.');
+  }
+
   if (!geo) {
     return (
       <div className="flex h-52 items-center justify-center rounded-lg border border-dashed border-border text-sm text-faint-foreground">
@@ -659,21 +782,51 @@ export function LienzoAnclaje({
     );
   }
 
-  const W = geo.pieza.ancho_cm, H = geo.pieza.alto_cm;
-  const m = Math.max(W, H) * 0.06;
   const R = Math.max(W, H) / 90;
   const F = Math.max(W, H) / 32;
 
+  // Cuadrícula: líneas de 1 cm y, más marcadas, de 10 cm -- siempre ~1px de
+  // grosor sin importar el zoom. Si el centímetro queda muy chico en
+  // pantalla, solo se dibujan las de 10 cm (si no, sería un manchón).
+  const cmPorPx = vistaActual.w / Math.max(anchoPx, 1);
+  const pxPorCm = 1 / cmPorPx;
+  const extension = Math.max(W, H) * 12;
+
   return (
-    <div className={'overflow-hidden rounded-lg border bg-surface-muted ' + (modo ? 'border-primary cursor-crosshair' : 'border-border')}>
+    <div
+      className={
+        'relative overflow-hidden rounded-lg border bg-surface-muted ' +
+        (archivoEncima ? 'border-primary ring-2 ring-primary/40' : modo ? 'border-primary cursor-crosshair' : 'border-border')
+      }
+      onDragOver={alArrastrarEncima}
+      onDragEnter={alArrastrarEncima}
+      onDragLeave={alSalirArrastre}
+      onDrop={alSoltarArchivo}
+    >
       <svg
         ref={svgRef}
-        viewBox={(-m) + ' ' + (-m) + ' ' + (W + m * 2) + ' ' + (H + m * 2)}
+        viewBox={vistaActual.x + ' ' + vistaActual.y + ' ' + vistaActual.w + ' ' + vistaActual.h}
         preserveAspectRatio="xMidYMid meet"
-        style={{ width: '100%', height: 380, display: 'block' }}
+        style={{ width: '100%', height: 460, display: 'block', cursor: paneo ? 'grabbing' : undefined }}
         onClick={alClickearSvg}
+        onMouseDown={alApretarSvg}
+        onAuxClick={(e) => e.preventDefault()}
       >
-        <rect x={0} y={0} width={W} height={H} fill="none" stroke="#2b303d" strokeWidth={R * 0.4} />
+        <defs>
+          <pattern id={idCuadricula + '-1'} width={1} height={1} patternUnits="userSpaceOnUse">
+            <path d="M 1 0 L 0 0 0 1" fill="none" stroke="rgba(230,233,240,0.05)" strokeWidth={cmPorPx} />
+          </pattern>
+          <pattern id={idCuadricula + '-10'} width={10} height={10} patternUnits="userSpaceOnUse">
+            {pxPorCm >= 4 && <rect width={10} height={10} fill={'url(#' + idCuadricula + '-1)'} />}
+            <path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(230,233,240,0.09)" strokeWidth={cmPorPx} />
+          </pattern>
+        </defs>
+        <rect
+          data-fondo="1"
+          x={-extension} y={-extension} width={extension * 2 + W} height={extension * 2 + H}
+          fill={'url(#' + idCuadricula + '-10)'}
+        />
+        <rect x={0} y={0} width={W} height={H} fill="none" stroke="#2b303d" strokeWidth={R * 0.4} pointerEvents="none" />
 
         {imagenUrl && (
           <>
@@ -681,24 +834,24 @@ export function LienzoAnclaje({
                 no a un rectángulo -- mismo pedido de la pasada anterior,
                 ahora en el lienzo fiel de Illustrator. */}
             <clipPath id={idRecorte}><polygon points={puntos} /></clipPath>
-            <image href={imagenUrl} x={0} y={0} width={W} height={H} clipPath={'url(#' + idRecorte + ')'} preserveAspectRatio="xMidYMid slice" />
+            <image data-fondo="1" href={imagenUrl} x={0} y={0} width={W} height={H} clipPath={'url(#' + idRecorte + ')'} preserveAspectRatio="xMidYMid slice" />
           </>
         )}
         {!imagenUrl && (
-          <polygon points={puntos} fill="rgba(76,141,255,0.06)" stroke="#4c8dff" strokeWidth={R * 0.5} vectorEffect="non-scaling-stroke" />
+          <polygon data-fondo="1" points={puntos} fill="rgba(76,141,255,0.06)" stroke="#4c8dff" strokeWidth={R * 0.5} vectorEffect="non-scaling-stroke" />
         )}
         {/* El contorno para láser es independiente de que haya diseño o no --
             es el corte real, no un adorno del arte. Antes vivía adentro del
             "if (imagenUrl)" y desaparecía sin diseño elegido. */}
         {borde?.activo ? (
           <polygon
-            points={puntosBorde} fill="none"
+            points={puntosBorde} fill="none" pointerEvents="none"
             stroke={borde.colorHex}
             strokeWidth={Math.max((borde.grosorCm || 0.03), R * 0.25)}
             vectorEffect="non-scaling-stroke"
           />
         ) : imagenUrl && (
-          <polygon points={puntos} fill="none" stroke="#4c8dff" strokeWidth={R * 0.3} opacity={0.5} vectorEffect="non-scaling-stroke" />
+          <polygon points={puntos} fill="none" pointerEvents="none" stroke="#4c8dff" strokeWidth={R * 0.3} opacity={0.5} vectorEffect="non-scaling-stroke" />
         )}
 
         {zonasResueltas.map((zOriginal) => {
@@ -741,6 +894,44 @@ export function LienzoAnclaje({
           <AnclasCapa anclasResueltas={anclasResueltas} anclaSeleccionadaId={anclaSeleccionadaId} onSeleccionarAncla={onSeleccionarAncla} R={R} />
         )}
       </svg>
+
+      {/* Controles de zoom */}
+      <div className="absolute bottom-2.5 right-2.5 flex items-center gap-0.5 rounded-lg border border-border bg-surface/90 p-0.5 text-xs shadow-sm">
+        <button type="button" onClick={() => zoomBoton(1.25)} className="h-7 w-7 rounded-md text-muted-foreground hover:bg-surface-muted hover:text-foreground" title="Alejar" aria-label="Alejar">−</button>
+        <button type="button" onClick={() => setVista(null)} className="h-7 min-w-[52px] rounded-md px-1.5 tabular-nums text-muted-foreground hover:bg-surface-muted hover:text-foreground" title="Ver la pieza entera">
+          {Math.round(zoom * 100)}%
+        </button>
+        <button type="button" onClick={() => zoomBoton(0.8)} className="h-7 w-7 rounded-md text-muted-foreground hover:bg-surface-muted hover:text-foreground" title="Acercar" aria-label="Acercar">+</button>
+      </div>
+      <div
+        className="pointer-events-none absolute bottom-3 left-3 max-w-[calc(100%-150px)] truncate text-[10px] text-faint-foreground"
+        title={'Rueda: zoom · arrastrar el fondo: mover' + (aceptaImagen ? ' · soltá una imagen PNG/JPG para ponerla de diseño' : '')}
+      >
+        Rueda: zoom · arrastrar el fondo: mover{aceptaImagen ? ' · soltá una imagen PNG/JPG para ponerla de diseño' : ''}
+      </div>
+
+      {(archivoEncima || subiendoImagen) && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/60">
+          <span className="rounded-lg border border-primary/40 bg-primary-soft px-4 py-2 text-sm font-medium text-primary">
+            {subiendoImagen ? 'Subiendo imagen…' : 'Soltá la imagen para ponerla en esta pieza'}
+          </span>
+        </div>
+      )}
     </div>
   );
+}
+
+// Nueva vista tras acercar/alejar `factor` veces (factor < 1 acerca) con
+// `punto` (en cm) quieto en pantalla, dentro de los topes de zoom.
+function acercar(v, factor, punto, encuadre) {
+  const wMin = encuadre.w / ZOOM_MAX;
+  const wMax = encuadre.w / ZOOM_MIN;
+  const w = Math.min(Math.max(v.w * factor, wMin), wMax);
+  const f = w / v.w;
+  return {
+    x: punto.x - (punto.x - v.x) * f,
+    y: punto.y - (punto.y - v.y) * f,
+    w,
+    h: v.h * f,
+  };
 }

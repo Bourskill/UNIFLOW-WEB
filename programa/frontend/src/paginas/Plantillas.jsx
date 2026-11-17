@@ -10,6 +10,7 @@ import { Boton, Tarjeta, Chip, Aviso } from '../componentes/ui.jsx';
 // acá ("Usar esta plantilla" te lleva a Diseño con las zonas ya puestas).
 export function Plantillas({ recargarSenal, onUsarPlantilla }) {
   const [plantillas, setPlantillas] = useState([]);
+  const [conjuntos, setConjuntos] = useState([]);
   const [grupos, setGrupos] = useState([]);
   // Ver el comentario igual en Piezas.jsx -- sin esto, la primera visita
   // muestra "Todavía no hay ninguna plantilla" mientras el fetch sigue en
@@ -27,7 +28,10 @@ export function Plantillas({ recargarSenal, onUsarPlantilla }) {
     setError(null);
     try {
       const [ps, gs] = await Promise.all([obtener('plantillas'), obtener('grupos')]);
-      setPlantillas(ps);
+      // Los conjuntos de zonas (Diseño · "Guardar conjunto") viven en la
+      // misma tabla, marcados con su tipo: van en su propia sección.
+      setPlantillas(ps.filter((p) => p.tipo !== 'conjuntoZonas'));
+      setConjuntos(ps.filter((p) => p.tipo === 'conjuntoZonas'));
       setGrupos(gs);
     } catch (e) {
       setError(e.message);
@@ -98,6 +102,35 @@ export function Plantillas({ recargarSenal, onUsarPlantilla }) {
               </Tarjeta>
             );
           })}
+        </div>
+      )}
+
+      {!cargando && !error && (
+        <div className="flex flex-col gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">Conjuntos de zonas</h3>
+            <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+              Zonas encadenadas (una pegada a otra) guardadas desde Diseño con «Guardar conjunto».
+              Se pegan en cualquier pieza desde el panel de zonas de Diseño, eligiendo el punto.
+            </p>
+          </div>
+          {conjuntos.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Todavía no hay ningún conjunto guardado.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {conjuntos.map((c) => (
+                <Tarjeta key={c.id} className="flex flex-col gap-2">
+                  <div className="font-medium">{c.nombre}</div>
+                  <div className="flex flex-wrap gap-1">
+                    {(c.anclaje?.zonas || []).map((z) => <Chip key={z.id}>{z.nombre || z.id}</Chip>)}
+                  </div>
+                  <div>
+                    <Boton variante="fantasma" tamano="sm" onClick={() => borrar(c.id)}>Eliminar</Boton>
+                  </div>
+                </Tarjeta>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
