@@ -5,8 +5,13 @@ import { ordenarTallasNatural } from '../constantes.js';
 // completo, no un rectángulo con un número de ancho×alto). mm en el archivo
 // original van con Y hacia arriba; SVG las pinta con Y hacia abajo, así que
 // se invierte al armar el path en vez de forzarlo con un transform.
-export function TrazosPreview({ geometriaPorTalla, size = 96, className = '' }) {
+//
+// `fluido`: ocupa el ancho/alto de su contenedor en vez de un cuadrado fijo
+// de `size` px, sin marco propio (lo pone quien la contiene, ej. la tarjeta
+// de la Biblioteca). `mostrarPiquetes`: marca cada piquete con un punto.
+export function TrazosPreview({ geometriaPorTalla, size = 96, className = '', fluido = false, mostrarPiquetes = false }) {
   const tallas = ordenarTallasNatural(Object.keys(geometriaPorTalla || {}));
+  const dimension = fluido ? { width: '100%', height: '100%' } : { width: size, height: size };
 
   if (tallas.length === 0) {
     return (
@@ -15,7 +20,7 @@ export function TrazosPreview({ geometriaPorTalla, size = 96, className = '' }) 
           'flex items-center justify-center rounded-lg border border-dashed border-border ' +
           'text-[10px] text-faint-foreground ' + className
         }
-        style={{ width: size, height: size }}
+        style={dimension}
       >
         sin trazo
       </div>
@@ -34,6 +39,7 @@ export function TrazosPreview({ geometriaPorTalla, size = 96, className = '' }) 
   const ancho = maxX - minX || 1;
   const alto = maxY - minY || 1;
   const margen = Math.max(ancho, alto) * 0.06;
+  const radioPiquete = Math.max(ancho, alto) * 0.012;
 
   function trazoDe(poligonoMm) {
     return (
@@ -46,9 +52,10 @@ export function TrazosPreview({ geometriaPorTalla, size = 96, className = '' }) 
   return (
     <svg
       viewBox={(minX - margen) + ' ' + (minY - margen) + ' ' + (ancho + margen * 2) + ' ' + (alto + margen * 2)}
-      width={size}
-      height={size}
-      className={'rounded-lg border border-border bg-surface-muted ' + className}
+      width={dimension.width}
+      height={dimension.height}
+      preserveAspectRatio="xMidYMid meet"
+      className={(fluido ? '' : 'rounded-lg border border-border bg-surface-muted ') + className}
     >
       {tallas.map((t) => (
         <path
@@ -61,6 +68,19 @@ export function TrazosPreview({ geometriaPorTalla, size = 96, className = '' }) 
           opacity="0.85"
         />
       ))}
+      {mostrarPiquetes &&
+        tallas.flatMap((t) =>
+          (geometriaPorTalla[t].piquetesMm || []).map((p, i) => (
+            <circle
+              key={t + '-' + i}
+              cx={p.xMm}
+              cy={minY + maxY - p.yMm}
+              r={radioPiquete}
+              fill="var(--color-foreground)"
+              opacity="0.75"
+            />
+          ))
+        )}
     </svg>
   );
 }

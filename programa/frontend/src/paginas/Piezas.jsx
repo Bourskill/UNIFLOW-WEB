@@ -5,7 +5,7 @@ import {
   reemplazarArchivoPieza, eliminarVersionPieza, editarProducto,
 } from '../api.js';
 import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
-import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
+import { Boton, Campo, Input, Select, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
 import { FichaPieza } from './Formulario.jsx';
 
@@ -253,64 +253,97 @@ function FilaPieza({ pieza, usadaEn, productosQueLaUsan, onCambio, onBorrar }) {
 
   const tallas = ordenarTallasNatural(Object.keys(pieza.dimensionesPorTalla || {}));
   const faltanPiquetes = tallas.some((t) => !pieza.geometriaPorTalla?.[t]?.piquetesMm?.length);
+  const piquetesPorTalla = tallas.length > 0 ? (pieza.geometriaPorTalla?.[tallas[0]]?.piquetesMm?.length || 0) : 0;
+  const rangoTallas = pieza.tallaUnica || tallas.length === 1
+    ? 'Talla única'
+    : tallas.length === 0
+      ? 'Sin tallas'
+      : tallas.length + ' tallas · ' + tallas[0].toUpperCase() + ' – ' + tallas[tallas.length - 1].toUpperCase();
+  const medidaMayor = tallas.length > 0 ? pieza.dimensionesPorTalla[tallas[tallas.length - 1]] : null;
+  // Mientras se edita, se revisan versiones o hay un panel abierto, la
+  // tarjeta ocupa toda la fila: los formularios no entran en una columna.
+  const expandida = editando || reemplazando || mostrandoVersiones || !!pendienteConfirmar || !!resultadoReproceso;
+  const puedeReprocesar = !!pieza.archivoOriginal && tallas.length > 0 && pieza.formatoOriginal !== 'pdf-prenda';
 
   return (
-    <Tarjeta className="flex flex-col gap-3">
-      <div className="flex items-start gap-4">
-        <TrazosPreview geometriaPorTalla={pieza.geometriaPorTalla || {}} size={90} />
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <span className="font-medium">{pieza.nombre}</span>
-            {pieza.categoria && <Chip>{pieza.categoria}</Chip>}
-            {pieza.tela && <span className="text-xs text-faint-foreground">· {pieza.tela}</span>}
-            <Chip>v{pieza.version || 1}</Chip>
-            {pieza.tallaUnica && <Chip tono="activo">talla única</Chip>}
-          </div>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {tallas.length === 0 ? (
-              <span className="text-xs text-faint-foreground">sin geometría cargada</span>
-            ) : (
-              tallas.map((t) => (
-                <Chip key={t}>{t.toUpperCase()}: {pieza.dimensionesPorTalla[t].anchoCm}×{pieza.dimensionesPorTalla[t].altoCm}cm</Chip>
-              ))
-            )}
-          </div>
-          <div className="mt-1.5 text-xs text-faint-foreground">
-            {usadaEn.length === 0 ? 'Sin usar en ninguna prenda todavía' : 'Usada en: ' + usadaEn.join(', ')}
-          </div>
+    <article
+      className={
+        'flex flex-col overflow-hidden rounded-xl border bg-surface shadow-sm transition-[border-color,box-shadow] ' +
+        'hover:border-primary/40 hover:shadow-md ' +
+        (expandida ? 'col-span-full border-primary/40' : 'border-border')
+      }
+    >
+      <div className={'relative border-b border-border bg-surface-muted ' + (expandida ? 'h-56' : 'aspect-[4/3]')}>
+        {/* Caja absoluta: sin esto, una pieza alta y angosta (un tapacuellos)
+            estiraba la tarjeta entera con la proporción propia del SVG. */}
+        <div className="absolute inset-4">
+          <TrazosPreview geometriaPorTalla={pieza.geometriaPorTalla || {}} fluido mostrarPiquetes />
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
-          <div className="flex gap-2">
-            <Boton variante="secundario" tamano="sm" onClick={() => setEditando((v) => !v)}>
-              {editando ? 'Cerrar' : 'Editar'}
-            </Boton>
-            <Boton variante="fantasma" tamano="sm" onClick={onBorrar}>Eliminar</Boton>
-          </div>
-          <div className="flex items-center gap-1">
-            {pieza.archivoOriginal && tallas.length > 0 && (
-              <>
-                {faltanPiquetes && <span className="text-[10px] text-faint-foreground">sin piquetes</span>}
-                <Boton variante="fantasma" tamano="sm" onClick={reprocesar} disabled={reprocesando}>
-                  {reprocesando ? 'Recalculando…' : 'Reprocesar geometría'}
-                </Boton>
-                <Ayuda>
-                  Vuelve a leer el archivo original ya guardado (sin resubirlo) y recalcula el
-                  contorno y los piquetes de cada talla con el importador actual -- para piezas
-                  subidas antes de que se supiera separar los piquetes sueltos. Si el resultado no
-                  coincide con las medidas ya guardadas, no toca nada y avisa. Crea una versión nueva.
-                </Ayuda>
-              </>
-            )}
-            <Boton variante="fantasma" tamano="sm" onClick={() => setReemplazando((v) => !v)}>
-              {reemplazando ? 'Cancelar' : 'Reemplazar moldería'}
-            </Boton>
-            <Boton variante="fantasma" tamano="sm" onClick={() => setMostrandoVersiones((v) => !v)}>
-              {mostrandoVersiones ? 'Ocultar versiones' : 'Ver versiones (' + (pieza.versiones?.length || 1) + ')'}
-            </Boton>
-          </div>
+        <div className="absolute left-2.5 top-2.5 flex gap-1">
+          <span className="rounded-md bg-background/80 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            v{pieza.version || 1}
+          </span>
+          {pieza.tallaUnica && (
+            <span className="rounded-md bg-primary-soft px-1.5 py-0.5 text-[10px] font-medium text-primary">talla única</span>
+          )}
         </div>
       </div>
 
+      <div className="flex flex-1 flex-col gap-2 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="font-semibold leading-snug" title={pieza.nombre}>{pieza.nombre}</h3>
+          {pieza.categoria && <Chip className="shrink-0">{pieza.categoria}</Chip>}
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {rangoTallas}
+          {medidaMayor && ' · hasta ' + medidaMayor.anchoCm + '×' + medidaMayor.altoCm + ' cm'}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-faint-foreground">
+          <span>{faltanPiquetes ? 'sin piquetes en alguna talla' : piquetesPorTalla + (piquetesPorTalla === 1 ? ' piquete' : ' piquetes') + ' por talla'}</span>
+          {pieza.tela && <span>· {pieza.tela}</span>}
+        </div>
+        {tallas.length > 1 && (
+          <div className="flex flex-wrap gap-1">
+            {tallas.map((t) => (
+              <span
+                key={t}
+                title={t.toUpperCase() + ': ' + pieza.dimensionesPorTalla[t].anchoCm + '×' + pieza.dimensionesPorTalla[t].altoCm + ' cm'}
+                className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="mt-auto pt-1 text-xs text-faint-foreground">
+          {usadaEn.length === 0 ? 'Sin usar en ninguna prenda' : 'En: ' + usadaEn.join(', ')}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1 border-t border-border px-2 py-1.5">
+        <Boton variante={editando ? 'acento' : 'fantasma'} tamano="sm" onClick={() => setEditando((v) => !v)}>
+          {editando ? 'Cerrar' : 'Editar'}
+        </Boton>
+        <Boton
+          variante={mostrandoVersiones ? 'acento' : 'fantasma'}
+          tamano="sm"
+          title={(pieza.versiones?.length || 1) + ((pieza.versiones?.length || 1) === 1 ? ' versión' : ' versiones')}
+          onClick={() => setMostrandoVersiones((v) => !v)}
+        >
+          Historial
+        </Boton>
+        <Boton variante={reemplazando ? 'acento' : 'fantasma'} tamano="sm" onClick={() => setReemplazando((v) => !v)}>
+          {reemplazando ? 'Cancelar' : 'Reemplazar'}
+        </Boton>
+        {puedeReprocesar && (
+          <Boton variante="fantasma" tamano="sm" onClick={reprocesar} disabled={reprocesando} title="Vuelve a leer el archivo original guardado y recalcula contorno y piquetes de cada talla. Si no coincide con las medidas guardadas, no toca nada. Crea una versión nueva.">
+            {reprocesando ? 'Recalculando…' : 'Reprocesar'}
+          </Boton>
+        )}
+      </div>
+
+      {expandida && (
+        <div className="flex flex-col gap-3 border-t border-border p-4">
       {resultadoReproceso && <Aviso tono={resultadoReproceso.tono}>{resultadoReproceso.texto}</Aviso>}
 
       {pendienteConfirmar && (
@@ -362,9 +395,12 @@ function FilaPieza({ pieza, usadaEn, productosQueLaUsan, onCambio, onBorrar }) {
             de usar la talla equivocada por error.
           </Ayuda>
           <Boton variante="primario" tamano="sm" onClick={guardar}>Guardar cambios</Boton>
+          <Boton variante="fantasma" tamano="sm" className="ml-auto text-danger" onClick={onBorrar}>Eliminar pieza</Boton>
         </div>
       )}
-    </Tarjeta>
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -511,7 +547,7 @@ export function Piezas({ recargarSenal, onCambio }) {
           {piezas.length === 0 ? 'Todavía no hay ninguna — subí una en "Subir piezas".' : 'Ninguna coincide con el filtro.'}
         </p>
       ) : (
-        <div className="flex max-w-3xl flex-col gap-3">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
           {piezasFiltradas.map((p) => (
             <FilaPieza
               key={p.id}
