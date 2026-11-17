@@ -702,7 +702,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       ) : errorCarga ? (
         <ErrorCarga mensaje={errorCarga} onReintentar={recargar} />
       ) : grupos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Creá primero una prenda (Moldería → Prendas).</p>
+        <p className="text-sm text-muted-foreground">Creá primero una prenda (Moldería → Biblioteca → + Nueva prenda).</p>
       ) : (
         <Tarjeta as="form" onSubmit={guardar} className="flex flex-col gap-4">
           <Campo etiqueta="Nombre del producto" className="max-w-3xl">

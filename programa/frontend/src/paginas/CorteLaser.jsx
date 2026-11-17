@@ -142,7 +142,7 @@ export function CorteLaser({ recargarSenal }) {
       ) : errorCarga ? (
         <ErrorCarga mensaje={errorCarga} onReintentar={cargar} />
       ) : grupos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Armá primero una prenda (Moldería → Prendas).</p>
+        <p className="text-sm text-muted-foreground">Armá primero una prenda (Moldería → Biblioteca → + Nueva prenda).</p>
       ) : (
         <Tarjeta className="flex max-w-2xl flex-col gap-4">
           <Campo etiqueta="Prenda">

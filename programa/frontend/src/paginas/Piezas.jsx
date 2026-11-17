@@ -9,6 +9,7 @@ import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
 import { FichaPieza } from './Formulario.jsx';
+import { FormularioPrenda } from '../componentes/FormularioPrenda.jsx';
 
 function presetDe(angulosPermitidos) {
   if (angulosPermitidos === 'libre') return 'libre';
@@ -420,6 +421,8 @@ export function Piezas({ recargarSenal, onCambio }) {
   const [filtroCategoria, setFiltroCategoria] = useState('');
   const [busqueda, setBusqueda] = useState('');
   const [prendaAbierta, setPrendaAbierta] = useState(null); // id de la prenda desplegada
+  const [creandoPrenda, setCreandoPrenda] = useState(false);
+  const [editandoPrenda, setEditandoPrenda] = useState(null); // id
   // Sin esto, la PRIMERA vez que se visita esta pestaña en la sesión (o
   // después de cualquier reload de página, que resetea qué apartados ya se
   // visitaron -- ver App.jsx) el "Todavía no hay ninguna" de más abajo
@@ -583,6 +586,18 @@ export function Piezas({ recargarSenal, onCambio }) {
     );
   }
 
+  // Crear o editar una prenda (FormularioPrenda):
+  // la prenda guardada entra a la lista en el acto y queda abierta.
+  function alGuardarPrenda(guardada) {
+    setGrupos((prev) =>
+      prev.some((g) => g.id === guardada.id) ? prev.map((g) => (g.id === guardada.id ? guardada : g)) : [...prev, guardada]
+    );
+    setCreandoPrenda(false);
+    setEditandoPrenda(null);
+    setPrendaAbierta(guardada.id);
+    onCambio?.();
+  }
+
   const nada = prendasVisibles.length === 0 && piezasSueltas.length === 0;
 
   return (
@@ -616,7 +631,16 @@ export function Piezas({ recargarSenal, onCambio }) {
           <span className="text-xs text-faint-foreground">
             {grupos.length} {grupos.length === 1 ? 'prenda' : 'prendas'} · {piezas.length} {piezas.length === 1 ? 'pieza' : 'piezas'}
           </span>
+          {!creandoPrenda && (
+            <Boton variante="acento" tamano="sm" className="ml-auto" onClick={() => setCreandoPrenda(true)}>
+              + Nueva prenda
+            </Boton>
+          )}
         </div>
+      )}
+
+      {creandoPrenda && (
+        <FormularioPrenda piezas={piezas} onGuardado={alGuardarPrenda} onCancelar={() => setCreandoPrenda(false)} />
       )}
 
       {cargando ? (
@@ -636,12 +660,21 @@ export function Piezas({ recargarSenal, onCambio }) {
               </h3>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
                 {prendasVisibles.map((g) =>
-                  g.id === prendaAbierta ? (
+                  g.id === editandoPrenda ? (
+                    <FormularioPrenda
+                      key={g.id}
+                      grupo={g}
+                      piezas={piezas}
+                      onGuardado={alGuardarPrenda}
+                      onCancelar={() => setEditandoPrenda(null)}
+                    />
+                  ) : g.id === prendaAbierta ? (
                     <PrendaAbierta
                       key={g.id}
                       grupo={g}
                       piezas={piezas}
                       productos={productosDeGrupo(g.id)}
+                      onEditar={() => setEditandoPrenda(g.id)}
                       onCerrar={() => setPrendaAbierta(null)}
                       onBorrar={(conPiezas) => borrarPrenda(g, conPiezas)}
                       tarjetaDePieza={tarjetaDePieza}
@@ -724,7 +757,7 @@ function TarjetaPrenda({ grupo, piezas, onAbrir }) {
   );
 }
 
-function PrendaAbierta({ grupo, piezas, productos, onCerrar, onBorrar, tarjetaDePieza }) {
+function PrendaAbierta({ grupo, piezas, productos, onEditar, onCerrar, onBorrar, tarjetaDePieza }) {
   const [confirmando, setConfirmando] = useState(false);
   const [borrando, setBorrando] = useState(false);
   const [error, setError] = useState(null);
@@ -753,6 +786,7 @@ function PrendaAbierta({ grupo, piezas, productos, onCerrar, onBorrar, tarjetaDe
           </div>
         </div>
         <div className="flex gap-1">
+          <Boton variante="fantasma" tamano="sm" onClick={onEditar}>Editar prenda</Boton>
           <Boton variante="fantasma" tamano="sm" className="text-danger" onClick={() => setConfirmando((v) => !v)}>
             Eliminar prenda
           </Boton>
