@@ -11,6 +11,7 @@ import { Historial } from './paginas/Historial.jsx';
 import { CorteLaser } from './paginas/CorteLaser.jsx';
 import { Icono } from './componentes/Icono.jsx';
 import { EstadoServidor } from './componentes/EstadoServidor.jsx';
+import { Avisos } from './componentes/Avisos.jsx';
 import { SubTabs } from './componentes/SubTabs.jsx';
 import { PanelDock } from './componentes/PanelDock.jsx';
 
@@ -169,6 +170,9 @@ function App() {
           )}
         </main>
       </div>
+      {/* Avisos flotantes de lo que pasa por detrás (ej. un borrado que el
+          servidor rechazó y volvió a su lugar) -- ver datos/avisos.js. */}
+      <Avisos />
     </div>
   );
 }

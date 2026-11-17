@@ -74,6 +74,18 @@ function cambiaDatos(ruta, metodo) {
   return !RUTAS_SOLO_CALCULO.some((prefijo) => ruta.startsWith(prefijo));
 }
 
+// Qué colección de la caché toca una escritura, por su ruta: "/piezas/x/..."
+// -> piezas; generar un lote (nesting) crea una generación. Así se vuelve a
+// pedir SOLO esa, no las ocho (la de piezas pesa mucho: trae la geometría
+// de todo). null = no se sabe -> se invalida todo, por las dudas.
+const COLECCIONES = ['piezas', 'grupos', 'disenos', 'productos', 'plantillas', 'pedidos', 'fuentes'];
+function coleccionDe(ruta) {
+  const primera = ruta.split('/')[1];
+  if (COLECCIONES.includes(primera)) return primera;
+  if (primera === 'nesting') return 'generaciones';
+  return null;
+}
+
 // fetch con la clave puesta; un 401 dispara la pantalla de entrada.
 async function pedir(ruta, opciones = {}) {
   const respuesta = await fetch(BASE_URL + ruta, {
@@ -81,7 +93,7 @@ async function pedir(ruta, opciones = {}) {
     headers: encabezadosConClave(opciones.headers),
   });
   if (respuesta.ok && cambiaDatos(ruta, opciones.method) && typeof window !== 'undefined') {
-    window.dispatchEvent(new Event(EVENTO_ESCRITURA));
+    window.dispatchEvent(new CustomEvent(EVENTO_ESCRITURA, { detail: { coleccion: coleccionDe(ruta) } }));
   }
   if (respuesta.status === 401) {
     olvidarClave();

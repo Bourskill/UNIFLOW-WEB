@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { eliminarGrupo, editarGrupo } from '../api.js';
-import { obtener } from '../datos/index.js';
+import { obtener, confirmarGuardado, borrarRegistro } from '../datos/index.js';
 import { Boton, Tarjeta, Chip, Campo, Input, Select, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
 import { ordenarTallasNatural } from '../constantes.js';
@@ -87,7 +87,8 @@ function EditorPrenda({ grupo, piezas, onGuardado, onCancelar }) {
     if (piezasFinales.length === 0) return setError('Una prenda necesita al menos una pieza con rol.');
     setGuardando(true);
     try {
-      await editarGrupo(grupo.id, { nombre: nombre.trim(), piezas: piezasFinales });
+      const actualizado = await editarGrupo(grupo.id, { nombre: nombre.trim(), piezas: piezasFinales });
+      confirmarGuardado('grupos', actualizado);
       onGuardado();
     } catch (e) {
       setError(e.message);
@@ -220,13 +221,17 @@ export function Prendas({ recargarSenal, onCambio }) {
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState(null);
 
+  async function actualizarDatos() {
+    const [gs, ps] = await Promise.all([obtener('grupos'), obtener('piezas')]);
+    setGrupos(gs);
+    setPiezas(ps);
+  }
+
   async function recargar() {
     setCargando(true);
     setErrorCarga(null);
     try {
-      const [gs, ps] = await Promise.all([obtener('grupos'), obtener('piezas')]);
-      setGrupos(gs);
-      setPiezas(ps);
+      await actualizarDatos();
     } catch (e) {
       setErrorCarga(e.message);
     } finally {
@@ -234,14 +239,26 @@ export function Prendas({ recargarSenal, onCambio }) {
     }
   }
 
+  // Igual que en Piezas.jsx: "Cargando…" solo la primera vez; después se
+  // actualiza en silencio, sin esconder la lista.
+  const yaCargo = useRef(false);
   useEffect(() => {
-    recargar();
+    if (!yaCargo.current) {
+      yaCargo.current = true;
+      recargar();
+    } else {
+      actualizarDatos().catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recargarSenal]);
 
+  // Optimista: la tarjeta desaparece en el acto; si el servidor falla,
+  // vuelve y sale un aviso.
   async function borrar(id) {
-    await eliminarGrupo(id);
+    const grupo = grupos.find((g) => g.id === id);
     if (seleccionado === id) setSeleccionado(null);
+    setGrupos((prev) => prev.filter((g) => g.id !== id));
+    await borrarRegistro('grupos', id, () => eliminarGrupo(id), 'la prenda "' + (grupo?.nombre || '') + '"');
     onCambio?.();
   }
 

@@ -32,10 +32,37 @@ export const almacen = crearAlmacen({
 // a la pestaña) no frena a nadie, se muestra lo que hay y se actualiza solo.
 const sucias = new Set();
 if (typeof window !== 'undefined') {
-  window.addEventListener(EVENTO_ESCRITURA, () => {
-    for (const n of almacen.nombres) sucias.add(n);
-    almacen.invalidar();
+  window.addEventListener(EVENTO_ESCRITURA, (evento) => {
+    const coleccion = evento.detail?.coleccion;
+    const cuales = coleccion && almacen.nombres.includes(coleccion) ? [coleccion] : almacen.nombres;
+    for (const n of cuales) sucias.add(n);
+    almacen.invalidar(cuales);
   });
+}
+
+/**
+ * Tras un guardado cuyo resultado YA devolvió el servidor (el registro
+ * actualizado): se pone en la caché tal cual y nadie tiene que esperar a
+ * volver a pedir la colección entera -- eso era lo que hacía lento
+ * "Guardar cambios" (la lista de piezas trae la geometría de todo).
+ */
+export function confirmarGuardado(nombre, registro) {
+  almacen.guardarLocal(nombre, registro);
+  sucias.delete(nombre);
+  return registro;
+}
+
+/**
+ * Borrado optimista: desaparece de la caché YA y el DELETE corre por detrás;
+ * si falla, vuelve a su lugar y sale un aviso (datos/avisos.js). Devuelve
+ * true/false según cómo terminó.
+ */
+export async function borrarRegistro(nombre, id, llamada, etiqueta) {
+  const promesa = almacen.eliminar(nombre, id, llamada, { etiqueta });
+  sucias.delete(nombre);
+  const ok = await promesa;
+  sucias.delete(nombre);
+  return ok;
 }
 
 /**

@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
   editarPieza, eliminarPieza, reprocesarPieza,
   reemplazarArchivoPieza, eliminarVersionPieza, editarProducto, eliminarGrupo
 } from '../api.js';
-import { obtener } from '../datos/index.js';
+import { obtener, confirmarGuardado, borrarRegistro } from '../datos/index.js';
 import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
@@ -223,7 +223,10 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
 
   async function guardar() {
     const preset = PRESETS_ANGULOS.find((p) => p.id === presetAngulos);
-    await editarPieza(pieza.id, { categoria: categoria || null, tela: tela || null, angulosPermitidos: preset.valores, tallaUnica });
+    const actualizada = await editarPieza(pieza.id, { categoria: categoria || null, tela: tela || null, angulosPermitidos: preset.valores, tallaUnica });
+    // El servidor ya devolvió la pieza como quedó: va directo a la caché, sin
+    // volver a pedir la lista entera de piezas (eso era lo lento).
+    confirmarGuardado('piezas', actualizada);
     setEditando(false);
     onCambio();
   }
@@ -455,8 +458,17 @@ export function Piezas({ recargarSenal, onCambio }) {
     }
   }
 
+  // La primera vez, con "Cargando…"; después (cuando otra pantalla avisa un
+  // cambio), en silencio: la lista se queda a la vista y se actualiza sola,
+  // en vez de desaparecer detrás de un "Cargando…" en cada guardado.
+  const yaCargo = useRef(false);
   useEffect(() => {
-    recargar();
+    if (!yaCargo.current) {
+      yaCargo.current = true;
+      recargar();
+    } else {
+      actualizarDatos().catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recargarSenal]);
 
@@ -518,26 +530,42 @@ export function Piezas({ recargarSenal, onCambio }) {
     return suyas.some(piezaCoincide);
   });
 
+  // Borrar es optimista: desaparece de la pantalla en el acto y el servidor
+  // se entera por detrás. Si falla, vuelve a aparecer y sale un aviso abajo
+  // a la derecha (ver datos/index.js·borrarRegistro).
   async function borrar(id) {
-    await eliminarPieza(id);
-    await actualizarDatos();
+    const pieza = piezas.find((p) => p.id === id);
+    setPiezas((prev) => prev.filter((p) => p.id !== id));
+    await borrarRegistro('piezas', id, () => eliminarPieza(id), 'la pieza "' + (pieza?.nombre || '') + '"');
+    await actualizarDatos().catch(() => {});
     onCambio?.();
   }
 
   // Borra la prenda y, si se pide, también sus piezas -- salvo las que use
   // otra prenda, que se quedan (borrarlas rompería esa otra prenda).
   async function borrarPrenda(grupo, conPiezas) {
-    await eliminarGrupo(grupo.id);
-    if (conPiezas) {
-      const usadasEnOtras = new Set(
-        grupos.filter((g) => g.id !== grupo.id).flatMap((g) => g.piezas.map((gp) => gp.piezaId))
+    const usadasEnOtras = new Set(
+      grupos.filter((g) => g.id !== grupo.id).flatMap((g) => g.piezas.map((gp) => gp.piezaId))
+    );
+    const piezasABorrar = conPiezas
+      ? grupo.piezas.map((gp) => gp.piezaId).filter((id) => !usadasEnOtras.has(id))
+      : [];
+    setPrendaAbierta(null);
+    setGrupos((prev) => prev.filter((g) => g.id !== grupo.id));
+    if (piezasABorrar.length > 0) setPiezas((prev) => prev.filter((p) => !piezasABorrar.includes(p.id)));
+
+    const prendaBorrada = await borrarRegistro(
+      'grupos', grupo.id, () => eliminarGrupo(grupo.id), 'la prenda "' + grupo.nombre + '"'
+    );
+    // Si la prenda no se pudo borrar, sus piezas tampoco se tocan.
+    if (prendaBorrada) {
+      await Promise.all(
+        piezasABorrar.map((id) =>
+          borrarRegistro('piezas', id, () => eliminarPieza(id), 'una pieza de "' + grupo.nombre + '"')
+        )
       );
-      for (const gp of grupo.piezas) {
-        if (!usadasEnOtras.has(gp.piezaId)) await eliminarPieza(gp.piezaId);
-      }
     }
-    if (prendaAbierta === grupo.id) setPrendaAbierta(null);
-    await actualizarDatos();
+    await actualizarDatos().catch(() => {});
     onCambio?.();
   }
 
