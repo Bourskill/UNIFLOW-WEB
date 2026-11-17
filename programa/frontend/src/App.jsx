@@ -1,4 +1,5 @@
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
+import { precargar } from './datos/index.js';
 import { Formulario } from './paginas/Formulario.jsx';
 import { Prendas } from './paginas/Prendas.jsx';
 import { Piezas } from './paginas/Piezas.jsx';
@@ -58,6 +59,13 @@ function App() {
   // volverían a renderizar en cada cambio de estado de App, memo o no).
   const marcarCambio = useCallback(() => setRecargarSenal((n) => n + 1), []);
   const pestanaActual = PESTANAS.find((p) => p.id === pestana);
+
+  // Apenas se abre la app: despertar el servidor y traer todos los datos a
+  // la caché compartida (datos/index.js), así entrar a cualquier pantalla
+  // ya no espera su propia carga.
+  useEffect(() => {
+    precargar();
+  }, []);
 
   // "Usar esta plantilla" (Plantillas.jsx) tiene que llevar al usuario al
   // apartado Diseño con esa configuración de zonas ya cargada -- mismo
@@ -122,7 +130,7 @@ function App() {
               <SubTabs
                 tabs={[
                   { id: 'subir', etiqueta: 'Subir piezas', contenido: <FormularioMemo onCambio={marcarCambio} /> },
-                  { id: 'prendas', etiqueta: 'Prendas', contenido: <PrendasMemo recargarSenal={recargarSenal} /> },
+                  { id: 'prendas', etiqueta: 'Prendas', contenido: <PrendasMemo recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
                   { id: 'biblioteca', etiqueta: 'Biblioteca', contenido: <PiezasMemo recargarSenal={recargarSenal} onCambio={marcarCambio} /> },
                   { id: 'plantillas', etiqueta: 'Plantillas', contenido: <PlantillasMemo recargarSenal={recargarSenal} onUsarPlantilla={usarPlantilla} /> },
                   { id: 'fuentes', etiqueta: 'Fuentes', contenido: <FuentesMemo onCambio={marcarCambio} /> },
@@ -153,7 +161,7 @@ function App() {
               <SubTabs
                 tabs={[
                   { id: 'nuevo', etiqueta: 'Nuevo pedido', contenido: <PedidosMemo recargarSenal={recargarSenal} /> },
-                  { id: 'laser', etiqueta: 'Corte láser', contenido: <CorteLaserMemo /> },
+                  { id: 'laser', etiqueta: 'Corte láser', contenido: <CorteLaserMemo recargarSenal={recargarSenal} /> },
                   { id: 'historial', etiqueta: 'Historial', contenido: <HistorialMemo recargarSenal={recargarSenal} /> },
                 ]}
               />

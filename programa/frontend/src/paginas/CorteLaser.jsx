@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { listarGrupos, listarPiezas, anidarDesdeGrupo, generarDxf } from '../api.js';
+import { anidarDesdeGrupo, generarDxf } from '../api.js';
+import { obtener } from '../datos/index.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
 import { Boton, Campo, Input, Select, Tarjeta, Aviso, ErrorCarga } from '../componentes/ui.jsx';
@@ -29,7 +30,7 @@ function lineaVacia(talla) {
 // de Pedidos, acá no hay personalización ninguna, solo el contorno real de
 // cada pieza para cortar. Reusa /nesting/desde-grupo (existía desde antes,
 // sin ninguna pantalla que lo llamara) y el exportador DXF nuevo.
-export function CorteLaser() {
+export function CorteLaser({ recargarSenal }) {
   const [grupos, setGrupos] = useState([]);
   const [piezas, setPiezas] = useState([]);
   const [grupoId, setGrupoId] = useState('');
@@ -47,10 +48,12 @@ export function CorteLaser() {
     setCargandoInicial(true);
     setErrorCarga(null);
     try {
-      const [gs, ps] = await Promise.all([listarGrupos(), listarPiezas()]);
+      const [gs, ps] = await Promise.all([obtener('grupos'), obtener('piezas')]);
       setGrupos(gs);
       setPiezas(ps);
-      if (gs.length > 0) {
+      // Conserva la prenda elegida si sigue existiendo (esto también corre
+      // cuando cambia algo en otra pantalla).
+      if (gs.length > 0 && !gs.some((g) => g.id === grupoId)) {
         setGrupoId(gs[0].id);
         setLineas([lineaVacia(tallasDelGrupo(gs[0], ps)[0])]);
       }
@@ -61,10 +64,12 @@ export function CorteLaser() {
     }
   }
 
+  // Se recarga cuando cambia algo en otra pantalla (ej. se borró o editó una
+  // prenda): si no, acá se seguía ofreciendo la prenda vieja.
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [recargarSenal]);
 
   const grupo = grupos.find((g) => g.id === grupoId);
   const tallas = tallasDelGrupo(grupo, piezas);

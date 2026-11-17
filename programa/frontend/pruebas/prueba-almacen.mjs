@@ -154,5 +154,19 @@ console.log('\n--- invalidar toca solo lo que ya se había cargado ---');
   comprobar('grupos (nunca pedida) no se pidió', llamadas.grupos === 0);
 }
 
+console.log('\n--- enVuelo: avisa mientras la petición está en el aire (lo usa obtener() tras un guardado) ---');
+{
+  const servidor = diferida();
+  const { almacen } = nuevo({ listar: () => servidor.promesa });
+  comprobar('antes de pedir: no hay nada en vuelo', almacen.enVuelo('piezas') === false);
+  const p = almacen.cargar('piezas');
+  await esperar();
+  comprobar('mientras el servidor no responde: en vuelo', almacen.enVuelo('piezas') === true);
+  servidor.resolver([{ id: 'x' }]);
+  await p;
+  await esperar();
+  comprobar('al llegar la respuesta: ya no', almacen.enVuelo('piezas') === false);
+}
+
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');
 process.exit(fallos ? 1 : 0);

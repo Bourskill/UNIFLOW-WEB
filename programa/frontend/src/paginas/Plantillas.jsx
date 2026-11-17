@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { listarPlantillas, listarGrupos, eliminarPlantilla } from '../api.js';
+import { eliminarPlantilla } from '../api.js';
+import { obtener } from '../datos/index.js';
 import { Boton, Tarjeta, Chip, Aviso } from '../componentes/ui.jsx';
 
 // Una Plantilla es la configuración de zonas de un producto SIN contenido
@@ -25,7 +26,7 @@ export function Plantillas({ recargarSenal, onUsarPlantilla }) {
     setCargando(true);
     setError(null);
     try {
-      const [ps, gs] = await Promise.all([listarPlantillas(), listarGrupos()]);
+      const [ps, gs] = await Promise.all([obtener('plantillas'), obtener('grupos')]);
       setPlantillas(ps);
       setGrupos(gs);
     } catch (e) {

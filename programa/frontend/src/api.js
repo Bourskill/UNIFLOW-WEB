@@ -57,12 +57,32 @@ function encabezadosConClave(extra = {}) {
   return clave ? { ...extra, Authorization: 'Bearer ' + clave } : extra;
 }
 
+// Avisa que algo se guardó o se borró en el servidor -- la caché de
+// datos/index.js lo escucha para no seguir mostrando lo anterior.
+export const EVENTO_ESCRITURA = 'uniflow:escritura';
+
+// POST que solo CALCULAN (no guardan nada): no invalidan la caché. Algunos
+// corren en vivo mientras se edita (el anclaje), así que invalidar con
+// ellos pediría todo de nuevo una y otra vez.
+const RUTAS_SOLO_CALCULO = [
+  '/piezas/analizar', '/piezas/resolver-multitalla', '/piezas/detectar-pdf',
+  '/anclaje/', '/texto/', '/nesting/desde-', '/archivos', '/acceso',
+];
+
+function cambiaDatos(ruta, metodo) {
+  if (!metodo || metodo === 'GET') return false;
+  return !RUTAS_SOLO_CALCULO.some((prefijo) => ruta.startsWith(prefijo));
+}
+
 // fetch con la clave puesta; un 401 dispara la pantalla de entrada.
 async function pedir(ruta, opciones = {}) {
   const respuesta = await fetch(BASE_URL + ruta, {
     ...opciones,
     headers: encabezadosConClave(opciones.headers),
   });
+  if (respuesta.ok && cambiaDatos(ruta, opciones.method) && typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(EVENTO_ESCRITURA));
+  }
   if (respuesta.status === 401) {
     olvidarClave();
     claveEnMemoria = '';

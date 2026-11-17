@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
-  listarGrupos,
-  listarDisenos,
-  listarProductos,
-  listarPiezas,
   crearDiseno,
   editarDiseno,
   eliminarDiseno,
@@ -14,8 +10,8 @@ import {
   crearPlantilla,
   resolverAnclaje,
   subirArchivo,
-  listarFuentes,
 } from '../api.js';
+import { obtener } from '../datos/index.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { InputNumero } from '../componentes/InputNumero.jsx';
@@ -180,7 +176,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setCargando(true);
     setErrorCarga(null);
     try {
-      const [gs, ds, ps, pzs] = await Promise.all([listarGrupos(), listarDisenos(), listarProductos(), listarPiezas()]);
+      const [gs, ds, ps, pzs] = await Promise.all([obtener('grupos'), obtener('disenos'), obtener('productos'), obtener('piezas')]);
       setGrupos(gs);
       setDisenos(ds);
       setProductos(ps);
@@ -189,7 +185,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       // Nunca puede tumbar la carga de esta pantalla entera por faltar la
       // tabla `fuentes` (recién agregada) -- sin ella, el selector de
       // fuente de cada zona simplemente no tiene más opción que la de base.
-      setFuentes(await listarFuentes().catch(() => []));
+      setFuentes(await obtener('fuentes').catch(() => []));
     } catch (e) {
       setErrorCarga(e.message);
     } finally {

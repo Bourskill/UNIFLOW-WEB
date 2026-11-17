@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
-  listarPiezas, listarGrupos, listarProductos, editarPieza, eliminarPieza, reprocesarPieza,
-  reemplazarArchivoPieza, eliminarVersionPieza, editarProducto,
+  editarPieza, eliminarPieza, reprocesarPieza,
+  reemplazarArchivoPieza, eliminarVersionPieza, editarProducto, eliminarGrupo
 } from '../api.js';
+import { obtener } from '../datos/index.js';
 import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
@@ -205,7 +206,7 @@ function PanelConfirmarActualizacion({ pieza, versionAnterior, productosAfectado
   );
 }
 
-function FilaPieza({ pieza, usadaEn, productosQueLaUsan, onCambio, onBorrar }) {
+function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar }) {
   const [editando, setEditando] = useState(false);
   const [categoria, setCategoria] = useState(pieza.categoria || '');
   const [tela, setTela] = useState(pieza.tela || '');
@@ -316,7 +317,9 @@ function FilaPieza({ pieza, usadaEn, productosQueLaUsan, onCambio, onBorrar }) {
           </div>
         )}
         <div className="mt-auto pt-1 text-xs text-faint-foreground">
-          {usadaEn.length === 0 ? 'Sin usar en ninguna prenda' : 'En: ' + usadaEn.join(', ')}
+          {rol
+            ? 'Rol: ' + rol + (usadaEn.length > 1 ? ' · también en ' + (usadaEn.length - 1) + ' prenda' + (usadaEn.length > 2 ? 's' : '') + ' más' : '')
+            : usadaEn.length === 0 ? 'Sin usar en ninguna prenda' : 'En: ' + usadaEn.join(', ')}
         </div>
       </div>
 
@@ -413,6 +416,7 @@ export function Piezas({ recargarSenal, onCambio }) {
   const [productos, setProductos] = useState([]);
   const [filtroCategoria, setFiltroCategoria] = useState('');
   const [busqueda, setBusqueda] = useState('');
+  const [prendaAbierta, setPrendaAbierta] = useState(null); // id de la prenda desplegada
   // Sin esto, la PRIMERA vez que se visita esta pestaña en la sesión (o
   // después de cualquier reload de página, que resetea qué apartados ya se
   // visitaron -- ver App.jsx) el "Todavía no hay ninguna" de más abajo
@@ -433,7 +437,7 @@ export function Piezas({ recargarSenal, onCambio }) {
   // datos. `actualizarDatos` es la versión silenciosa: mismo fetch, pero
   // sin pasar por `cargando`, así la lista nunca se desmonta.
   async function actualizarDatos() {
-    const [ps, gs, prods] = await Promise.all([listarPiezas(), listarGrupos(), listarProductos()]);
+    const [ps, gs, prods] = await Promise.all([obtener('piezas'), obtener('grupos'), obtener('productos')]);
     setPiezas(ps);
     setGrupos(gs);
     setProductos(prods);
@@ -494,9 +498,25 @@ export function Piezas({ recargarSenal, onCambio }) {
     return mapa;
   }, [productos, grupos]);
 
-  const piezasFiltradas = piezas
-    .filter((p) => !filtroCategoria || p.categoria === filtroCategoria)
-    .filter((p) => !busqueda.trim() || p.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()));
+  function productosDeGrupo(grupoId) {
+    return productos.filter((p) => (p.grupoIds || (p.grupoId ? [p.grupoId] : [])).includes(grupoId));
+  }
+
+  const busquedaNormal = busqueda.trim().toLowerCase();
+  const piezaCoincide = (p) =>
+    (!filtroCategoria || p.categoria === filtroCategoria) &&
+    (!busquedaNormal || p.nombre.toLowerCase().includes(busquedaNormal));
+
+  // Una pieza que ya es parte de una prenda se ve DENTRO de esa prenda, no
+  // suelta en la lista: si no, la biblioteca repetía cada pieza de cada
+  // prenda. Sueltas quedan solo las que no están en ninguna.
+  const idsEnPrendas = new Set(grupos.flatMap((g) => g.piezas.map((gp) => gp.piezaId)));
+  const piezasSueltas = piezas.filter((p) => !idsEnPrendas.has(p.id)).filter(piezaCoincide);
+  const prendasVisibles = grupos.filter((g) => {
+    const suyas = g.piezas.map((gp) => piezas.find((p) => p.id === gp.piezaId)).filter(Boolean);
+    if (busquedaNormal && g.nombre.toLowerCase().includes(busquedaNormal) && !filtroCategoria) return true;
+    return suyas.some(piezaCoincide);
+  });
 
   async function borrar(id) {
     await eliminarPieza(id);
@@ -504,14 +524,47 @@ export function Piezas({ recargarSenal, onCambio }) {
     onCambio?.();
   }
 
+  // Borra la prenda y, si se pide, también sus piezas -- salvo las que use
+  // otra prenda, que se quedan (borrarlas rompería esa otra prenda).
+  async function borrarPrenda(grupo, conPiezas) {
+    await eliminarGrupo(grupo.id);
+    if (conPiezas) {
+      const usadasEnOtras = new Set(
+        grupos.filter((g) => g.id !== grupo.id).flatMap((g) => g.piezas.map((gp) => gp.piezaId))
+      );
+      for (const gp of grupo.piezas) {
+        if (!usadasEnOtras.has(gp.piezaId)) await eliminarPieza(gp.piezaId);
+      }
+    }
+    if (prendaAbierta === grupo.id) setPrendaAbierta(null);
+    await actualizarDatos();
+    onCambio?.();
+  }
+
+  function tarjetaDePieza(p, rol) {
+    return (
+      <FilaPieza
+        key={p.id + (rol || '')}
+        pieza={p}
+        rol={rol}
+        usadaEn={usadaEnPorPieza[p.id] || []}
+        productosQueLaUsan={productosPorPieza[p.id] || []}
+        onCambio={() => { actualizarDatos(); onCambio?.(); }}
+        onBorrar={() => borrar(p.id)}
+      />
+    );
+  }
+
+  const nada = prendasVisibles.length === 0 && piezasSueltas.length === 0;
+
   return (
     <div className="pagina flex flex-col gap-6">
       <div>
         <h2 className="text-lg font-semibold">Biblioteca</h2>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          La biblioteca completa. Reprocesar o reemplazar la moldería de una pieza acá crea una
-          versión nueva -- si algún producto ya guardado la usa, se pregunta cuál pasa a la versión
-          nueva y cuál se queda en la que tenía.
+          Las prendas con sus piezas, y aparte las piezas sueltas. Reprocesar o reemplazar la moldería
+          de una pieza crea una versión nueva -- si algún producto ya guardado la usa, se pregunta cuál
+          pasa a la versión nueva y cuál se queda en la que tenía.
         </p>
       </div>
 
@@ -520,7 +573,7 @@ export function Piezas({ recargarSenal, onCambio }) {
           <Input
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Buscar por nombre…"
+            placeholder="Buscar prenda o pieza…"
             className="max-w-[220px]"
           />
           {categorias.length > 0 && (
@@ -533,7 +586,7 @@ export function Piezas({ recargarSenal, onCambio }) {
             </>
           )}
           <span className="text-xs text-faint-foreground">
-            {piezasFiltradas.length} de {piezas.length}
+            {grupos.length} {grupos.length === 1 ? 'prenda' : 'prendas'} · {piezas.length} {piezas.length === 1 ? 'pieza' : 'piezas'}
           </span>
         </div>
       )}
@@ -542,24 +595,176 @@ export function Piezas({ recargarSenal, onCambio }) {
         <p className="text-sm text-muted-foreground">Cargando…</p>
       ) : errorCarga ? (
         <ErrorCarga mensaje={errorCarga} onReintentar={recargar} />
-      ) : piezasFiltradas.length === 0 ? (
+      ) : nada ? (
         <p className="text-sm text-muted-foreground">
-          {piezas.length === 0 ? 'Todavía no hay ninguna — subí una en "Subir piezas".' : 'Ninguna coincide con el filtro.'}
+          {piezas.length === 0 ? 'Todavía no hay ninguna — subí una en "Subir piezas".' : 'Nada coincide con el filtro.'}
         </p>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
-          {piezasFiltradas.map((p) => (
-            <FilaPieza
-              key={p.id}
-              pieza={p}
-              usadaEn={usadaEnPorPieza[p.id] || []}
-              productosQueLaUsan={productosPorPieza[p.id] || []}
-              onCambio={actualizarDatos}
-              onBorrar={() => borrar(p.id)}
-            />
-          ))}
-        </div>
+        <>
+          {prendasVisibles.length > 0 && (
+            <section className="flex flex-col gap-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">
+                Prendas · {prendasVisibles.length}
+              </h3>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
+                {prendasVisibles.map((g) =>
+                  g.id === prendaAbierta ? (
+                    <PrendaAbierta
+                      key={g.id}
+                      grupo={g}
+                      piezas={piezas}
+                      productos={productosDeGrupo(g.id)}
+                      onCerrar={() => setPrendaAbierta(null)}
+                      onBorrar={(conPiezas) => borrarPrenda(g, conPiezas)}
+                      tarjetaDePieza={tarjetaDePieza}
+                    />
+                  ) : (
+                    <TarjetaPrenda
+                      key={g.id}
+                      grupo={g}
+                      piezas={piezas}
+                      onAbrir={() => setPrendaAbierta(g.id)}
+                    />
+                  )
+                )}
+              </div>
+            </section>
+          )}
+
+          {piezasSueltas.length > 0 && (
+            <section className="flex flex-col gap-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">
+                Piezas sueltas · {piezasSueltas.length}
+              </h3>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
+                {piezasSueltas.map((p) => tarjetaDePieza(p))}
+              </div>
+            </section>
+          )}
+        </>
       )}
     </div>
+  );
+}
+
+function tallasDeGrupo(grupo, piezas) {
+  const tallas = new Set();
+  for (const gp of grupo.piezas) {
+    const pieza = piezas.find((p) => p.id === gp.piezaId);
+    if (pieza && !pieza.tallaUnica) Object.keys(pieza.dimensionesPorTalla || {}).forEach((t) => tallas.add(t));
+  }
+  return ordenarTallasNatural([...tallas]);
+}
+
+// Tarjeta de una prenda: un mosaico con las primeras piezas y, al abrirla,
+// sus piezas completas (PrendaAbierta).
+function TarjetaPrenda({ grupo, piezas, onAbrir }) {
+  const suyas = grupo.piezas.map((gp) => piezas.find((p) => p.id === gp.piezaId));
+  const tallas = tallasDeGrupo(grupo, piezas);
+  const faltan = suyas.filter((p) => !p).length;
+  return (
+    <article
+      onClick={onAbrir}
+      className="flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-sm transition-[border-color,box-shadow] hover:border-primary/40 hover:shadow-md"
+    >
+      <div className="grid aspect-[4/3] grid-cols-2 grid-rows-2 gap-px border-b border-border bg-border">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="relative bg-surface-muted">
+            {suyas[i] && (
+              <div className="absolute inset-2.5">
+                <TrazosPreview geometriaPorTalla={suyas[i].geometriaPorTalla || {}} fluido />
+              </div>
+            )}
+            {i === 3 && suyas.length > 4 && (
+              <span className="absolute bottom-1.5 right-1.5 rounded-md bg-background/80 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                +{suyas.length - 4}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-1 flex-col gap-1.5 p-4">
+        <h3 className="font-semibold leading-snug">{grupo.nombre}</h3>
+        <div className="text-xs text-muted-foreground">
+          {grupo.piezas.length} {grupo.piezas.length === 1 ? 'pieza' : 'piezas'}
+          {tallas.length > 0 && ' · ' + tallas.length + ' tallas · ' + tallas[0].toUpperCase() + ' – ' + tallas[tallas.length - 1].toUpperCase()}
+        </div>
+        {faltan > 0 && <div className="text-xs text-danger">{faltan} pieza{faltan === 1 ? '' : 's'} borrada{faltan === 1 ? '' : 's'} de la biblioteca</div>}
+        <div className="mt-auto pt-1 text-xs text-primary">Ver piezas →</div>
+      </div>
+    </article>
+  );
+}
+
+function PrendaAbierta({ grupo, piezas, productos, onCerrar, onBorrar, tarjetaDePieza }) {
+  const [confirmando, setConfirmando] = useState(false);
+  const [borrando, setBorrando] = useState(false);
+  const [error, setError] = useState(null);
+  const tallas = tallasDeGrupo(grupo, piezas);
+
+  async function borrar(conPiezas) {
+    setBorrando(true);
+    setError(null);
+    try {
+      await onBorrar(conPiezas);
+    } catch (e) {
+      setError(e.message);
+      setBorrando(false);
+    }
+  }
+
+  return (
+    <section className="col-span-full flex flex-col gap-4 rounded-xl border border-primary/40 bg-surface/60 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">{grupo.nombre}</h3>
+          <div className="text-xs text-muted-foreground">
+            {grupo.piezas.length} {grupo.piezas.length === 1 ? 'pieza' : 'piezas'}
+            {tallas.length > 0 && ' · tallas ' + tallas.map((t) => t.toUpperCase()).join(' ')}
+            {productos.length > 0 && ' · usada en ' + productos.length + (productos.length === 1 ? ' producto' : ' productos')}
+          </div>
+        </div>
+        <div className="flex gap-1">
+          <Boton variante="fantasma" tamano="sm" className="text-danger" onClick={() => setConfirmando((v) => !v)}>
+            Eliminar prenda
+          </Boton>
+          <Boton tamano="sm" onClick={onCerrar}>Cerrar</Boton>
+        </div>
+      </div>
+
+      {confirmando && (
+        <div className="flex flex-col gap-2 rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger">
+          <span>
+            ¿Eliminar «{grupo.nombre}»?
+            {productos.length > 0 &&
+              ' La usan ' + productos.length + (productos.length === 1 ? ' producto' : ' productos') +
+                ' (' + productos.map((p) => p.nombre).join(', ') + '), que van a dejar de funcionar.'}{' '}
+            Esto no se puede deshacer.
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <Boton variante="peligro" tamano="sm" disabled={borrando} onClick={() => borrar(true)}>
+              {borrando ? 'Eliminando…' : 'Eliminar prenda y sus piezas'}
+            </Boton>
+            <Boton tamano="sm" disabled={borrando} onClick={() => borrar(false)}>Solo la prenda (dejar las piezas)</Boton>
+            <Boton variante="fantasma" tamano="sm" disabled={borrando} onClick={() => setConfirmando(false)}>Cancelar</Boton>
+          </div>
+          <span className="text-xs opacity-80">Las piezas que use otra prenda no se borran nunca.</span>
+          {error && <span className="text-xs">{error}</span>}
+        </div>
+      )}
+
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
+        {grupo.piezas.map((gp) => {
+          const pieza = piezas.find((p) => p.id === gp.piezaId);
+          return pieza ? (
+            tarjetaDePieza(pieza, gp.rol)
+          ) : (
+            <div key={gp.piezaId + gp.rol} className="rounded-xl border border-dashed border-danger/40 p-4 text-sm text-danger">
+              {gp.rol}: pieza borrada de la biblioteca
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import {
   listarPiezas, listarGrupos, listarDisenos, listarProductos, listarPlantillas,
-  listarPedidos, listarFuentes, listarGeneraciones,
+  listarPedidos, listarFuentes, listarGeneraciones, verificarSalud, EVENTO_ESCRITURA,
 } from '../api.js';
 import { crearAlmacen } from './almacen.js';
 import { avisar } from './avisos.js';
@@ -19,7 +19,60 @@ export const almacen = crearAlmacen({
     generaciones: listarGeneraciones,
   },
   avisar,
+  // Toda escritura hecha desde esta app ya invalida la caché (ver más
+  // abajo); la vigencia solo cubre cambios hechos desde otro dispositivo.
+  vigenciaMs: 5 * 60 * 1000,
 });
+
+// Cualquier guardado o borrado (api.js avisa con este evento) deja vieja la
+// caché: lo ya cargado se vuelve a pedir por detrás, y quien lo lea mientras
+// tanto espera esa versión nueva en vez de recibir la anterior.
+// `sucias`: colecciones que pueden haber cambiado por un guardado propio --
+// solo ESAS hacen esperar a obtener(); un refresco de rutina (ej. al volver
+// a la pestaña) no frena a nadie, se muestra lo que hay y se actualiza solo.
+const sucias = new Set();
+if (typeof window !== 'undefined') {
+  window.addEventListener(EVENTO_ESCRITURA, () => {
+    for (const n of almacen.nombres) sucias.add(n);
+    almacen.invalidar();
+  });
+}
+
+/**
+ * Lo que usan las pantallas para leer una colección: si ya está en la caché,
+ * vuelve AL INSTANTE (y, si está vieja, se refresca por detrás para la próxima
+ * vez); si un guardado propio la dejó vieja, espera la versión nueva. Tira si
+ * no hay datos y la carga falló.
+ */
+export async function obtener(nombre) {
+  const estado = almacen.leer(nombre);
+  if (estado.datos !== null && !sucias.has(nombre)) {
+    almacen.asegurar(nombre);
+    return estado.datos;
+  }
+  await almacen.asegurar(nombre);
+  sucias.delete(nombre);
+  const final = almacen.leer(nombre);
+  if (final.datos === null) throw new Error(final.error || 'No se pudieron cargar los datos (' + nombre + ').');
+  return final.datos;
+}
+
+/**
+ * Al abrir la app: despierta el servidor (Render gratis se duerme y tarda
+ * hasta un minuto) y, apenas responde, pide todas las colecciones en
+ * paralelo -- así cada pantalla ya tiene sus datos al entrar, en vez de
+ * cargarlos recién ahí.
+ */
+export async function precargar({ intentos = 30, esperaMs = 3000 } = {}) {
+  for (let i = 0; i < intentos; i++) {
+    if (await verificarSalud()) {
+      await Promise.all(almacen.nombres.map((n) => almacen.asegurar(n)));
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, esperaMs));
+  }
+  return false;
+}
 
 // Al volver a la pestaña del navegador (o desde otro dispositivo) lo que se
 // ve puede estar viejo: se actualiza por detrás, sin "Cargando…". Con un

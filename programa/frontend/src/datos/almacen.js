@@ -180,5 +180,11 @@ export function crearAlmacen({ listadores, avisar = () => {}, vigenciaMs = 30000
     return true;
   }
 
-  return { leer, suscribir, cargar, asegurar, invalidar, guardarLocal, eliminar, nombres };
+  /** ¿Hay una petición de esta colección en el aire ahora mismo? */
+  function enVuelo(nombre) {
+    comprobar(nombre);
+    return !!enCurso[nombre];
+  }
+
+  return { leer, suscribir, cargar, asegurar, invalidar, guardarLocal, eliminar, enVuelo, nombres };
 }

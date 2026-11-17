@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { listarGeneraciones, reponerPieza } from '../api.js';
+import { reponerPieza } from '../api.js';
+import { obtener } from '../datos/index.js';
 import { Boton, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 
 function formatoFecha(iso) {
@@ -83,7 +84,7 @@ export function Historial({ recargarSenal }) {
     setCargando(true);
     setErrorCarga(null);
     try {
-      setGeneraciones(await listarGeneraciones());
+      setGeneraciones(await obtener('generaciones'));
     } catch (e) {
       setErrorCarga(e.message);
     } finally {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { listarFuentes, crearFuente, eliminarFuente, buscarEnBancoDeFuentes, agregarFuenteDelBanco } from '../api.js';
+import { crearFuente, eliminarFuente, buscarEnBancoDeFuentes, agregarFuenteDelBanco } from '../api.js';
+import { obtener } from '../datos/index.js';
 import { useFuentesWeb, cssDeFamilia } from '../componentes/useFuentesWeb.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
 
@@ -43,7 +44,7 @@ export function Fuentes({ onCambio }) {
     setCargando(true);
     setErrorCatalogo(null);
     try {
-      setFuentes(await listarFuentes());
+      setFuentes(await obtener('fuentes'));
     } catch (e) {
       setErrorCatalogo(e.message);
     } finally {

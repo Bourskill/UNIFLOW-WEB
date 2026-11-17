@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
-  listarProductos,
-  listarGrupos,
-  listarPiezas,
-  listarPedidos,
   crearPedido,
   editarPedido,
   eliminarPedido,
   anidarDesdePedido,
   generarPdf,
 } from '../api.js';
+import { obtener } from '../datos/index.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
@@ -110,7 +107,7 @@ export function Pedidos({ recargarSenal }) {
     setCargandoInicial(true);
     setErrorCarga(null);
     try {
-      const [ps, gs, pzs, peds] = await Promise.all([listarProductos(), listarGrupos(), listarPiezas(), listarPedidos()]);
+      const [ps, gs, pzs, peds] = await Promise.all([obtener('productos'), obtener('grupos'), obtener('piezas'), obtener('pedidos')]);
       setProductos(ps);
       setGrupos(gs);
       setPiezas(pzs);

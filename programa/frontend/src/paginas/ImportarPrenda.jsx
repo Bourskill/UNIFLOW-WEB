@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { analizarPrenda, crearGrupo, crearPieza, listarPiezas, subirArchivo } from '../api.js';
+import { analizarPrenda, crearGrupo, crearPieza, subirArchivo } from '../api.js';
+import { obtener } from '../datos/index.js';
 import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
@@ -89,7 +90,7 @@ export function ImportarPrenda({ archivo, onQuitar, onGuardado }) {
           return null;
         }),
         analizarPrenda(base64),
-        listarPiezas().catch(() => []),
+        obtener('piezas').catch(() => []),
       ]);
       if (r.piezas.length === 0) throw new Error('El PDF no trae ninguna capa con piezas.');
       setArchivoUrl(url);

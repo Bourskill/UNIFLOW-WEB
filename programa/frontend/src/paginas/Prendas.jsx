@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { listarGrupos, listarPiezas, eliminarGrupo, editarGrupo } from '../api.js';
+import { eliminarGrupo, editarGrupo } from '../api.js';
+import { obtener } from '../datos/index.js';
 import { Boton, Tarjeta, Chip, Campo, Input, Select, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
 import { ordenarTallasNatural } from '../constantes.js';
@@ -206,7 +207,10 @@ function DetallePrenda({ grupo, piezas, onVolver, onGuardado }) {
 // El catálogo: cada prenda es una card (mosaico de sus piezas + tallas
 // disponibles); entrar a una muestra el detalle real de qué piezas la
 // forman, con su contorno real -- no una lista de texto plano.
-export function Prendas({ recargarSenal }) {
+// onCambio: avisa a las demás pantallas (Biblioteca, Diseño, Pedidos...)
+// que algo cambió, para que vuelvan a leer -- sin esto, borrar o editar una
+// prenda acá no se veía en ningún otro lado hasta recargar la página.
+export function Prendas({ recargarSenal, onCambio }) {
   const [grupos, setGrupos] = useState([]);
   const [piezas, setPiezas] = useState([]);
   const [seleccionado, setSeleccionado] = useState(null);
@@ -220,7 +224,7 @@ export function Prendas({ recargarSenal }) {
     setCargando(true);
     setErrorCarga(null);
     try {
-      const [gs, ps] = await Promise.all([listarGrupos(), listarPiezas()]);
+      const [gs, ps] = await Promise.all([obtener('grupos'), obtener('piezas')]);
       setGrupos(gs);
       setPiezas(ps);
     } catch (e) {
@@ -238,7 +242,13 @@ export function Prendas({ recargarSenal }) {
   async function borrar(id) {
     await eliminarGrupo(id);
     if (seleccionado === id) setSeleccionado(null);
-    await recargar();
+    onCambio?.();
+  }
+
+  // Lo que dispara onCambio vuelve acá como recargarSenal (App.jsx), así
+  // que esta pantalla se recarga sola junto con las demás.
+  function alGuardar() {
+    onCambio?.();
   }
 
   const grupoAbierto = grupos.find((g) => g.id === seleccionado);
@@ -246,7 +256,7 @@ export function Prendas({ recargarSenal }) {
   if (grupoAbierto) {
     return (
       <div className="pagina">
-        <DetallePrenda grupo={grupoAbierto} piezas={piezas} onVolver={() => setSeleccionado(null)} onGuardado={recargar} />
+        <DetallePrenda grupo={grupoAbierto} piezas={piezas} onVolver={() => setSeleccionado(null)} onGuardado={alGuardar} />
       </div>
     );
   }
