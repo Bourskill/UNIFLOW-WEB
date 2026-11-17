@@ -80,24 +80,20 @@ console.log('\n--- El desborde de las cifras redondas se permite (puede salirse 
   comprobar('...y aun así cuenta como que cabe (no se achica por eso)', r.cabe && r.escalaH === 100 && r.trackingMil === 0);
 }
 
-console.log('\n--- Un número demasiado ancho: tracking, condensar y RECIÉN AHÍ achicar ---');
+console.log('\n--- Un número más ancho que su zona: NO se achica ni se deforma, se sale por los costados ---');
 {
   const W = 10, H = 12;
   const cuerpo = calibrarCuerpo({ medidor, candidatos: ['55'], anchoCm: W, altoCm: H });
   const r = ajustarTexto({ medidor, texto: '55', anchoCm: W, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo });
-  const iCondensa = r.pasos.findIndex((p) => p.startsWith('condensado'));
-  const iAchica = r.pasos.findIndex((p) => p.startsWith('cuerpo '));
-  comprobar('condensa antes de achicar', iCondensa !== -1 && (iAchica === -1 || iCondensa < iAchica), JSON.stringify(r.pasos));
-  comprobar('termina cabiendo a lo ancho', r.cabe && r.tintaCm.ancho <= W + 0.02, 'ancho = ' + r.tintaCm.ancho);
-  comprobar('no supera el cuerpo de alto completo', r.cuerpoCm <= cuerpo + 1e-9);
-  // Si condensar alcanza, conserva el alto completo.
-  const justo = ajustarTexto({ medidor, texto: '10', anchoCm: r10Ancho() * 0.93, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo });
-  comprobar('si con condensar alcanza, el alto sigue completo', cerca(justo.cuerpoCm, cuerpo, 1e-9) && justo.escalaH < 100 && justo.cabe, JSON.stringify(justo.pasos));
-  function r10Ancho() { return ajustarTexto({ medidor, texto: '10', anchoCm: 100, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo }).tintaCm.ancho; }
-  // Un dato absurdo agota la escalera y se AVISA ("NO cabe en su guía").
-  const absurdo = ajustarTexto({ medidor, texto: '1000000', anchoCm: W, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo });
-  comprobar('un dato imposible de encajar lo dice (cabe = false) y no baja de la mitad del cuerpo',
-    absurdo.cabe === false && absurdo.cuerpoCm >= cuerpo * 0.5 - 1e-9);
+  comprobar('mantiene el alto completo (mismo cuerpo)', cerca(r.cuerpoCm, cuerpo, 1e-9));
+  comprobar('sin tracking ni condensado (forma natural)', r.trackingMil === 0 && r.escalaH === 100, JSON.stringify(r.pasos));
+  comprobar('es más ancho que la zona y lo informa', r.tintaCm.ancho > W && cerca(r.desbordeAnchoCm, r.tintaCm.ancho - W, 1e-9));
+  comprobar('cuenta como que cabe (para un número solo manda el alto)', r.cabe === true);
+  const enZonaAncha = ajustarTexto({ medidor, texto: '7', anchoCm: 30, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo });
+  comprobar('un número que entra no informa desborde', enZonaAncha.desbordeAnchoCm === 0);
+  // Un nombre, en cambio, sí sigue ajustándose al ancho.
+  const nombre = ajustarTexto({ medidor, texto: 'HERNANDEZ', anchoCm: W, altoCm: H, modo: 'llenar' });
+  comprobar('un nombre no se sale del ancho', nombre.tintaCm.ancho <= W + 0.02 && nombre.desbordeAnchoCm < 0.02);
 }
 
 console.log('\n--- El cuerpo común ya no depende de los datos: un número larguísimo no encoge a nadie ---');
@@ -203,8 +199,8 @@ console.log('\n--- Texto con caracteres de control o sin glifo: se normaliza y s
     ajustarTexto({ medidor, texto: 'ŠKRTEL ŽUPAN ŸŒ € ĆČŁŞĐĞİŐŰ', anchoCm: 40, altoCm: 5, modo: 'llenar' }).sinGlifo.length === 0);
 
   const base = { colorHex: '#000000', rotacionGrados: 0, fuenteUrl: null, xCm: 0, yCm: 0, cxCm: 10, cyCm: 5, anchoCm: 12, altoCm: 6, modo: 'calibrado', zonaClave: 'p|n|m' };
-  // Diez números normales y UNO con más dígitos de los que caben: con el
-  // percentil 85 el largo no manda sobre el cuerpo común, así que queda desbordado.
+  // Diez números normales y UNO con muchos más dígitos que la zona: los
+  // números no se achican, así que ese se sale bastante por los costados.
   const normales = ['55', '10', '7', '23', '9', '11', '14', '8', '5', '12'].map((n, i) => ({ id: 'n' + i, piezaId: 'Espalda', talla: 'm', textos: [{ ...base, texto: n }] }));
   const piezas = [
     ...normales,
@@ -215,7 +211,8 @@ console.log('\n--- Texto con caracteres de control o sin glifo: se normaliza y s
   const ajustadas = await ajustarTextosDePiezas(piezas, obtenerMedidor);
   const avisos = advertenciasDeTextos(ajustadas);
   const tipos = avisos.map((x) => x.tipo).sort().join();
-  comprobar('avisa del número que no cabe', avisos.some((x) => x.tipo === 'no-cabe' && /5555555/.test(x.mensaje)), JSON.stringify(avisos));
+  comprobar('avisa del número que se sale mucho por los costados', avisos.some((x) => x.tipo === 'desborda-ancho' && /5555555/.test(x.mensaje)), JSON.stringify(avisos));
+  comprobar('pero no lo da como "no cabe" (su alto sí cabe)', !avisos.some((x) => x.tipo === 'no-cabe' && /5555555/.test(x.mensaje)));
   comprobar('avisa del carácter sin glifo', avisos.some((x) => x.tipo === 'sin-glifo' && /⚽/.test(x.mensaje)));
   comprobar('avisa del texto sin nada que dibujar', avisos.some((x) => x.tipo === 'sin-tinta'));
   comprobar('y no inventa avisos para el "55" que sí cabe', !avisos.some((x) => x.texto === '55'), tipos);
@@ -234,7 +231,8 @@ console.log('\n--- Dos productos con el MISMO id de zona en un pedido no mezclan
   const sola = await ajustarTextosDePiezas([pantaloneta], obtenerMedidor);
   const aJuntas = juntas[1].textos[0].ajuste, aSola = sola[0].textos[0].ajuste;
   comprobar('la pantaloneta sale igual que si estuviera sola (a pesar de la clave repetida)', cerca(aJuntas.cuerpoCm, aSola.cuerpoCm, 1e-9) && aJuntas.cabe, aJuntas.cuerpoCm + ' vs ' + aSola.cuerpoCm);
-  comprobar('y cabe en su zona de 6 cm', aJuntas.tintaCm.ancho <= 6.02, String(aJuntas.tintaCm.ancho));
+  const altoCifraPantaloneta = aJuntas.cuerpoCm * (medidor.bandaNumeros.maxY - medidor.bandaNumeros.minY);
+  comprobar('y su cifra mide el alto de SU zona (8 cm), no el de la camiseta (30 cm)', cerca(altoCifraPantaloneta, 8, 1e-6), String(altoCifraPantaloneta));
 }
 
 console.log('\n--- Una fuente propia que ya no se puede bajar: se reajusta con la de base, no se imprime mal medido ---');

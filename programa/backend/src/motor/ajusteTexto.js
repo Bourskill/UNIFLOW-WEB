@@ -23,11 +23,11 @@
 // la banda de una cifra plana ("1"). El ANCHO sí es el de la tinta real
 // (primer pixel a último), no el avance tipográfico.
 //
-// La escalera (solo cuando no cabe a lo ancho):
-//   - nombre/texto: tracking negativo -> reducir cuerpo -> condensar (el
-//     orden de host.jsx -- lo último deforma la letra).
-//   - número: tracking negativo -> condensar -> reducir cuerpo. Al revés que
-//     un nombre, porque el alto completo es lo que manda: achicar es lo último.
+// La escalera (solo nombres y textos, cuando no caben a lo ancho): tracking
+// negativo -> reducir cuerpo -> condensar (el orden de host.jsx -- lo último
+// deforma la letra). Un número NO tiene escalera: va a alto completo con su
+// forma natural, y si es más ancho que la zona se sale por los costados
+// (pedido explícito: el alto completo es la prioridad, sí o sí).
 //
 // Todo en cm. El "medidor" abstrae la fuente (ver medidorDeFontkit): este
 // módulo no sabe de archivos ni de red.
@@ -36,6 +36,10 @@
 const TOLERANCIA_CM = 0.5 / 28.3465;
 // Illustrator no admite cuerpos mayores de 1296 pt.
 const CUERPO_MAXIMO_CM = 1296 / 28.3465;
+
+// Un número que se sale más de esto (fracción del ancho de su zona) por los
+// costados genera un aviso; menos, es el desborde normal y no se menciona.
+const DESBORDE_NUMERO_AVISO = 0.25;
 
 export const REGLAS_TEXTO = {
   trackingMinimo: -30, // milésimas de em, como el "tracking" de Illustrator
@@ -239,14 +243,16 @@ export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCali
   // tinta: una letra o cifra redonda (G, O, S, 0, 8) o una tilde sobresalen
   // unas décimas por arriba/abajo -- es la tipografía de toda la vida (y en
   // un número se deja salir de la zona a propósito), no un texto que no cabe.
-  const cabe = () => tinta.ancho <= anchoCm + TOLERANCIA_CM && alturaBanda * cuerpo <= altoCm + TOLERANCIA_CM;
+  // Un número nunca se ajusta por el ancho: su alto completo es lo único que
+  // manda, y si es más ancho que la zona se sale por los costados (pedido
+  // explícito: "no importa si se desborda del ancho"). Para él, "cabe" es
+  // solo el alto -- que por construcción siempre da.
+  const cabe = () => (esNumero || tinta.ancho <= anchoCm + TOLERANCIA_CM) && alturaBanda * cuerpo <= altoCm + TOLERANCIA_CM;
   const remedir = () => { tinta = medirTinta(glifos, cuerpo, tracking, escalaH); };
 
   const reducirCuerpo = () => {
     if (cabe() || !(reglas.cuerpoMinimoFactor < 1)) return;
-    // Para un número, solo el ancho decide (su alto ya es el de la zona); para
-    // un nombre, el que más apriete de los dos.
-    const k = esNumero ? anchoCm / tinta.ancho : Math.min(anchoCm / tinta.ancho, altoCm / tinta.alto);
+    const k = Math.min(anchoCm / tinta.ancho, altoCm / tinta.alto);
     cuerpo = limitarCuerpo(Math.max(cuerpo * k, nominal * reglas.cuerpoMinimoFactor));
     pasos.push('cuerpo ' + cuerpo.toFixed(2) + ' cm (base ' + nominal.toFixed(2) + ')');
     remedir();
@@ -265,10 +271,9 @@ export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCali
     pasos.push('tracking ' + tracking);
     remedir();
   }
-  // Pasos 2 y 3: un nombre achica y recién después condensa (condensar
-  // deforma la letra); un número condensa primero y achica solo si hace
-  // falta (achicar le quita el alto completo, que es lo que manda).
-  if (esNumero) { condensar(); reducirCuerpo(); } else { reducirCuerpo(); condensar(); }
+  // Pasos 2 y 3 (solo nombres y textos): achicar y, recién después,
+  // condensar -- condensar deforma la letra. Un número no pasa por ninguno.
+  if (!esNumero) { reducirCuerpo(); condensar(); }
 
   // Colocación: tinta centrada en horizontal, banda (de mayúsculas, o de
   // cifras planas) centrada en vertical -- un número a alto completo queda
@@ -285,6 +290,8 @@ export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCali
     cabe: cabe(),
     pasos,
     tintaCm: { ancho: tinta.ancho, alto: tinta.alto },
+    // Cuánto se sale un número por los costados de su zona (0 si no se sale).
+    desbordeAnchoCm: Math.max(0, tinta.ancho - anchoCm),
   };
 }
 
@@ -377,6 +384,12 @@ export function advertenciasDeTextos(piezas) {
       }
       if (a.sinGlifo.length) {
         avisos.push({ tipo: 'sin-glifo', pieza: donde, texto: a.texto, mensaje: donde + ': «' + a.texto + '» lleva ' + a.sinGlifo.join(' ') + ', que la fuente no trae -- saldría como un cuadrito vacío.' });
+      }
+      // Un número se sale por los costados a propósito (manda su alto); solo
+      // se avisa cuando el desborde ya es grande -- un dato fuera de lo común
+      // para esa zona, que conviene mirar antes de imprimir.
+      if (t.modo === 'calibrado' && a.desbordeAnchoCm > t.anchoCm * DESBORDE_NUMERO_AVISO) {
+        avisos.push({ tipo: 'desborda-ancho', pieza: donde, texto: a.texto, mensaje: donde + ': el número «' + a.texto + '» mide ' + a.tintaCm.ancho.toFixed(1) + ' cm de ancho y su zona ' + t.anchoCm.toFixed(1) + ' cm -- se sale bastante por los costados; revisalo antes de imprimir.' });
       }
       if (!a.cabe) {
         avisos.push({ tipo: 'no-cabe', pieza: donde, texto: a.texto, mensaje: donde + ': «' + a.texto + '» no cabe en su zona (mide ' + a.tintaCm.ancho.toFixed(1) + ' cm de ancho, la zona ' + t.anchoCm.toFixed(1) + ' cm) -- revisalo antes de imprimir.' });
