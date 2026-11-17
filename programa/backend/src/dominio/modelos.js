@@ -213,7 +213,9 @@
  * @property {string} nombre
  * @property {string} [grupoId]     LEGACY, igual que Producto.grupoId
  * @property {string[]} [grupoIds]  ver el comentario de arriba
- * @property {Record<string, string>} imagenesPorPieza  rol (o grupoId::rol) -> URL de Storage
+ * @property {Record<string, string>} imagenesPorPieza  rol (o grupoId::rol) -> URL de Storage (PNG, JPG o PDF)
+ * @property {Record<string, string>} [vistasPorPieza]  misma clave -> PNG para VER un arte en PDF en el navegador
+ *   (el PDF de producción usa el PDF original, vectorial).
  * @property {{tipo: string, color1: string, color2: string, anguloGrados: number}} [fondo]  color sólido o
  *   degradado de TODAS las piezas, debajo del arte (ver motor/fondoPieza.js).
  * @property {Record<string, object>} [fondoPorPieza]  misma clave que imagenesPorPieza -> fondo

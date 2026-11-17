@@ -130,6 +130,14 @@ export async function generarPdfNesting(resultadoNesting) {
   // texto). Si falla, devuelve null: una fuente rota nunca puede tumbar la
   // generación real de un pedido.
   const cacheFuentes = new Map();
+  // El arte del Diseño (imagen o PDF) se incrusta UNA vez por URL: el mismo
+  // archivo se repite en cada talla/pieza del pedido y, sin esto, el PDF
+  // final llevaba una copia por cada vez que aparece.
+  const cacheArte = new Map();
+  function arteDe(url) {
+    if (!cacheArte.has(url)) cacheArte.set(url, incrustarArte(pdf, url));
+    return cacheArte.get(url);
+  }
   async function fuentePersonalizada(url) {
     if (!url) return null;
     if (cacheFuentes.has(url)) return cacheFuentes.get(url);
@@ -182,7 +190,11 @@ export async function generarPdfNesting(resultadoNesting) {
     }
 
     if (pieza.imagenDataUrl) {
-      const imagen = await incrustarImagen(pdf, pieza.imagenDataUrl);
+      // Imagen (PNG/JPG) o PDF: el PDF entra VECTORIAL (página incrustada
+      // como Form XObject, sin rasterizar), así los vectores del diseño
+      // llegan intactos al archivo de producción.
+      const arte = await arteDe(pieza.imagenDataUrl);
+      const imagen = arte.objeto;
       // Recorte real a la forma de la pieza, no al rectángulo del bounding
       // box -- mismo contornoCm (mismas coordenadas cm que zonas/textos) que
       // ya usa el borde de contraste/láser un poco más abajo. Sin él (pieza
@@ -220,10 +232,10 @@ export async function generarPdfNesting(resultadoNesting) {
           clip(),
           endPath()
         );
-        pagina.drawImage(imagen, rectImagen);
+        dibujarArte(pagina, arte, rectImagen);
         pagina.pushOperators(popGraphicsState());
       } else {
-        pagina.drawImage(imagen, rectImagen);
+        dibujarArte(pagina, arte, rectImagen);
       }
     }
 
@@ -461,7 +473,34 @@ export function operadoresDeFondo(fondo, anchoCm, altoCm, aPt) {
   return ops;
 }
 
+function dibujarArte(pagina, arte, rect) {
+  if (arte.tipo === 'pdf') pagina.drawPage(arte.objeto, rect);
+  else pagina.drawImage(arte.objeto, rect);
+}
+
+// Arte del Diseño: imagen o PDF. Del PDF se usa la primera página, recortada
+// a su CropBox (el área visible, la misma que muestra el lienzo con pdf.js).
+async function incrustarArte(pdf, urlODataUrl) {
+  const { contentType, bytes } = await bajarArchivo(urlODataUrl);
+  const esPdf = contentType.includes('pdf') || Buffer.from(bytes.slice(0, 5)).toString('latin1') === '%PDF-';
+  if (!esPdf) return { tipo: 'imagen', objeto: await embeberImagen(pdf, contentType, bytes) };
+  const origen = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const pagina = origen.getPage(0);
+  const caja = pagina.getCropBox();
+  const objeto = await pdf.embedPage(pagina, { left: caja.x, bottom: caja.y, right: caja.x + caja.width, top: caja.y + caja.height });
+  return { tipo: 'pdf', objeto };
+}
+
 async function incrustarImagen(pdf, urlODataUrl) {
+  const { contentType, bytes } = await bajarArchivo(urlODataUrl);
+  return embeberImagen(pdf, contentType, bytes);
+}
+
+function embeberImagen(pdf, contentType, bytes) {
+  return contentType.includes('png') ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
+}
+
+async function bajarArchivo(urlODataUrl) {
   let contentType;
   let bytes;
   if (urlODataUrl.startsWith('data:')) {
@@ -477,7 +516,7 @@ async function incrustarImagen(pdf, urlODataUrl) {
     contentType = respuesta.headers.get('content-type') || '';
     bytes = await leerConTope(respuesta, 60 * 1024 * 1024); // arte de sublimación en alta: más margen que una fuente
   }
-  return contentType.includes('png') ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
+  return { contentType, bytes };
 }
 
 function hexARgb(hex) {

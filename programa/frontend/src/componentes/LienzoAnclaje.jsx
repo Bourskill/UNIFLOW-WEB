@@ -486,7 +486,7 @@ const AnclasCapa = memo(function AnclasCapa({ anclasResueltas, anclaSeleccionada
 // Tipos de imagen que se pueden soltar como diseño: los que el PDF de
 // producción sabe incrustar (exportarPdf.js usa pdf-lib, que solo acepta
 // PNG y JPG).
-const TIPOS_IMAGEN = ['image/png', 'image/jpeg'];
+const TIPOS_IMAGEN = ['image/png', 'image/jpeg', 'application/pdf'];
 
 // Zoom: hasta 20 veces más cerca que "toda la pieza a la vista", y hasta 4
 // veces más lejos (para ver el molde con aire alrededor).
@@ -854,7 +854,7 @@ export function LienzoAnclaje({
     ev.preventDefault();
     setArchivoEncima(false);
     const archivo = imagenDe(ev);
-    onSoltarImagen(archivo, archivo ? null : 'Solo se puede soltar una imagen PNG o JPG.');
+    onSoltarImagen(archivo, archivo ? null : 'Solo se puede soltar una imagen PNG o JPG, o un PDF.');
   }
 
   if (!geo) {
@@ -1030,9 +1030,9 @@ export function LienzoAnclaje({
       </div>
       <div
         className="pointer-events-none absolute bottom-3 left-3 max-w-[calc(100%-150px)] truncate text-[10px] text-faint-foreground"
-        title={'Rueda: zoom · arrastrar el fondo: mover' + (aceptaImagen ? ' · soltá una imagen PNG/JPG para ponerla de diseño' : '')}
+        title={'Rueda: zoom · arrastrar el fondo: mover' + (aceptaImagen ? ' · soltá una imagen PNG/JPG o un PDF para ponerlo de diseño' : '')}
       >
-        Rueda: zoom · arrastrar el fondo: mover{aceptaImagen ? ' · soltá una imagen PNG/JPG para ponerla de diseño' : ''}
+        Rueda: zoom · arrastrar el fondo: mover{aceptaImagen ? ' · soltá una imagen PNG/JPG o un PDF para ponerlo de diseño' : ''}
       </div>
 
       {(archivoEncima || subiendoImagen) && (

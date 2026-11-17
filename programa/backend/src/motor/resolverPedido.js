@@ -198,6 +198,9 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         altoCm: dimension.altoCm,
         rotable: !!pieza.rotable,
         imagenDataUrl: diseno?.imagenesPorPieza?.[pieza.nombre] || null,
+        // Si el arte es un PDF (vectorial), su vista en PNG para la vista
+        // previa del navegador; el PDF de producción usa el PDF original.
+        imagenVistaUrl: diseno?.vistasPorPieza?.[pieza.nombre] || null,
         // Escala/alineación/corrimiento del arte elegidos en Diseño (ver
         // colocarArte.js). Sin ajuste guardado, el arte se estira a la pieza
         // como siempre.

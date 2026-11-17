@@ -308,21 +308,39 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // cambiar después); con uno elegido, se le suma o reemplaza esta pieza.
   async function ponerImagenEnPieza(archivo, motivoRechazo) {
     setErrorDiseno(null);
-    if (!archivo) { setErrorDiseno(motivoRechazo || 'Ese archivo no es una imagen PNG o JPG.'); return; }
+    if (!archivo) { setErrorDiseno(motivoRechazo || 'Ese archivo no es una imagen PNG, JPG ni un PDF.'); return; }
     if (!piezaActiva) return;
     const clave = piezaActiva;
     setSubiendoImagen(true);
     try {
-      const base64 = await new Promise((resolve, reject) => {
+      const aBase64 = (blob) => new Promise((resolve, reject) => {
         const lector = new FileReader();
         lector.onload = () => resolve(String(lector.result).split(',')[1]);
         lector.onerror = () => reject(new Error('No se pudo leer el archivo.'));
-        lector.readAsDataURL(archivo);
+        lector.readAsDataURL(blob);
       });
-      const url = await subirArchivo(base64, archivo.type, 'diseno-' + clave);
+      // Un PDF (vectorial) se guarda TAL CUAL -- es lo que va al PDF de
+      // producción -- y además una vista en PNG para poder verlo acá.
+      const esPdf = archivo.type === 'application/pdf';
+      let urlVista = null;
+      if (esPdf) {
+        const { vistaDePdf } = await import('../utilidades/vistaPdf.js');
+        let vista;
+        try { vista = await vistaDePdf(archivo); }
+        catch (e) { throw new Error('No se pudo leer el PDF (' + e.message + '). ¿Está protegido o dañado?'); }
+        urlVista = await subirArchivo(await aBase64(vista.blob), 'image/png', 'diseno-vista-' + clave);
+        if (vista.paginas > 1) setErrorDiseno('El PDF tiene ' + vista.paginas + ' páginas: se usa solo la primera.');
+      }
+      const url = await subirArchivo(await aBase64(archivo), archivo.type, 'diseno-' + clave);
+      const vistasNuevas = (vistas) => {
+        const r = { ...(vistas || {}) };
+        if (urlVista) r[clave] = urlVista; else delete r[clave];
+        return r;
+      };
       if (disenoSeleccionado) {
         const actualizado = await editarDiseno(disenoSeleccionado.id, {
           imagenesPorPieza: { ...(disenoSeleccionado.imagenesPorPieza || {}), [clave]: url },
+          vistasPorPieza: vistasNuevas(disenoSeleccionado.vistasPorPieza),
         });
         guardarDisenoLocal(actualizado);
       } else {
@@ -331,6 +349,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
           nombre: 'Diseño ' + (nombre.trim() || nombrePrendas || 'nuevo'),
           grupoIds,
           imagenesPorPieza: { [clave]: url },
+          vistasPorPieza: vistasNuevas(null),
         });
         guardarDisenoLocal(creado);
         setDisenoId(creado.id);
@@ -346,8 +365,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     if (!disenoSeleccionado) return;
     const { [clave]: _quitada, ...resto } = disenoSeleccionado.imagenesPorPieza || {};
     const { [clave]: _ajuste, ...restoAjustes } = disenoSeleccionado.ajusteArtePorPieza || {};
+    const { [clave]: _vista, ...restoVistas } = disenoSeleccionado.vistasPorPieza || {};
     try {
-      guardarDisenoLocal(await editarDiseno(disenoSeleccionado.id, { imagenesPorPieza: resto, ajusteArtePorPieza: restoAjustes }));
+      guardarDisenoLocal(await editarDiseno(disenoSeleccionado.id, { imagenesPorPieza: resto, ajusteArtePorPieza: restoAjustes, vistasPorPieza: restoVistas }));
       setAjusteArteLocal((prev) => { const { [clave]: _x, ...r } = prev; return r; });
     } catch (e) { setErrorDiseno(e.message); }
   }
@@ -980,7 +1000,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
               <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">Diseño</h3>
               <Ayuda>
                 El diseño es el arte real de esta prenda: una imagen por pieza. Para ponerla,
-                arrastrá la imagen (PNG o JPG) desde tu carpeta y soltala sobre el molde de la pieza
+                arrastrá la imagen (PNG o JPG) o un PDF con vectores desde tu carpeta y soltala sobre el molde de la pieza
                 en el lienzo de abajo. Si el producto no tiene diseño, se crea uno solo. También
                 podés reusar un diseño ya cargado de estas mismas prendas. Sin diseño, la pieza
                 sale en blanco en la vista previa y el PDF.
@@ -1011,7 +1031,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 ? 'Con imagen: ' + (Object.keys(disenoSeleccionado.imagenesPorPieza || {}).length
                     ? piezasDisponibles.filter((pd) => disenoSeleccionado.imagenesPorPieza?.[pd.clave]).map((pd) => pd.rol).join(', ')
                     : 'ninguna pieza todavía') + ' — arrastrá una imagen sobre el molde para sumar o cambiar la de esa pieza.'
-                : 'Arrastrá una imagen PNG o JPG sobre el molde de abajo para ponerle diseño a esa pieza.'}
+                : 'Arrastrá una imagen PNG o JPG, o un PDF vectorial, sobre el molde de abajo para ponerle diseño a esa pieza.'}
             </p>
             {grupoIds.length > 0 && (
               <PanelFondo fondo={fondoVigente} onCambiar={(f) => cambiarFondo(GENERAL, f)} deshabilitado={creandoDisenoFondo} />
@@ -1111,7 +1131,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 onElegirCandidato={elegirCandidato}
                 onArrastrarZona={moverZona}
                 senalServidor={resuelto}
-                imagenUrl={disenoSeleccionado?.imagenesPorPieza?.[piezaActiva]}
+                imagenUrl={disenoSeleccionado?.vistasPorPieza?.[piezaActiva] || disenoSeleccionado?.imagenesPorPieza?.[piezaActiva]}
                 borde={bordeContraste}
                 onSoltarImagen={ponerImagenEnPieza}
                 subiendoImagen={subiendoImagen}

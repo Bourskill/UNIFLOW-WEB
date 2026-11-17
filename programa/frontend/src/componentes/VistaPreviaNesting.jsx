@@ -64,7 +64,9 @@ function PiezaEnLienzo({ pieza, familias }) {
   const ancho = pieza.anchoCm * PX_POR_CM;
   const alto = pieza.altoCm * PX_POR_CM;
   const esRotada = pieza.rotacionGrados === 180;
-  const imagen = useImagenCargada(pieza.imagenDataUrl);
+  // Un arte en PDF trae su vista en PNG (el navegador no dibuja PDF); el PDF
+  // de producción usa el original, vectorial.
+  const imagen = useImagenCargada(pieza.imagenVistaUrl || pieza.imagenDataUrl);
   // Fondo de color del Diseño (sólido o degradado), debajo del arte -- mismo cálculo que el PDF (fondoPieza.js).
   const fondo = fondoActivo(pieza.fondo);
   const tieneContenidoReal = imagen || fondo || (pieza.textos && pieza.textos.length > 0);
