@@ -62,6 +62,22 @@ export function normalizarTexto(texto) {
     .trim();
 }
 
+// Límites del estilo que se puede elegir en la zona (y que acepta la API).
+export const ESPACIADO_MIL = { min: -200, max: 500 };
+export const CONTORNO_MAX_CM = 3;
+
+function limitarEspaciado(mil) {
+  const n = Number(mil);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(Math.max(n, ESPACIADO_MIL.min), ESPACIADO_MIL.max);
+}
+
+function limitarContorno(cm) {
+  const n = Number(cm);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(n, CONTORNO_MAX_CM);
+}
+
 function limitarCuerpo(cm) {
   if (!(cm > 0)) return 0.01;
   return Math.min(cm, CUERPO_MAXIMO_CM);
@@ -213,7 +229,21 @@ export function calibrarCuerpo({ medidor, candidatos, anchoCm, altoCm, reglas = 
  * creciendo hacia ABAJO (igual que zonas y lienzo) -- la base queda debajo
  * del centro de la zona exactamente la mitad de la banda de mayúsculas.
  */
-export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCalibradoCm = null, reglas = REGLAS_TEXTO }) {
+export function ajustarTexto({
+  medidor, texto, anchoCm, altoCm, modo, cuerpoCalibradoCm = null, reglas = REGLAS_TEXTO,
+  espaciadoMil = 0, contornoCm = 0,
+}) {
+  // Estilo elegido en la zona (panel de Diseño): el espaciado entre letras
+  // es el punto de partida del tracking, y el contorno de color ocupa
+  // espacio por fuera de la letra -- un nombre o texto deja ese margen
+  // adentro de su zona para no salirse con el borde puesto. Un número no:
+  // va a alto completo igual (su contorno desborda como sus cifras redondas).
+  const espaciado = limitarEspaciado(espaciadoMil);
+  const contorno = limitarContorno(contornoCm);
+  if (modo !== 'calibrado' && contorno > 0) {
+    anchoCm = Math.max(anchoCm - 2 * contorno, 0.01);
+    altoCm = Math.max(altoCm - 2 * contorno, 0.01);
+  }
   const valor = normalizarTexto(texto);
   if (valor === '' || !(anchoCm > 0) || !(altoCm > 0)) return null;
   const glifos = medidor.glifos(valor);
@@ -222,7 +252,9 @@ export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCali
   const esNumero = modo === 'calibrado';
   const banda = bandaDe(medidor, modo);
   const alturaBanda = banda.maxY - banda.minY;
-  const ancho1 = medirTinta(glifos, 1, 0, 100).ancho;
+  // Medido YA con el espaciado elegido: si no, un nombre con letras más
+  // abiertas no entraría y perdería su espaciado en el primer paso.
+  const ancho1 = medirTinta(glifos, 1, espaciado, 100).ancho;
   const pasos = [];
 
   let cuerpo;
@@ -236,7 +268,7 @@ export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCali
     pasos.push('al alto de la zona: ' + cuerpo.toFixed(2) + ' cm');
   }
   const nominal = cuerpo;
-  let tracking = 0;
+  let tracking = espaciado;
   let escalaH = 100;
   let tinta = medirTinta(glifos, cuerpo, tracking, escalaH);
   // El alto se compara por la BANDA (mayúsculas, o cifras planas), no por la
@@ -266,8 +298,10 @@ export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCali
   };
 
   // Paso 1: tracking negativo.
-  if (!cabe() && reglas.trackingMinimo < 0 && tinta.ancho > anchoCm) {
-    tracking = reglas.trackingMinimo;
+  // (Con un espaciado propio más abierto que eso, se cierra hasta el mínimo
+  // antes de achicar la letra: que el nombre entre manda sobre el estilo.)
+  if (!cabe() && tracking > reglas.trackingMinimo && tinta.ancho > anchoCm) {
+    tracking = Math.min(tracking, reglas.trackingMinimo);
     pasos.push('tracking ' + tracking);
     remedir();
   }
@@ -354,6 +388,8 @@ export async function ajustarTextosDePiezas(piezas, obtenerMedidor, reglas = REG
         modo: t.modo,
         cuerpoCalibradoCm: t.modo === 'calibrado' ? cuerpoPorZona.get(grupoDeCalibracion(t)) : null,
         reglas,
+        espaciadoMil: t.espaciadoMil || 0,
+        contornoCm: t.contorno?.grosorCm || 0,
       });
       // El texto que se escribe en el PDF es el mismo que se midió.
       return { ...t, texto: ajuste ? ajuste.texto : t.texto, fuenteUrl, ajuste };

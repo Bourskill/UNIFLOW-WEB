@@ -152,6 +152,12 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             colorHex: cruda?.colorHex || '#000000',
             rotacionGrados: cruda?.rotacion || 0,
             fuenteUrl: fuente?.archivoUrl || null,
+            // Estilo de la zona (panel de Diseño): espaciado entre letras en
+            // milésimas de em, y un contorno de color por fuera de la letra.
+            espaciadoMil: Number(cruda?.espaciadoMil) || 0,
+            contorno: cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0
+              ? { colorHex: cruda.contorno.colorHex || '#000000', grosorCm: Number(cruda.contorno.grosorCm) }
+              : null,
           };
         })
         .filter(Boolean);

@@ -105,6 +105,53 @@ console.log('\n--- El cuerpo común ya no depende de los datos: un número largu
   const sinDatos = calibrarCuerpo({ medidor, candidatos: [], anchoCm: 10, altoCm: 12 });
   comprobar('sin candidatos no inventa un cuerpo (null)', sinDatos === null);
 }
+console.log('\n--- Estilo de la zona: espaciado entre letras ---');
+{
+  const normal = ajustarTexto({ medidor, texto: 'GIL', anchoCm: 40, altoCm: 5, modo: 'llenar' });
+  const abierto = ajustarTexto({ medidor, texto: 'GIL', anchoCm: 40, altoCm: 5, modo: 'llenar', espaciadoMil: 200 });
+  comprobar('el espaciado elegido se usa como tracking', abierto.trackingMil === 200, String(abierto.trackingMil));
+  comprobar('con letras más abiertas el texto es más ancho, al mismo alto', abierto.tintaCm.ancho > normal.tintaCm.ancho && cerca(abierto.cuerpoCm, normal.cuerpoCm, 1e-9));
+  const angosto = ajustarTexto({ medidor, texto: 'HERNANDEZ', anchoCm: 12, altoCm: 5, modo: 'llenar', espaciadoMil: 300 });
+  comprobar('si con ese espaciado no entra, igual termina dentro del ancho', angosto.tintaCm.ancho <= 12.02, String(angosto.tintaCm.ancho));
+  const numero = ajustarTexto({ medidor, texto: '10', anchoCm: 20, altoCm: 12, modo: 'calibrado', espaciadoMil: -100 });
+  const numeroNormal = ajustarTexto({ medidor, texto: '10', anchoCm: 20, altoCm: 12, modo: 'calibrado' });
+  comprobar('un número también lo usa, sin perder su alto completo', numero.trackingMil === -100 && cerca(numero.cuerpoCm, numeroNormal.cuerpoCm, 1e-9));
+  comprobar('un espaciado fuera de rango se acota', ajustarTexto({ medidor, texto: 'GIL', anchoCm: 40, altoCm: 5, modo: 'llenar', espaciadoMil: 99999 }).trackingMil <= 500);
+}
+
+console.log('\n--- Estilo de la zona: contorno de color ---');
+{
+  const sin = ajustarTexto({ medidor, texto: 'GIL', anchoCm: 25, altoCm: 5, modo: 'llenar' });
+  const con = ajustarTexto({ medidor, texto: 'GIL', anchoCm: 25, altoCm: 5, modo: 'llenar', contornoCm: 0.3 });
+  comprobar('un nombre con contorno deja ese margen adentro de la zona (letra + borde = alto de la zona)',
+    cerca(con.cuerpoCm * altoBanda + 2 * 0.3, 5, 0.01), String(con.cuerpoCm * altoBanda + 0.6));
+  comprobar('por eso sale un poco más chico que sin contorno', con.cuerpoCm < sin.cuerpoCm);
+  const n = ajustarTexto({ medidor, texto: '10', anchoCm: 20, altoCm: 12, modo: 'calibrado', contornoCm: 0.3 });
+  const nSin = ajustarTexto({ medidor, texto: '10', anchoCm: 20, altoCm: 12, modo: 'calibrado' });
+  comprobar('un número con contorno NO se achica (su alto completo manda)', cerca(n.cuerpoCm, nSin.cuerpoCm, 1e-9));
+}
+
+console.log('\n--- El contorno llega al PDF: trazo por debajo, relleno encima ---');
+{
+  const pieza = {
+    id: 'p0', piezaId: 'Espalda', talla: 'm', anchoCm: 50, altoCm: 70, posicion: { x: 0, y: 0 }, rotacionGrados: 0, imagenes: [],
+    textos: [{ texto: 'PEÑA', cxCm: 25, cyCm: 10, anchoCm: 30, altoCm: 5, xCm: 0, yCm: 0, modo: 'llenar', zonaClave: 'n|m',
+      colorHex: '#ffffff', rotacionGrados: 0, fuenteUrl: null, espaciadoMil: 50, contorno: { colorHex: '#ff0000', grosorCm: 0.3 } }],
+  };
+  const [conAjuste] = await ajustarTextosDePiezas([pieza], obtenerMedidor);
+  comprobar('el ajuste del pedido usa el espaciado de la zona', conAjuste.textos[0].ajuste.trackingMil === 50);
+  const bytes = await generarPdfNesting({ anchoLienzoCm: 60, altoLienzoCm: 80, piezas: [{ ...conAjuste, imagenDataUrl: null }] });
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: false }).promise;
+  const pagina = await doc.getPage(1);
+  const items = (await pagina.getTextContent()).items.filter((i) => i.str === 'PEÑA');
+  comprobar('el texto se escribe dos veces (contorno + relleno), en el mismo lugar', items.length === 2 &&
+    cerca(items[0].transform[4], items[1].transform[4], 0.01) && cerca(items[0].transform[5], items[1].transform[5], 0.01), String(items.length));
+  const ops = await pagina.getOperatorList();
+  const modos = ops.fnArray.map((f, i) => (f === pdfjs.OPS.setTextRenderingMode ? ops.argsArray[i][0] : null)).filter((m) => m !== null);
+  comprobar('la primera pasada es solo trazo (modo 1, contorno)', modos.includes(1), JSON.stringify(modos));
+  const anchos = ops.fnArray.map((f, i) => (f === pdfjs.OPS.setLineWidth ? ops.argsArray[i][0] : null)).filter((w) => w !== null);
+  comprobar('con el doble del grosor (la mitad de adentro la tapa el relleno)', anchos.some((w) => cerca(w, 2 * 0.3 * 28.3465, 0.05)), JSON.stringify(anchos));
+}
 
 console.log('\n--- Sin nada que ajustar: null, nunca un número inventado ---');
 {

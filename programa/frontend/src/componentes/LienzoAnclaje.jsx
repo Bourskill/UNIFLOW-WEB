@@ -245,17 +245,37 @@ function medidaLogoAjustada({ cruz, lado, ancho, alto, natural }) {
 // escala horizontal ya resueltos por el backend con las medidas reales de la
 // fuente. Se dibuja por su línea de base, sin kerning (pdf-lib tampoco lo
 // aplica) para que el ancho coincida con el impreso.
+// ¿Un color es claro? (para elegir con qué halo se distingue del lienzo
+// oscuro cuando el texto no tiene contorno propio).
+function esClaro(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return true;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return 0.299 * r + 0.587 * g + 0.114 * b > 140;
+}
+
 function TextoAjustado({ z, ajuste, familia }) {
   const x = z.cx + ajuste.dxCm;
   const y = z.cy + ajuste.dyCm;
   const h = ajuste.escalaH / 100;
+  // Con el color real del texto y su contorno, como sale en el PDF: el
+  // trazo va POR DEBAJO (paint-order) con el doble del grosor, así lo que
+  // se ve es exactamente el grosor elegido por fuera de la letra. Sin
+  // contorno, un halo finito solo para que se lea sobre el lienzo.
+  const contorno = z.contorno && Number(z.contorno.grosorCm) > 0 ? z.contorno : null;
+  const color = z.colorHex || '#e6e9f0';
   return (
     <text
       x={x} y={y}
       fontSize={ajuste.cuerpoCm} fontFamily={familia}
       style={{ letterSpacing: ajuste.trackingMil / 1000 + 'em', fontKerning: 'none' }}
       transform={h !== 1 ? 'translate(' + x + ' ' + y + ') scale(' + h + ' 1) translate(' + -x + ' ' + -y + ')' : undefined}
-      fill="#e6e9f0" stroke="#0d0f14" strokeWidth={ajuste.cuerpoCm / 40} paintOrder="stroke"
+      fill={color}
+      stroke={contorno ? contorno.colorHex : (esClaro(color) ? '#0d0f14' : 'rgba(230,233,240,0.6)')}
+      strokeWidth={contorno ? 2 * Number(contorno.grosorCm) : ajuste.cuerpoCm / 40}
+      strokeLinejoin="round"
+      paintOrder="stroke"
     >
       {ajuste.texto ?? z.contenidoTexto}
     </text>
@@ -269,6 +289,10 @@ function pedidoDeAjuste(z) {
   return {
     id: z.id, texto: z.contenidoTexto, anchoCm: z.ancho, altoCm: z.alto,
     modo: z.campoPedido === 'numero' ? 'calibrado' : 'llenar', fuenteUrl: z.fuenteUrl || null,
+    // El estilo cambia el ajuste (letras más abiertas, o el margen que deja
+    // el contorno): va en el pedido para que el backend lo tenga en cuenta.
+    espaciadoMil: z.espaciadoMil || 0,
+    contornoCm: z.contorno ? Number(z.contorno.grosorCm) || 0 : 0,
   };
 }
 

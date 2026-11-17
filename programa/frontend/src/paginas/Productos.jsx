@@ -18,6 +18,7 @@ import { ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { InputNumero } from '../componentes/InputNumero.jsx';
 import { PanelDock } from '../componentes/PanelDock.jsx';
+import { PanelTexto } from '../componentes/PanelTexto.jsx';
 import { LienzoAnclaje, COLOR } from '../componentes/LienzoAnclaje.jsx';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
 
@@ -749,6 +750,10 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       // tipografía elegida -- sin ninguna, el lienzo usa la de base.
       contenidoTexto: z.tipo === 'logo' ? null : ((cruda?.campoPedido === 'fijo' ? cruda?.valorFijo : cruda?.valorEjemplo) || null),
       fuenteUrl: cruda?.fuenteId ? (fuentes.find((f) => f.id === cruda.fuenteId)?.archivoUrl || null) : null,
+      // Estilo del texto, para verlo en el lienzo igual que en el PDF.
+      colorHex: cruda?.colorHex || '#ffffff',
+      espaciadoMil: Number(cruda?.espaciadoMil) || 0,
+      contorno: cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0 ? cruda.contorno : null,
     };
   });
 
@@ -1464,6 +1469,10 @@ function PanelZona({ zona, fuentes, anclasDisponibles, anclasResueltas, onRenomb
         )}
       </div>
 
+      {/* Fuente, color, espaciado, orientación y borde -- todo el estilo del
+          texto junto, justo debajo de qué texto lleva la zona. */}
+      {zona.tipo !== 'logo' && <PanelTexto zona={zona} fuentes={fuentes} onActualizar={onActualizar} />}
+
       <div className="flex flex-col gap-2 border-t border-border pt-3">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-semibold text-faint-foreground">Repetir en otra zona</span>
@@ -1535,7 +1544,8 @@ function PanelZona({ zona, fuentes, anclasDisponibles, anclasResueltas, onRenomb
         <span className="text-xs font-semibold text-faint-foreground">Corrección</span>
         <LineaMedida etiqueta="Mover X" valor={zona.offset.x} onCambiar={(m) => onActualizar({ offset: { ...zona.offset, x: m } })} />
         <LineaMedida etiqueta="Mover Y" valor={zona.offset.y} onCambiar={(m) => onActualizar({ offset: { ...zona.offset, y: m } })} />
-        <div className="flex items-center gap-2">
+        {/* En una zona de texto el giro está en "Texto · Orientación". */}
+        {zona.tipo === 'logo' && <div className="flex items-center gap-2">
           <span className="w-24 flex-none text-xs text-muted-foreground" title="Grados positivos giran en sentido antihorario, igual que en Illustrator y en el PDF">Girar ↺</span>
           <InputNumero className="w-20" step={1} value={zona.rotacion || 0}
             onChange={(n) => onActualizar({ rotacion: n })} />
@@ -1546,31 +1556,9 @@ function PanelZona({ zona, fuentes, anclasDisponibles, anclasResueltas, onRenomb
               {g}°
             </button>
           ))}
-        </div>
+        </div>}
       </div>
 
-      {zona.tipo !== 'logo' && (
-        <div className="flex items-center gap-2 border-t border-border pt-3">
-          <span className="text-xs text-muted-foreground">Color del texto</span>
-          <input type="color" className="h-8 w-8 rounded border border-border" value={zona.colorHex} onChange={(e) => onActualizar({ colorHex: e.target.value })} />
-          <Ayuda>Con qué color se imprime este nombre/número/texto de verdad, en el PDF final (sublimación).</Ayuda>
-        </div>
-      )}
-
-      {zona.tipo !== 'logo' && (
-        <div className="flex items-center gap-2 border-t border-border pt-3">
-          <span className="text-xs text-muted-foreground">Fuente</span>
-          <Select className="max-w-[180px]" value={zona.fuenteId || ''} onChange={(e) => onActualizar({ fuenteId: e.target.value || null })}>
-            <option value="">Arimo Bold (base)</option>
-            {fuentes.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.nombre}{!f.coberturaCompleta ? ' (sin ñ/acentos)' : ''}
-              </option>
-            ))}
-          </Select>
-          <Ayuda>Tipografías propias se cargan en Moldería → Fuentes.</Ayuda>
-        </div>
-      )}
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
 import { geometriaDelGrupo, geometriaParaAnclaje } from '../motor/geometriaAnclaje.js';
 import { generarDxfNesting } from '../motor/exportarDxf.js';
 import { verificarCobertura, CARACTERES_CRITICOS } from '../motor/fuentes.js';
-import { ajustarTexto, ajustarTextosDePiezas, calibrarCuerpo, advertenciasDeTextos, REGLAS_TEXTO } from '../motor/ajusteTexto.js';
+import { ajustarTexto, ajustarTextosDePiezas, calibrarCuerpo, advertenciasDeTextos, REGLAS_TEXTO, ESPACIADO_MIL, CONTORNO_MAX_CM } from '../motor/ajusteTexto.js';
 import { obtenerMedidor, bytesFuenteBase } from '../motor/medidorFuentes.js';
 import fontkit from '@pdf-lib/fontkit';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
@@ -289,6 +289,13 @@ router.post('/texto/ajustar', async (req, res) => {
         !medidaValida(z.anchoCm) || !medidaValida(z.altoCm) || (z.fuenteUrl != null && typeof z.fuenteUrl !== 'string')) {
       return res.status(400).json({ error: 'Una zona no es válida: necesita id, texto (hasta ' + MAX_LARGO_TEXTO + ' caracteres) y anchoCm/altoCm positivos' });
     }
+    // Estilo opcional: espaciado entre letras y grosor del contorno.
+    if ((z.espaciadoMil != null && !(Number.isFinite(z.espaciadoMil) && z.espaciadoMil >= ESPACIADO_MIL.min && z.espaciadoMil <= ESPACIADO_MIL.max)) ||
+        (z.contornoCm != null && !(Number.isFinite(z.contornoCm) && z.contornoCm >= 0 && z.contornoCm <= CONTORNO_MAX_CM))) {
+      return res.status(400).json({
+        error: 'Estilo de texto no válido: espaciado entre ' + ESPACIADO_MIL.min + ' y ' + ESPACIADO_MIL.max + ', contorno entre 0 y ' + CONTORNO_MAX_CM + ' cm',
+      });
+    }
   }
   const ajustes = {};
   for (const z of zonas) {
@@ -299,7 +306,10 @@ router.post('/texto/ajustar', async (req, res) => {
       : null;
     ajustes[z.id] = {
       fuenteUrl,
-      ajuste: ajustarTexto({ medidor, texto: z.texto, anchoCm: z.anchoCm, altoCm: z.altoCm, modo, cuerpoCalibradoCm }),
+      ajuste: ajustarTexto({
+        medidor, texto: z.texto, anchoCm: z.anchoCm, altoCm: z.altoCm, modo, cuerpoCalibradoCm,
+        espaciadoMil: z.espaciadoMil || 0, contornoCm: z.contornoCm || 0,
+      }),
     };
   }
   res.json({ ajustes });

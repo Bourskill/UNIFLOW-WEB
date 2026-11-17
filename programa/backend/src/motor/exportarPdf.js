@@ -11,6 +11,7 @@ import {
   pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath,
   beginText, endText, setFontAndSize, setFillingColor, showText,
   setCharacterSpacing, setCharacterSqueeze, rotateAndSkewTextRadiansAndTranslate,
+  setStrokingColor, setLineWidth, setLineJoin, LineJoinStyle, setTextRenderingMode, TextRenderingMode,
 } from 'pdf-lib';
 import ClipperLib from 'clipper-lib';
 import fontkit from '@pdf-lib/fontkit';
@@ -238,7 +239,12 @@ export async function generarPdfNesting(resultadoNesting) {
             // calculado para OTRA letra no sirve, se vuelve a ajustar con la
             // de base en vez de imprimir mal medido.
             const { medidor } = await obtenerMedidor(null);
-            a = ajustarTexto({ medidor, texto: texto.texto, anchoCm: texto.anchoCm, altoCm: texto.altoCm, modo: 'llenar' }) || a;
+            a = ajustarTexto({
+              medidor, texto: texto.texto, anchoCm: texto.anchoCm, altoCm: texto.altoCm,
+              // Con su modo real: un número sigue yendo a alto completo.
+              modo: texto.modo === 'calibrado' ? 'calibrado' : 'llenar',
+              espaciadoMil: texto.espaciadoMil || 0, contornoCm: texto.contorno?.grosorCm || 0,
+            }) || a;
           }
         }
         const rad = ((texto.rotacionGrados || 0) * Math.PI) / 180;
@@ -253,6 +259,34 @@ export async function generarPdfNesting(resultadoNesting) {
         const tamanoPt = a.cuerpoCm * CM_A_PUNTOS;
 
         pagina.setFont(fontElegida);
+        const textoCodificado = fontElegida.encodeText(a.texto ?? texto.texto);
+        const operadoresDeTexto = () => [
+          beginText(),
+          setFontAndSize(pagina.fontKey, tamanoPt),
+          setCharacterSpacing((a.trackingMil / 1000) * tamanoPt),
+          setCharacterSqueeze(a.escalaH),
+          rotateAndSkewTextRadiansAndTranslate(rad, 0, 0, x, y),
+          showText(textoCodificado),
+          endText(),
+        ];
+
+        // Contorno de color (estilo de la zona): primero el trazo, con el
+        // DOBLE del grosor elegido y esquinas redondeadas -- la mitad de
+        // adentro queda tapada por el relleno de la pasada siguiente, así
+        // que lo que se ve es exactamente "grosor" por FUERA de la letra.
+        if (texto.contorno && texto.contorno.grosorCm > 0) {
+          const borde = hexARgb(texto.contorno.colorHex);
+          pagina.pushOperators(
+            pushGraphicsState(),
+            setStrokingColor(rgb(borde.r, borde.g, borde.b)),
+            setLineWidth(2 * texto.contorno.grosorCm * CM_A_PUNTOS),
+            setLineJoin(LineJoinStyle.Round),
+            setTextRenderingMode(TextRenderingMode.Outline),
+            ...operadoresDeTexto(),
+            popGraphicsState()
+          );
+        }
+
         pagina.pushOperators(
           pushGraphicsState(),
           setFillingColor(rgb(color.r, color.g, color.b)),
