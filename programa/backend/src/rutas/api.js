@@ -309,6 +309,7 @@ router.post('/texto/ajustar', async (req, res) => {
       ajuste: ajustarTexto({
         medidor, texto: z.texto, anchoCm: z.anchoCm, altoCm: z.altoCm, modo, cuerpoCalibradoCm,
         espaciadoMil: z.espaciadoMil || 0, contornoCm: z.contornoCm || 0,
+        alineacion: ['izquierda', 'derecha'].includes(z.alineacion) ? z.alineacion : 'centro',
       }),
     };
   }

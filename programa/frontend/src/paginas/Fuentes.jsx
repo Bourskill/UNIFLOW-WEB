@@ -4,6 +4,7 @@ import { crearFuente, eliminarFuente, buscarEnBancoDeFuentes, agregarFuenteDelBa
 import { obtener } from '../datos/index.js';
 import { useFuentesWeb, cssDeFamilia } from '../componentes/useFuentesWeb.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
+import { NOMBRE_PESO, urlDeMuestra } from '../utilidades/bancoFuentes.js';
 
 function leerArchivoComoBase64(archivo) {
   return new Promise((resolve, reject) => {
@@ -15,15 +16,6 @@ function leerArchivoComoBase64(archivo) {
 }
 
 const TIPO_MIME_POR_EXTENSION = { ttf: 'font/ttf', otf: 'font/otf' };
-const NOMBRE_PESO = { 100: 'Thin', 200: 'ExtraLight', 300: 'Light', 400: 'Regular', 500: 'Medium', 600: 'SemiBold', 700: 'Bold', 800: 'ExtraBold', 900: 'Black' };
-
-// Mismo archivo que baja el backend (.ttf) pero en woff2, que es el que el
-// navegador carga más liviano -- solo para MOSTRAR cómo se ve la fuente antes
-// de agregarla; al agregarla, el backend baja y guarda el .ttf real.
-function urlDeMuestra(id, peso) {
-  return 'https://cdn.jsdelivr.net/fontsource/fonts/' + id + '@latest/latin-' + peso + '-normal.woff2';
-}
-
 const TEXTO_DE_PRUEBA = 'PEÑA 10';
 
 // Catálogo de tipografías propias para nombre/número/texto fijo de una zona

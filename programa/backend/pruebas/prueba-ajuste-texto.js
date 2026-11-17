@@ -131,6 +131,32 @@ console.log('\n--- Estilo de la zona: contorno de color ---');
   comprobar('un número con contorno NO se achica (su alto completo manda)', cerca(n.cuerpoCm, nSin.cuerpoCm, 1e-9));
 }
 
+console.log('\n--- Alineación: el texto arranca desde la izquierda, el centro o la derecha de su zona ---');
+{
+  const W = 30, H = 5;
+  // La tinta va de (dxCm + izq) a (dxCm + der) respecto del centro de la zona.
+  const bordes = (r) => {
+    const g = medidor.glifos(r.texto);
+    const t = r.trackingMil / 1000, h = r.escalaH / 100;
+    const izq = Math.min(...g.map((x) => (x.izq + x.indice * t) * h)) * r.cuerpoCm;
+    const der = Math.max(...g.map((x) => (x.der + x.indice * t) * h)) * r.cuerpoCm;
+    return { izq: r.dxCm + izq, der: r.dxCm + der };
+  };
+  const izq = bordes(ajustarTexto({ medidor, texto: 'GIL', anchoCm: W, altoCm: H, modo: 'llenar', alineacion: 'izquierda' }));
+  const cen = bordes(ajustarTexto({ medidor, texto: 'GIL', anchoCm: W, altoCm: H, modo: 'llenar' }));
+  const der = bordes(ajustarTexto({ medidor, texto: 'GIL', anchoCm: W, altoCm: H, modo: 'llenar', alineacion: 'derecha' }));
+  comprobar('a la izquierda: la tinta arranca en el borde izquierdo de la zona', cerca(izq.izq, -W / 2, 1e-6), JSON.stringify(izq));
+  comprobar('al centro (por defecto): centrada', cerca(cen.izq + cen.der, 0, 1e-6), JSON.stringify(cen));
+  comprobar('a la derecha: termina en el borde derecho', cerca(der.der, W / 2, 1e-6), JSON.stringify(der));
+  // Con borde de color, la que toca el borde de la zona es la línea del borde.
+  const conBorde = bordes(ajustarTexto({ medidor, texto: 'GIL', anchoCm: W, altoCm: H, modo: 'llenar', alineacion: 'izquierda', contornoCm: 0.3 }));
+  comprobar('con borde, la letra queda a "grosor" del borde izquierdo', cerca(conBorde.izq, -W / 2 + 0.3, 1e-6), JSON.stringify(conBorde));
+  // Un número ancho alineado a la izquierda se sale solo por la derecha.
+  const n = bordes(ajustarTexto({ medidor, texto: '10', anchoCm: 6, altoCm: 12, modo: 'calibrado', alineacion: 'izquierda' }));
+  comprobar('un número ancho a la izquierda se sale solo por la derecha', cerca(n.izq, -3, 1e-6) && n.der > 3, JSON.stringify(n));
+}
+
+
 console.log('\n--- El contorno llega al PDF: trazo por debajo, relleno encima ---');
 {
   const pieza = {

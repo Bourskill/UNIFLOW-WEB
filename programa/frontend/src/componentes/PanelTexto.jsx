@@ -1,14 +1,16 @@
-import { useState } from 'react';
-import { URL_FUENTE_BASE } from '../api.js';
+import { useEffect, useState } from 'react';
+import { URL_FUENTE_BASE, buscarEnBancoDeFuentes, agregarFuenteDelBanco } from '../api.js';
+import { confirmarGuardado } from '../datos/index.js';
+import { NOMBRE_PESO, urlDeMuestra } from '../utilidades/bancoFuentes.js';
 import { useFuentesWeb, cssDeFamilia } from './useFuentesWeb.js';
 import { InputNumero } from './InputNumero.jsx';
 import { Ayuda } from './ui.jsx';
 
 // Estilo del texto de una zona (nombre, número o texto fijo): fuente, color,
-// espaciado entre letras, orientación y contorno de color. Todo lo que se
-// elige acá llega igual al lienzo y al PDF (backend: ajusteTexto.js y
-// exportarPdf.js) -- el espaciado y el contorno cambian además cuánto entra
-// el texto en su zona.
+// espaciado entre letras, alineación y borde de color. Todo lo que se elige
+// acá llega igual al lienzo y al PDF (backend: ajusteTexto.js y
+// exportarPdf.js) -- el espaciado y el borde cambian además cuánto entra el
+// texto en su zona.
 
 // Mismos límites que acepta el backend (ajusteTexto.js·ESPACIADO_MIL / CONTORNO_MAX_CM).
 const ESPACIADO = { min: -200, max: 500 };
@@ -17,11 +19,10 @@ const CONTORNO_MAX_CM = 3;
 // Colores de uso más común en camisetas, para no abrir el selector cada vez.
 const COLORES_RAPIDOS = ['#ffffff', '#000000', '#d32f2f', '#1565c0', '#fbc02d', '#2e7d32', '#ef6c00', '#6a1b9a', '#9e9e9e', '#c9a227'];
 
-const ORIENTACIONES = [
-  { grados: 0, etiqueta: 'Horizontal', icono: 'A→' },
-  { grados: 90, etiqueta: 'Hacia arriba', icono: '↑' },
-  { grados: 270, etiqueta: 'Hacia abajo', icono: '↓' },
-  { grados: 180, etiqueta: 'Invertido', icono: '↻' },
+const ALINEACIONES = [
+  { valor: 'izquierda', etiqueta: 'Izquierda' },
+  { valor: 'centro', etiqueta: 'Centro' },
+  { valor: 'derecha', etiqueta: 'Derecha' },
 ];
 
 const CONTORNO_POR_DEFECTO = { activo: false, colorHex: '#000000', grosorCm: 0.2 };
@@ -60,21 +61,87 @@ function SelectorColor({ valor, onCambiar, etiqueta }) {
   );
 }
 
+// Iconito de alineación: tres renglones alineados como el texto.
+function IconoAlineacion({ valor }) {
+  const anchos = [14, 9, 12];
+  const x = (w) => (valor === 'izquierda' ? 1 : valor === 'derecha' ? 15 - w : (16 - w) / 2);
+  return (
+    <svg width="16" height="12" viewBox="0 0 16 12" aria-hidden="true">
+      {anchos.map((w, i) => <rect key={i} x={x(w)} y={i * 4.5} width={w} height="2" rx="1" fill="currentColor" />)}
+    </svg>
+  );
+}
+
 // Selector de fuente con vista previa: cada opción se dibuja CON su propia
-// letra (la misma que mide el backend y escribe el PDF), mostrando el texto
-// de ejemplo de la zona -- se elige viendo, no leyendo nombres.
-function SelectorFuente({ fuentes, fuenteId, muestra, onElegir }) {
+// letra, mostrando el texto de ejemplo de la zona. Lista primero las del
+// catálogo propio y, abajo, el banco gratuito (Fontsource) con buscador --
+// elegir una del banco la trae sola al catálogo (sin pasar por Moldería →
+// Fuentes) y la deja puesta en la zona.
+function SelectorFuente({ fuentes, fuenteId, muestra, onElegir, onFuenteAgregada }) {
   const [abierto, setAbierto] = useState(false);
   const [busqueda, setBusqueda] = useState('');
-  const opciones = [
+  const [banco, setBanco] = useState(null); // { total, fuentes }
+  const [buscandoBanco, setBuscandoBanco] = useState(false);
+  const [agregando, setAgregando] = useState(null); // id de banco
+  const [error, setError] = useState(null);
+
+  const propias = [
     { id: '', nombre: 'Arimo Bold (base)', archivoUrl: URL_FUENTE_BASE, coberturaCompleta: true },
     ...fuentes,
   ];
-  const actual = opciones.find((f) => f.id === (fuenteId || '')) || opciones[0];
-  // Solo se cargan todas las tipografías al abrir la lista (no por cada zona).
-  const familias = useFuentesWeb(abierto ? opciones.map((f) => f.archivoUrl) : [actual.archivoUrl]);
-  const familiaDe = (f) => (familias[f.archivoUrl] ? cssDeFamilia(familias[f.archivoUrl]) : 'sans-serif');
-  const filtradas = opciones.filter((f) => !busqueda.trim() || f.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()));
+  const actual = propias.find((f) => f.id === (fuenteId || '')) || propias[0];
+  const texto = busqueda.trim().toLowerCase();
+  const propiasFiltradas = propias.filter((f) => !texto || f.nombre.toLowerCase().includes(texto));
+
+  // El banco se consulta al abrir y con cada búsqueda (con un respiro).
+  useEffect(() => {
+    if (!abierto) return undefined;
+    let vigente = true;
+    setBuscandoBanco(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await buscarEnBancoDeFuentes({ q: busqueda.trim(), pagina: 0 });
+        if (vigente) { setBanco(r); setError(null); }
+      } catch (e) {
+        if (vigente) setError('No se pudo consultar el banco de fuentes: ' + e.message);
+      } finally {
+        if (vigente) setBuscandoBanco(false);
+      }
+    }, 300);
+    return () => { vigente = false; clearTimeout(t); };
+  }, [abierto, busqueda]);
+
+  // Del banco, las que todavía NO están en el catálogo con ese mismo peso.
+  const delBanco = (banco?.fuentes || []).filter(
+    (b) => !fuentes.some((f) => f.fontsourceId === b.id && f.peso === b.pesoPorDefecto)
+  );
+
+  // Solo se cargan las tipografías al abrir la lista (no por cada zona).
+  const urls = abierto
+    ? [...propias.map((f) => f.archivoUrl), ...delBanco.map((b) => urlDeMuestra(b.id, b.pesoPorDefecto))]
+    : [actual.archivoUrl];
+  const familias = useFuentesWeb(urls);
+  const estiloDe = (url) => (familias[url] ? { fontFamily: cssDeFamilia(familias[url]) } : { opacity: 0.35 });
+
+  async function elegirDelBanco(b) {
+    setAgregando(b.id);
+    setError(null);
+    try {
+      const registro = await agregarFuenteDelBanco({ id: b.id, peso: b.pesoPorDefecto });
+      confirmarGuardado('fuentes', registro);
+      onFuenteAgregada?.(registro);
+      onElegir(registro.id);
+      setAbierto(false);
+      setBusqueda('');
+    } catch (e) {
+      // Ya estaba en el catálogo (otra pestaña la agregó): se usa esa.
+      const existente = fuentes.find((f) => f.fontsourceId === b.id && f.peso === b.pesoPorDefecto);
+      if (existente) { onElegir(existente.id); setAbierto(false); }
+      else setError(e.message);
+    } finally {
+      setAgregando(null);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -83,7 +150,7 @@ function SelectorFuente({ fuentes, fuenteId, muestra, onElegir }) {
         className={'flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ' +
           (abierto ? 'border-primary bg-primary-soft/40' : 'border-border bg-surface hover:border-primary/50')}
       >
-        <span className="min-w-0 flex-1 truncate text-xl leading-tight text-foreground" style={{ fontFamily: familiaDe(actual) }}>
+        <span className="min-w-0 flex-1 truncate text-xl leading-tight text-foreground" style={estiloDe(actual.archivoUrl)}>
           {muestra}
         </span>
         <span className="flex flex-col items-end">
@@ -91,27 +158,28 @@ function SelectorFuente({ fuentes, fuenteId, muestra, onElegir }) {
           <span className="text-[10px] text-faint-foreground">{abierto ? 'cerrar ▴' : 'cambiar ▾'}</span>
         </span>
       </button>
+
       {abierto && (
         <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-surface-muted/50 p-1.5">
-          {opciones.length > 6 && (
-            <input
-              value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar fuente…"
-              className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-primary"
-            />
-          )}
-          <div className="flex max-h-64 flex-col gap-1 overflow-y-auto">
-            {filtradas.map((f) => {
+          <input
+            value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar fuente (Anton, Bebas, Oswald…)" autoFocus
+            className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-foreground outline-none focus:border-primary"
+          />
+          {error && <span className="px-1 text-[11px] text-danger">{error}</span>}
+          <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
+            {propiasFiltradas.length > 0 && (
+              <span className="px-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-faint-foreground">Tus fuentes</span>
+            )}
+            {propiasFiltradas.map((f) => {
               const elegida = f.id === actual.id;
               return (
                 <button
                   key={f.id || 'base'} type="button"
-                  onClick={() => { onElegir(f.id || null); setAbierto(false); }}
+                  onClick={() => { onElegir(f.id || null); setAbierto(false); setBusqueda(''); }}
                   className={'flex flex-col rounded-md border px-2.5 py-1.5 text-left transition-colors ' +
                     (elegida ? 'border-primary bg-primary-soft/60' : 'border-transparent hover:border-border hover:bg-surface')}
                 >
-                  <span className="truncate text-lg leading-tight text-foreground" style={{ fontFamily: familiaDe(f) }}>
-                    {familias[f.archivoUrl] ? muestra : '…'}
-                  </span>
+                  <span className="truncate text-lg leading-tight text-foreground" style={estiloDe(f.archivoUrl)}>{muestra}</span>
                   <span className="flex items-center gap-1.5 text-[10px] text-faint-foreground">
                     {f.nombre}
                     {!f.coberturaCompleta && <span className="text-amber-400">· sin ñ/acentos</span>}
@@ -120,9 +188,35 @@ function SelectorFuente({ fuentes, fuenteId, muestra, onElegir }) {
                 </button>
               );
             })}
-            {filtradas.length === 0 && <span className="px-2 py-1 text-xs text-faint-foreground">Ninguna coincide.</span>}
+
+            <span className="flex items-center gap-1.5 px-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-faint-foreground">
+              Banco gratuito{banco ? ' · ' + banco.total : ''}
+              <Ayuda>Fuentes de licencia libre (Fontsource). Al elegir una, se agrega sola a tus fuentes, con la revisión de ñ y acentos, y queda puesta en esta zona.</Ayuda>
+            </span>
+            {buscandoBanco && !banco && <span className="px-2 py-1 text-xs text-faint-foreground">Buscando…</span>}
+            {delBanco.map((b) => {
+              const url = urlDeMuestra(b.id, b.pesoPorDefecto);
+              return (
+                <button
+                  key={b.id} type="button" disabled={agregando !== null}
+                  onClick={() => elegirDelBanco(b)}
+                  className="flex flex-col rounded-md border border-transparent px-2.5 py-1.5 text-left transition-colors hover:border-border hover:bg-surface disabled:opacity-60"
+                >
+                  <span className="truncate text-lg leading-tight text-foreground" style={estiloDe(url)}>{muestra}</span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-faint-foreground">
+                    {b.family} {NOMBRE_PESO[b.pesoPorDefecto] || b.pesoPorDefecto}
+                    {agregando === b.id ? <span className="text-primary">· agregando…</span> : <span className="text-faint-foreground">· {b.category}</span>}
+                  </span>
+                </button>
+              );
+            })}
+            {banco && delBanco.length === 0 && !buscandoBanco && (
+              <span className="px-2 py-1 text-xs text-faint-foreground">Nada más en el banco con ese nombre.</span>
+            )}
+            {banco && banco.total > banco.fuentes.length && (
+              <span className="px-2 py-1 text-[10px] text-faint-foreground">Mostrando las primeras {banco.fuentes.length} — escribí para afinar la búsqueda.</span>
+            )}
           </div>
-          <span className="px-1 text-[10px] text-faint-foreground">Tipografías propias: Moldería → Fuentes.</span>
         </div>
       )}
     </div>
@@ -134,14 +228,15 @@ function SelectorFuente({ fuentes, fuenteId, muestra, onElegir }) {
  * @param {object} props.zona        la zona cruda (anclaje.zonas)
  * @param {object[]} props.fuentes   catálogo de fuentes propias
  * @param {(cambios: object) => void} props.onActualizar
+ * @param {(fuente: object) => void} [props.onFuenteAgregada]  una fuente del banco que se acaba de traer al catálogo
  */
-export function PanelTexto({ zona, fuentes, onActualizar }) {
+export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
   const esNumero = zona.campoPedido === 'numero';
   const muestra =
     (zona.campoPedido === 'fijo' ? zona.valorFijo : zona.valorEjemplo) || (esNumero ? '10' : 'PEÑA');
   const contorno = { ...CONTORNO_POR_DEFECTO, ...(zona.contorno || {}) };
   const espaciado = Number(zona.espaciadoMil) || 0;
-  const rotacion = zona.rotacion || 0;
+  const alineacion = zona.alineacion || 'centro';
   const cambiarContorno = (cambios) => onActualizar({ contorno: { ...contorno, ...cambios } });
 
   return (
@@ -149,11 +244,35 @@ export function PanelTexto({ zona, fuentes, onActualizar }) {
       <span className="text-xs font-semibold text-faint-foreground">Texto</span>
 
       <Seccion titulo="Fuente">
-        <SelectorFuente fuentes={fuentes} fuenteId={zona.fuenteId} muestra={muestra} onElegir={(id) => onActualizar({ fuenteId: id })} />
+        <SelectorFuente
+          fuentes={fuentes} fuenteId={zona.fuenteId} muestra={muestra}
+          onElegir={(id) => onActualizar({ fuenteId: id })}
+          onFuenteAgregada={onFuenteAgregada}
+        />
       </Seccion>
 
       <Seccion titulo="Color" ayuda="Con qué color se imprime este texto de verdad, en el PDF final (sublimación).">
         <SelectorColor valor={zona.colorHex} etiqueta="Color del texto" onCambiar={(c) => onActualizar({ colorHex: c })} />
+      </Seccion>
+
+      <Seccion
+        titulo="Alineación"
+        ayuda={'Desde dónde arranca el texto dentro de su zona: pegado al borde izquierdo, centrado, o pegado al borde derecho.' +
+          (esNumero ? ' Si el número es más ancho que la zona, se sale solo por el lado contrario.' : '')}
+      >
+        <div className="grid grid-cols-3 gap-1">
+          {ALINEACIONES.map((a) => (
+            <button
+              key={a.valor} type="button" onClick={() => onActualizar({ alineacion: a.valor })}
+              aria-pressed={alineacion === a.valor}
+              className={'flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] transition-colors ' +
+                (alineacion === a.valor ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary/50')}
+            >
+              <IconoAlineacion valor={a.valor} />
+              {a.etiqueta}
+            </button>
+          ))}
+        </div>
       </Seccion>
 
       <Seccion
@@ -177,29 +296,9 @@ export function PanelTexto({ zona, fuentes, onActualizar }) {
         </div>
       </Seccion>
 
-      <Seccion titulo="Orientación" ayuda="Gira el texto sobre el centro de su zona. Grados positivos, en sentido antihorario (como Illustrator y el PDF).">
-        <div className="grid grid-cols-4 gap-1">
-          {ORIENTACIONES.map((o) => (
-            <button
-              key={o.grados} type="button" onClick={() => onActualizar({ rotacion: o.grados })} title={o.etiqueta + ' (' + o.grados + '°)'}
-              className={'flex flex-col items-center gap-0.5 rounded-lg border px-1 py-1.5 text-[10px] transition-colors ' +
-                (rotacion === o.grados ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary/50')}
-            >
-              <span className="text-sm leading-none">{o.icono}</span>
-              {o.etiqueta}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-faint-foreground">Otro ángulo</span>
-          <InputNumero className="w-20" step={1} value={rotacion} onChange={(n) => onActualizar({ rotacion: n })} />
-          <span className="text-xs text-muted-foreground">°</span>
-        </div>
-      </Seccion>
-
       <Seccion
         titulo="Borde de color"
-        ayuda={'Un contorno alrededor de cada letra, por fuera. ' +
+        ayuda={'Un contorno alrededor de cada letra, por fuera. Sin activarlo, el texto no lleva ningún borde. ' +
           (esNumero ? 'En un número, el borde puede salirse de la zona (manda el alto completo).' : 'El texto deja ese margen adentro de su zona, así el borde no se sale.')}
         derecha={(
           <button

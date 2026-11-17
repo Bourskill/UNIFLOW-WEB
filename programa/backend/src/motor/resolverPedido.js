@@ -155,6 +155,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             // Estilo de la zona (panel de Diseño): espaciado entre letras en
             // milésimas de em, y un contorno de color por fuera de la letra.
             espaciadoMil: Number(cruda?.espaciadoMil) || 0,
+            alineacion: ['izquierda', 'derecha'].includes(cruda?.alineacion) ? cruda.alineacion : 'centro',
             contorno: cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0
               ? { colorHex: cruda.contorno.colorHex || '#000000', grosorCm: Number(cruda.contorno.grosorCm) }
               : null,

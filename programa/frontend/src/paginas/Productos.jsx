@@ -753,6 +753,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       // Estilo del texto, para verlo en el lienzo igual que en el PDF.
       colorHex: cruda?.colorHex || '#ffffff',
       espaciadoMil: Number(cruda?.espaciadoMil) || 0,
+      alineacion: cruda?.alineacion || 'centro',
       contorno: cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0 ? cruda.contorno : null,
     };
   });
@@ -1200,6 +1201,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                   <PanelZona
                     zona={seleccionado}
                     fuentes={fuentes}
+                    onFuenteAgregada={(f) => setFuentes((prev) => (prev.some((x) => x.id === f.id) ? prev : [...prev, f]))}
                     anclasDisponibles={anclaje.anclas.filter((a) => a.pieza === piezaActiva)}
                     anclasResueltas={resuelto?.anclas || {}}
                     onRenombrar={(v) => renombrarNodo('zona', seleccionado.id, v)}
@@ -1421,7 +1423,7 @@ function SelectorCruce({ zona, etiquetaActual, etiquetaOtra, horiz, vert, onEleg
 }
 
 // ============ panel: zona ============
-function PanelZona({ zona, fuentes, anclasDisponibles, anclasResueltas, onRenombrar, onActualizar, onCambiarGrupo, hermanas, onQuitar, onDuplicar, onCruzar, onVolverAUnPunto }) {
+function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasResueltas, onRenombrar, onActualizar, onCambiarGrupo, hermanas, onQuitar, onDuplicar, onCruzar, onVolverAUnPunto }) {
   const cruzada = !!(zona.anclaX && zona.anclaY && zona.anclaX !== zona.anclaY);
   const rxA = anclasResueltas[zona.anclaX], ryA = anclasResueltas[zona.anclaY];
   let etiquetaEsquinaActual = 'esquina', etiquetaEsquinaOtra = 'la otra esquina';
@@ -1471,7 +1473,7 @@ function PanelZona({ zona, fuentes, anclasDisponibles, anclasResueltas, onRenomb
 
       {/* Fuente, color, espaciado, orientación y borde -- todo el estilo del
           texto junto, justo debajo de qué texto lleva la zona. */}
-      {zona.tipo !== 'logo' && <PanelTexto zona={zona} fuentes={fuentes} onActualizar={onActualizar} />}
+      {zona.tipo !== 'logo' && <PanelTexto zona={zona} fuentes={fuentes} onActualizar={onActualizar} onFuenteAgregada={onFuenteAgregada} />}
 
       <div className="flex flex-col gap-2 border-t border-border pt-3">
         <div className="flex items-center gap-1.5">
@@ -1544,8 +1546,7 @@ function PanelZona({ zona, fuentes, anclasDisponibles, anclasResueltas, onRenomb
         <span className="text-xs font-semibold text-faint-foreground">Corrección</span>
         <LineaMedida etiqueta="Mover X" valor={zona.offset.x} onCambiar={(m) => onActualizar({ offset: { ...zona.offset, x: m } })} />
         <LineaMedida etiqueta="Mover Y" valor={zona.offset.y} onCambiar={(m) => onActualizar({ offset: { ...zona.offset, y: m } })} />
-        {/* En una zona de texto el giro está en "Texto · Orientación". */}
-        {zona.tipo === 'logo' && <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <span className="w-24 flex-none text-xs text-muted-foreground" title="Grados positivos giran en sentido antihorario, igual que en Illustrator y en el PDF">Girar ↺</span>
           <InputNumero className="w-20" step={1} value={zona.rotacion || 0}
             onChange={(n) => onActualizar({ rotacion: n })} />
@@ -1556,7 +1557,7 @@ function PanelZona({ zona, fuentes, anclasDisponibles, anclasResueltas, onRenomb
               {g}°
             </button>
           ))}
-        </div>}
+        </div>
       </div>
 
     </div>

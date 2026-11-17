@@ -244,6 +244,7 @@ export async function generarPdfNesting(resultadoNesting) {
               // Con su modo real: un número sigue yendo a alto completo.
               modo: texto.modo === 'calibrado' ? 'calibrado' : 'llenar',
               espaciadoMil: texto.espaciadoMil || 0, contornoCm: texto.contorno?.grosorCm || 0,
+              alineacion: texto.alineacion || 'centro',
             }) || a;
           }
         }

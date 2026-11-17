@@ -231,7 +231,7 @@ export function calibrarCuerpo({ medidor, candidatos, anchoCm, altoCm, reglas = 
  */
 export function ajustarTexto({
   medidor, texto, anchoCm, altoCm, modo, cuerpoCalibradoCm = null, reglas = REGLAS_TEXTO,
-  espaciadoMil = 0, contornoCm = 0,
+  espaciadoMil = 0, contornoCm = 0, alineacion = 'centro',
 }) {
   // Estilo elegido en la zona (panel de Diseño): el espaciado entre letras
   // es el punto de partida del tracking, y el contorno de color ocupa
@@ -309,9 +309,17 @@ export function ajustarTexto({
   // condensar -- condensar deforma la letra. Un número no pasa por ninguno.
   if (!esNumero) { reducirCuerpo(); condensar(); }
 
-  // Colocación: tinta centrada en horizontal, banda (de mayúsculas, o de
-  // cifras planas) centrada en vertical -- un número a alto completo queda
-  // con la base de la cifra en el borde de abajo y su tope en el de arriba.
+  // Colocación en horizontal según la alineación de la zona: la tinta
+  // pegada al borde izquierdo, centrada, o pegada al borde derecho (con
+  // borde de color, la que llega al borde de la zona es la línea del borde:
+  // anchoCm ya descuenta su grosor). Un número más ancho que su zona se sale
+  // solo por el lado contrario al de la alineación.
+  const dxCm = alineacion === 'izquierda' ? -anchoCm / 2 - tinta.izq
+    : alineacion === 'derecha' ? anchoCm / 2 - tinta.der
+    : -(tinta.izq + tinta.der) / 2;
+  // En vertical, la banda (de mayúsculas, o de cifras planas) centrada: un
+  // número a alto completo queda con la base de la cifra en el borde de
+  // abajo y su tope en el de arriba.
   const centroBanda = ((banda.minY + banda.maxY) / 2) * cuerpo;
   return {
     texto: valor, // el texto normalizado que se midió: es EL que hay que dibujar
@@ -319,7 +327,7 @@ export function ajustarTexto({
     cuerpoCm: cuerpo,
     trackingMil: tracking,
     escalaH,
-    dxCm: -(tinta.izq + tinta.der) / 2,
+    dxCm,
     dyCm: centroBanda,
     cabe: cabe(),
     pasos,
@@ -390,6 +398,7 @@ export async function ajustarTextosDePiezas(piezas, obtenerMedidor, reglas = REG
         reglas,
         espaciadoMil: t.espaciadoMil || 0,
         contornoCm: t.contorno?.grosorCm || 0,
+        alineacion: t.alineacion || 'centro',
       });
       // El texto que se escribe en el PDF es el mismo que se midió.
       return { ...t, texto: ajuste ? ajuste.texto : t.texto, fuenteUrl, ajuste };
