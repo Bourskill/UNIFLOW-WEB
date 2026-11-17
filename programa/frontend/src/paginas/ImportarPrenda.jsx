@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useDropzone } from 'react-dropzone';
 import { analizarPrenda, crearGrupo, crearPieza, listarPiezas, subirArchivo } from '../api.js';
 import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
@@ -59,11 +58,13 @@ function cantidadDeTallasComun(piezas) {
 // archivo no dice qué talla es cada contorno -- el backend los devuelve de
 // mayor a menor y acá se les pone nombre con la lista que escribe el
 // usuario (de menor a mayor, como se lee una tabla de talles).
-export function ImportarPrenda({ onCambio }) {
-  const [archivo, setArchivo] = useState(null);
-  const [estado, setEstado] = useState('vacio'); // vacio | analizando | listo | error
+// Recibe el archivo ya soltado en "Subir piezas" (Formulario.jsx), que es
+// quien detectó que es una prenda y no una pieza.
+export function ImportarPrenda({ archivo, onQuitar, onGuardado }) {
+  const [estado, setEstado] = useState('analizando'); // analizando | listo | error
   const [analisis, setAnalisis] = useState(null);
   const [archivoUrl, setArchivoUrl] = useState(null);
+  const [avisoArchivo, setAvisoArchivo] = useState(null);
   const [textoTallas, setTextoTallas] = useState('');
   const [filas, setFilas] = useState([]); // [{ incluir, nombre }] alineado con analisis.piezas
   const [presetAngulos, setPresetAngulos] = useState(PRESETS_ANGULOS[0].id);
@@ -71,32 +72,22 @@ export function ImportarPrenda({ onCambio }) {
   const [nombrePrenda, setNombrePrenda] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState(null);
-  const [exito, setExito] = useState(null);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: (archivos) => archivos[0] && empezar(archivos[0]),
-    accept: { 'application/pdf': ['.pdf'] },
-    multiple: false,
-  });
-
-  function reiniciar() {
-    setArchivo(null);
-    setEstado('vacio');
-    setAnalisis(null);
-    setArchivoUrl(null);
-    setFilas([]);
-    setError(null);
-  }
+  useEffect(() => {
+    empezar(archivo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function empezar(nuevo) {
-    reiniciar();
-    setExito(null);
-    setArchivo(nuevo);
-    setEstado('analizando');
     try {
       const base64 = await leerArchivoComoBase64(nuevo);
       const [url, r, biblioteca] = await Promise.all([
-        subirArchivo(base64, 'application/pdf', 'prenda'),
+        // La copia del original no es imprescindible (estas piezas no se
+        // "reprocesan"): si Storage falla, se importa igual y se avisa.
+        subirArchivo(base64, 'application/pdf', 'prenda').catch((e) => {
+          setAvisoArchivo(e.message);
+          return null;
+        }),
         analizarPrenda(base64),
         listarPiezas().catch(() => []),
       ]);
@@ -184,12 +175,10 @@ export function ImportarPrenda({ onCambio }) {
         creadas.push({ piezaId: pieza.id, rol: f.nombre.trim() });
       }
       if (armarPrenda) await crearGrupo({ nombre: nombrePrenda.trim(), piezas: creadas });
-      setExito(
-        creadas.length + (creadas.length === 1 ? ' pieza guardada' : ' piezas guardadas') +
+      onGuardado?.(
+        archivo.name + ': ' + creadas.length + (creadas.length === 1 ? ' pieza guardada' : ' piezas guardadas') +
           (armarPrenda ? ' · prenda "' + nombrePrenda.trim() + '" armada.' : '.')
       );
-      reiniciar();
-      onCambio?.();
     } catch (e) {
       // Si falló a mitad, las que ya se crearon quedan en la biblioteca:
       // se dice cuántas, para no duplicarlas al reintentar.
@@ -203,20 +192,24 @@ export function ImportarPrenda({ onCambio }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div
-        {...getRootProps()}
-        className={
-          'cursor-pointer rounded-lg border-2 border-dashed px-4 py-6 text-center text-sm ' +
-          (isDragActive ? 'border-primary bg-primary-soft text-primary' : 'border-border text-faint-foreground')
-        }
-      >
-        <input {...getInputProps()} />
-        {archivo ? 'Soltá otro PDF para cambiarlo · ' + archivo.name : 'Soltá acá el PDF de la prenda completa'}
+    <div className="flex flex-col gap-4 rounded-xl border border-border p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium" title={archivo.name}>{archivo.name}</div>
+          <div className="text-xs text-muted-foreground">
+            Prenda completa{analisis ? ' · ' + analisis.piezas.length + ' piezas' : ''}
+          </div>
+        </div>
+        <Boton variante="fantasma" tamano="sm" type="button" onClick={onQuitar}>Quitar</Boton>
       </div>
 
       {estado === 'analizando' && <p className="text-sm text-muted-foreground">Analizando…</p>}
       {estado === 'error' && <Aviso tono="error">{error}</Aviso>}
+      {avisoArchivo && (
+        <Aviso tono="info">
+          No se pudo guardar una copia del PDF original ({avisoArchivo}). Las piezas se importan igual.
+        </Aviso>
+      )}
 
       {estado === 'listo' && analisis && (
         <>
@@ -333,7 +326,6 @@ export function ImportarPrenda({ onCambio }) {
           </div>
         </>
       )}
-      {exito && <Aviso tono="info">{exito}</Aviso>}
     </div>
   );
 }

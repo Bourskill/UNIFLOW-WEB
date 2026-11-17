@@ -13,7 +13,7 @@ import { ajustarTexto, ajustarTextosDePiezas, calibrarCuerpo, advertenciasDeText
 import { obtenerMedidor, bytesFuenteBase } from '../motor/medidorFuentes.js';
 import fontkit from '@pdf-lib/fontkit';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
-import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf, analizarPrendaPdf } from '../motor/importarPdf.js';
+import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf, analizarPrendaPdf, detectarTipoPdf } from '../motor/importarPdf.js';
 
 const router = Router();
 
@@ -423,6 +423,19 @@ router.post('/piezas/analizar-multitalla', async (req, res) => {
   try {
     const resultado = await motor.analizar(motor.decodificar(texto));
     res.json(resultado);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Un PDF soltado en "Subir piezas": ¿es una pieza (una capa por talla) o
+// una prenda completa (una capa por pieza)? Ver importarPdf.js·detectarTipoPdf.
+// Un DXF no pasa por acá: ese formato es siempre una pieza por archivo.
+router.post('/piezas/detectar-pdf', async (req, res) => {
+  const { texto } = req.body;
+  if (!texto) return res.status(400).json({ error: 'Falta el PDF (texto en base64)' });
+  try {
+    res.json(await detectarTipoPdf(Buffer.from(texto, 'base64')));
   } catch (error) {
     res.status(400).json({ error: error.message });
   }

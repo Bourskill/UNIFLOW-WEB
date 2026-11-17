@@ -165,6 +165,12 @@ export function resolverPieza(texto, formato, asignaciones, { mmPorUnidad, ancho
   });
 }
 
+// ¿El PDF es una pieza (una capa por talla) o una prenda completa (una
+// capa por pieza)? -> { tipo: 'pieza' | 'prenda', capas }
+export function detectarTipoPdf(textoBase64) {
+  return pedirJson('/piezas/detectar-pdf', { method: 'POST', body: JSON.stringify({ texto: textoBase64 }) });
+}
+
 // Prenda completa en un solo PDF (una capa por pieza, todas las tallas
 // anidadas adentro): devuelve cada pieza con sus tallas de MAYOR a MENOR,
 // sin nombre -- los pone ImportarPrenda.jsx con la lista del usuario.

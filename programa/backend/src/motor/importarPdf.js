@@ -281,3 +281,33 @@ export async function analizarPrendaPdf(bufferPdf) {
   });
   return { piezas, mmPorUnidad: PT_A_MM };
 }
+
+// Nombres que se leen como una talla: números (2, 10, 32/34), letras de
+// talla (XS, S, M, L, XL, 2XL, XXXL...), "T8", "U"/"UNICA".
+const PARECE_TALLA = /^(\d{1,3}(\/\d{1,3})?|\d?X{0,4}S|M|\d?X{0,4}L|T\d{1,2}|U|[UÚ]NICA)$/i;
+
+export function pareceNombreDeTalla(nombre) {
+  return PARECE_TALLA.test((nombre || '').trim());
+}
+
+/**
+ * ¿Este PDF es UNA pieza (una capa por talla) o una PRENDA completa (una
+ * capa por pieza, tallas anidadas adentro)? Lo decide la geometría primero
+ * y el nombre de las capas después:
+ * - alguna capa trae varios contornos (tallas anidadas) -> prenda;
+ * - si no, cada capa es una sola forma: prenda si la mayoría de las capas
+ *   NO se llama como una talla ("MANGA", "CUELLO"), pieza si sí ("S", "M").
+ * Ante la duda queda "pieza", el formato de siempre, donde las capas se
+ * pueden reasignar a mano.
+ *
+ * @param {Buffer} bufferPdf
+ * @returns {Promise<{tipo: 'pieza'|'prenda', capas: number}>}
+ */
+export async function detectarTipoPdf(bufferPdf) {
+  const candidatos = await extraerCandidatosPdf(bufferPdf);
+  const contornosPorCapa = candidatos.map((c) => separarTallasAnidadas(c.trazos, PT_A_MM).tallas.length);
+  if (contornosPorCapa.some((n) => n > 1)) return { tipo: 'prenda', capas: candidatos.length };
+  const conNombreDeTalla = candidatos.filter((c) => pareceNombreDeTalla(c.nombre)).length;
+  const tipo = conNombreDeTalla * 2 < candidatos.length ? 'prenda' : 'pieza';
+  return { tipo, capas: candidatos.length };
+}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { crearPieza, crearGrupo, analizarPieza, resolverPieza, subirArchivo } from '../api.js';
+import { crearPieza, crearGrupo, analizarPieza, resolverPieza, subirArchivo, detectarTipoPdf } from '../api.js';
 import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
@@ -59,6 +59,7 @@ export function FichaPieza({ archivo, onQuitar, onCambio, modoPrenda = false, ro
   const [geometrias, setGeometrias] = useState(null);
   const [error, setError] = useState(null);
   const [resolviendo, setResolviendo] = useState(false);
+  const [avisoArchivo, setAvisoArchivo] = useState(null);
 
   const [nombre, setNombre] = useState(archivo.name.replace(/\.(dxf|pdf)$/i, ''));
   // null = el rol acompaña al nombre hasta que se lo edite a mano.
@@ -80,7 +81,13 @@ export function FichaPieza({ archivo, onQuitar, onCambio, modoPrenda = false, ro
         setFormato(formatoDetectado);
         const base64ParaGuardar = formatoDetectado === 'pdf' ? texto : await leerArchivoComoBase64(archivo);
         const [url, r] = await Promise.all([
-          subirArchivo(base64ParaGuardar, TIPO_MIME_POR_FORMATO[formatoDetectado], 'pieza'),
+          // Guardar la copia del original sirve para "Reprocesar" más
+          // adelante, pero no es imprescindible: si Storage falla, la pieza
+          // se importa igual y se avisa (ver avisoArchivo).
+          subirArchivo(base64ParaGuardar, TIPO_MIME_POR_FORMATO[formatoDetectado], 'pieza').catch((e) => {
+            setAvisoArchivo(e.message);
+            return null;
+          }),
           analizarPieza(texto, formatoDetectado),
         ]);
         setArchivoUrl(url);
@@ -250,8 +257,14 @@ export function FichaPieza({ archivo, onQuitar, onCambio, modoPrenda = false, ro
               </div>
             )}
 
+            {avisoArchivo && (
+              <Aviso tono="info">
+                No se pudo guardar una copia del archivo original ({avisoArchivo}). La pieza se importa
+                igual; solo no se va a poder "Reprocesar" después.
+              </Aviso>
+            )}
             {error && <Aviso tono="error">{error}</Aviso>}
-            {resolviendo && <p className="text-xs text-faint-foreground">Calculando…</p>}
+            {resolviendo &&<p className="text-xs text-faint-foreground">Calculando…</p>}
           </>
         )}
       </div>
@@ -259,57 +272,15 @@ export function FichaPieza({ archivo, onQuitar, onCambio, modoPrenda = false, ro
   );
 }
 
-// Dos maneras de subir moldería: una pieza por archivo (una capa por
-// talla), o la prenda entera en un PDF (una capa por pieza, tallas anidadas
-// adentro -- ImportarPrenda.jsx). Cada una conserva lo suyo al alternar.
+// "Subir piezas": una sola zona para soltar archivos, y la app decide qué
+// es cada uno -- un DXF es siempre UNA pieza (una capa por talla); un PDF
+// puede ser eso mismo o una PRENDA completa (una capa por pieza, tallas
+// anidadas adentro), y lo decide el backend mirando el archivo
+// (importarPdf.js·detectarTipoPdf). Cada prenda se revisa y se guarda en
+// su propia tarjeta (ImportarPrenda.jsx); las piezas sueltas, todas juntas
+// con el botón de abajo.
 export function Formulario({ onCambio }) {
-  const [modo, setModo] = useState('piezas'); // piezas | prenda
-
-  return (
-    <div className="pagina flex flex-col gap-6">
-      <div>
-        <h2 className="text-lg font-semibold">Subir piezas</h2>
-        <div className="mt-3 inline-flex rounded-lg border border-border p-0.5 text-sm" role="tablist">
-          {[
-            { id: 'piezas', etiqueta: 'Una pieza por archivo' },
-            { id: 'prenda', etiqueta: 'Prenda completa (PDF)' },
-          ].map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              role="tab"
-              aria-selected={modo === m.id}
-              onClick={() => setModo(m.id)}
-              className={
-                'rounded-md px-3 py-1.5 ' +
-                (modo === m.id ? 'bg-primary-soft font-medium text-primary' : 'text-muted-foreground hover:text-foreground')
-              }
-            >
-              {m.etiqueta}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className={modo === 'piezas' ? '' : 'hidden'}>
-        <SubirPiezasSueltas onCambio={onCambio} />
-      </div>
-      <div className={modo === 'prenda' ? '' : 'hidden'}>
-        <div className="mb-4 flex max-w-2xl items-center gap-1.5 text-sm text-muted-foreground">
-          Un PDF con una capa por pieza (Manga, Espalda, Cuello…), cada una con todas sus tallas
-          anidadas y sus piquetes.
-          <Ayuda>
-            Exportá desde Illustrator con "Crear capas de Acrobat" activado, así cada capa llega con su
-            nombre. Cada capa se guarda como una pieza de la biblioteca, con una talla por contorno.
-          </Ayuda>
-        </div>
-        <ImportarPrenda onCambio={onCambio} />
-      </div>
-    </div>
-  );
-}
-
-function SubirPiezasSueltas({ onCambio }) {
-  const [fichas, setFichas] = useState([]); // [{ id, archivo }]
+  const [fichas, setFichas] = useState([]); // [{ id, archivo, tipo: 'detectando' | 'pieza' | 'prenda' }]
   const [datosPorFicha, setDatosPorFicha] = useState({}); // id -> snapshot reportado por FichaPieza
   const [armarPrenda, setArmarPrenda] = useState(false);
   const [nombrePrenda, setNombrePrenda] = useState('');
@@ -317,9 +288,27 @@ function SubirPiezasSueltas({ onCambio }) {
   const [error, setError] = useState(null);
   const [exito, setExito] = useState(null);
 
+  function ponerTipo(id, tipo) {
+    setFichas((prev) => prev.map((f) => (f.id === id ? { ...f, tipo } : f)));
+  }
+
   const onDrop = useCallback((archivos) => {
     setExito(null);
-    setFichas((prev) => [...prev, ...archivos.map((archivo) => ({ id: crypto.randomUUID(), archivo }))]);
+    const nuevas = archivos.map((archivo) => ({
+      id: crypto.randomUUID(),
+      archivo,
+      tipo: formatoDeArchivo(archivo) === 'pdf' ? 'detectando' : 'pieza',
+    }));
+    setFichas((prev) => [...prev, ...nuevas]);
+    for (const f of nuevas) {
+      if (f.tipo !== 'detectando') continue;
+      leerArchivoComoBase64(f.archivo)
+        .then((base64) => detectarTipoPdf(base64))
+        .then((r) => ponerTipo(f.id, r.tipo === 'prenda' ? 'prenda' : 'pieza'))
+        // Si no se pudo decidir, va al camino de una pieza: ahí el mismo
+        // análisis muestra el error real del archivo, si lo hay.
+        .catch(() => ponerTipo(f.id, 'pieza'));
+    }
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -336,8 +325,9 @@ function SubirPiezasSueltas({ onCambio }) {
     });
   }
 
-  const fichasListas = fichas.filter((f) => datosPorFicha[f.id]?.listo);
-  const faltanListas = fichas.length - fichasListas.length;
+  const fichasPieza = fichas.filter((f) => f.tipo === 'pieza');
+  const fichasListas = fichasPieza.filter((f) => datosPorFicha[f.id]?.listo);
+  const faltanListas = fichasPieza.length - fichasListas.length;
 
   // Límites de una prenda: las piezas de la prenda SON las fichas de esta
   // pantalla (ni más ni menos), cada una con un rol propio -- el rol es la
@@ -370,7 +360,7 @@ function SubirPiezasSueltas({ onCambio }) {
   if (armarPrenda && !nombrePrenda.trim()) pendientes.push('nombre de la prenda');
   if (armarPrenda && sinRol > 0) pendientes.push('rol en ' + sinRol + (sinRol === 1 ? ' pieza' : ' piezas'));
   if (armarPrenda && hayRolesRepetidos) pendientes.push('roles repetidos');
-  const puedeGuardar = fichas.length > 0 && pendientes.length === 0;
+  const puedeGuardar = fichasPieza.length > 0 && pendientes.length === 0;
 
   async function guardarTodo() {
     if (!puedeGuardar) return;
@@ -396,7 +386,8 @@ function SubirPiezasSueltas({ onCambio }) {
         fichasListas.length + (fichasListas.length === 1 ? ' pieza guardada' : ' piezas guardadas') +
           (armarPrenda ? ' · prenda "' + nombrePrenda.trim() + '" armada.' : '.')
       );
-      setFichas([]);
+      const guardadas = new Set(fichasPieza.map((f) => f.id));
+      setFichas((prev) => prev.filter((f) => !guardadas.has(f.id)));
       setDatosPorFicha({});
       setArmarPrenda(false);
       setNombrePrenda('');
@@ -409,14 +400,17 @@ function SubirPiezasSueltas({ onCambio }) {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="pagina flex flex-col gap-6">
       <div>
-        <div className="flex max-w-2xl items-center gap-1.5 text-sm text-muted-foreground">
-          Un archivo por pieza, con una capa por talla.
+        <h2 className="text-lg font-semibold">Subir piezas</h2>
+        <div className="mt-1 flex max-w-2xl items-center gap-1.5 text-sm text-muted-foreground">
+          Una pieza por archivo, o la prenda entera en un PDF: la app reconoce cuál es.
           <Ayuda>
-            Acepta .dxf o .pdf. Los piquetes sueltos van dentro de la misma capa de su talla. Cada
-            archivo se guarda como una pieza de la biblioteca; si querés, las juntás en una prenda
-            acá mismo. Categoría y tela se definen después (Biblioteca y Producción).
+            Una pieza: .dxf o .pdf con una capa por talla ("S", "M", "L"…), con sus piquetes dentro de
+            la capa de su talla. Una prenda completa: un .pdf con una capa por pieza ("MANGA",
+            "ESPALDAS"…) y todas sus tallas anidadas adentro, cada una con sus piquetes -- exportado
+            desde Illustrator con "Crear capas de Acrobat" activado. Categoría y tela se definen
+            después (Biblioteca y Producción).
           </Ayuda>
         </div>
       </div>
@@ -432,7 +426,24 @@ function SubirPiezasSueltas({ onCambio }) {
         Soltá acá tus .dxf o .pdf
       </div>
 
-      {fichas.length > 0 && (
+      {fichas.map((f) =>
+        f.tipo === 'detectando' ? (
+          <Tarjeta key={f.id} className="text-sm text-muted-foreground">Revisando {f.archivo.name}…</Tarjeta>
+        ) : f.tipo === 'prenda' ? (
+          <ImportarPrenda
+            key={f.id}
+            archivo={f.archivo}
+            onQuitar={() => quitarFicha(f.id)}
+            onGuardado={(mensaje) => {
+              quitarFicha(f.id);
+              setExito(mensaje);
+              onCambio?.();
+            }}
+          />
+        ) : null
+      )}
+
+      {fichasPieza.length > 0 && (
         <Tarjeta className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <label className="flex items-center gap-2 text-sm font-medium text-foreground">
             <input type="checkbox" checked={armarPrenda} onChange={(e) => setArmarPrenda(e.target.checked)} />
@@ -449,9 +460,9 @@ function SubirPiezasSueltas({ onCambio }) {
         </Tarjeta>
       )}
 
-      {fichas.length > 0 && (
+      {fichasPieza.length > 0 && (
         <div className="flex flex-col gap-3">
-          {fichas.map((f) => (
+          {fichasPieza.map((f) => (
             <FichaPieza
               key={f.id}
               archivo={f.archivo}
@@ -471,11 +482,11 @@ function SubirPiezasSueltas({ onCambio }) {
         </Aviso>
       )}
 
-      {fichas.length > 0 && (
+      {fichasPieza.length > 0 && (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-3">
             <Boton variante="primario" type="button" onClick={guardarTodo} disabled={guardando || !puedeGuardar}>
-              {guardando ? 'Guardando…' : armarPrenda ? 'Guardar prenda' : fichas.length === 1 ? 'Guardar pieza' : 'Guardar ' + fichas.length + ' piezas'}
+              {guardando ? 'Guardando…' : armarPrenda ? 'Guardar prenda' : fichasPieza.length === 1 ? 'Guardar pieza' : 'Guardar ' + fichasPieza.length + ' piezas'}
             </Boton>
             {pendientes.length > 0 && (
               <span className="text-xs text-faint-foreground">Falta: {pendientes.join(' · ')}</span>

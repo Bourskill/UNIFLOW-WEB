@@ -90,32 +90,33 @@ export async function borrarRegistro(nombre, id) {
 // SQL) y la fila en la tabla solo guarda la URL pública, que sí es liviana.
 
 const NOMBRE_BUCKET = 'archivos';
-let bucketAsegurado = false;
 
-async function asegurarBucket() {
-  if (bucketAsegurado) return;
+async function crearBucket() {
+  const { error } = await supabaseStorage.storage.createBucket(NOMBRE_BUCKET, { public: true });
+  // "already exists" puede llegar por una carrera entre dos requests casi
+  // simultáneos creando el bucket a la vez -- no es un error real.
+  if (error && !/already exists/i.test(error.message)) {
+    throw new Error('Supabase (crear bucket): ' + error.message);
+  }
+}
+
+// Se sube directo y el bucket se crea SOLO si Supabase dice que no existe.
+// Antes se listaban todos los buckets antes de la primera subida, y ese
+// listado devolvió "Internal Server Error" (2026-11-17) aunque el bucket
+// existía y Storage andaba -- un paso de más que tumbaba la subida entera.
+export async function subirArchivo(ruta, buffer, contentType) {
   if (!supabaseStorage) {
     throw new Error(
       'Falta SUPABASE_SERVICE_KEY en las variables de entorno -- hace falta la clave service_role de ' +
       'Supabase (Project Settings > API) para poder crear el bucket de archivos y subir a él.'
     );
   }
-  const { data: buckets, error } = await supabaseStorage.storage.listBuckets();
-  if (error) throw new Error('Supabase (listar buckets): ' + error.message);
-  if (!buckets.some((b) => b.name === NOMBRE_BUCKET)) {
-    const { error: errorCrear } = await supabaseStorage.storage.createBucket(NOMBRE_BUCKET, { public: true });
-    // "already exists" puede llegar por una carrera entre dos requests casi
-    // simultáneos creando el bucket a la vez -- no es un error real.
-    if (errorCrear && !/already exists/i.test(errorCrear.message)) {
-      throw new Error('Supabase (crear bucket): ' + errorCrear.message);
-    }
+  const subir = () => supabaseStorage.storage.from(NOMBRE_BUCKET).upload(ruta, buffer, { contentType, upsert: true });
+  let { error } = await subir();
+  if (error && /bucket not found/i.test(error.message)) {
+    await crearBucket();
+    ({ error } = await subir());
   }
-  bucketAsegurado = true;
-}
-
-export async function subirArchivo(ruta, buffer, contentType) {
-  await asegurarBucket();
-  const { error } = await supabaseStorage.storage.from(NOMBRE_BUCKET).upload(ruta, buffer, { contentType, upsert: true });
   if (error) throw new Error('Supabase (subir archivo): ' + error.message);
   const { data } = supabaseStorage.storage.from(NOMBRE_BUCKET).getPublicUrl(ruta);
   return data.publicUrl;

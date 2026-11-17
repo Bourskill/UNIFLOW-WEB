@@ -10,6 +10,7 @@
 // del PDF (eso se probó a mano con el archivo real del taller).
 
 import { separarTallasAnidadas } from '../src/motor/tallasAnidadas.js';
+import { pareceNombreDeTalla } from '../src/motor/importarPdf.js';
 
 let fallos = 0, pasadas = 0;
 function comprobar(desc, cond, detalle) {
@@ -90,6 +91,16 @@ console.log('\n--- Una línea larga sin área (hilo / doblez) no es una talla --
   const r = separarTallasAnidadas([rectangulo(0, 0, 40, 50), linea(20, 5, 20, 45)], MM);
   comprobar('sale 1 talla, no 2', r.tallas.length === 1, 'salieron ' + r.tallas.length);
   comprobar('la línea queda contada como ignorada', r.lineasIgnoradas === 1);
+}
+
+console.log('\n--- Nombre de capa: talla o pieza (detectar PDF de pieza vs prenda) ---');
+{
+  const tallas = ['S', 'm', 'XL', '2XL', 'XXXL', 'xs', '10', '32/34', 'T8', 'U', 'UNICA'];
+  const piezas = ['MANGA', 'CUELLO V', 'FRENTE R', 'PUÑO', 'Capa 1', 'TAPACUELLOS'];
+  comprobar('se leen como talla: ' + tallas.join(' '), tallas.every(pareceNombreDeTalla),
+    tallas.filter((t) => !pareceNombreDeTalla(t)).join(' '));
+  comprobar('no se leen como talla: ' + piezas.join(' · '), piezas.every((p) => !pareceNombreDeTalla(p)),
+    piezas.filter(pareceNombreDeTalla).join(' '));
 }
 
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallidas');
