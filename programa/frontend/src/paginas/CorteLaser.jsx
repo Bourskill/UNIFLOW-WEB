@@ -12,7 +12,8 @@ function tallasDelGrupo(grupo, piezas) {
   if (!grupo) return [];
   const conjuntos = grupo.piezas
     .map((gp) => piezas.find((p) => p.id === gp.piezaId))
-    .filter(Boolean)
+    // Talla única (ej. tapacuellos): sirve para cualquier talla.
+    .filter((p) => p && !p.tallaUnica)
     .map((p) => new Set(Object.keys(p.dimensionesPorTalla || {})));
   if (conjuntos.length === 0) return [];
   const interseccion = [...conjuntos[0]].filter((t) => conjuntos.every((s) => s.has(t)));

@@ -4,6 +4,7 @@ import { crearPieza, crearGrupo, analizarPieza, resolverPieza, subirArchivo } fr
 import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
+import { ImportarPrenda } from './ImportarPrenda.jsx';
 
 function leerArchivoComoTexto(archivo) {
   return new Promise((resolve, reject) => {
@@ -258,7 +259,56 @@ export function FichaPieza({ archivo, onQuitar, onCambio, modoPrenda = false, ro
   );
 }
 
+// Dos maneras de subir moldería: una pieza por archivo (una capa por
+// talla), o la prenda entera en un PDF (una capa por pieza, tallas anidadas
+// adentro -- ImportarPrenda.jsx). Cada una conserva lo suyo al alternar.
 export function Formulario({ onCambio }) {
+  const [modo, setModo] = useState('piezas'); // piezas | prenda
+
+  return (
+    <div className="pagina flex flex-col gap-6">
+      <div>
+        <h2 className="text-lg font-semibold">Subir piezas</h2>
+        <div className="mt-3 inline-flex rounded-lg border border-border p-0.5 text-sm" role="tablist">
+          {[
+            { id: 'piezas', etiqueta: 'Una pieza por archivo' },
+            { id: 'prenda', etiqueta: 'Prenda completa (PDF)' },
+          ].map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              role="tab"
+              aria-selected={modo === m.id}
+              onClick={() => setModo(m.id)}
+              className={
+                'rounded-md px-3 py-1.5 ' +
+                (modo === m.id ? 'bg-primary-soft font-medium text-primary' : 'text-muted-foreground hover:text-foreground')
+              }
+            >
+              {m.etiqueta}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className={modo === 'piezas' ? '' : 'hidden'}>
+        <SubirPiezasSueltas onCambio={onCambio} />
+      </div>
+      <div className={modo === 'prenda' ? '' : 'hidden'}>
+        <div className="mb-4 flex max-w-2xl items-center gap-1.5 text-sm text-muted-foreground">
+          Un PDF con una capa por pieza (Manga, Espalda, Cuello…), cada una con todas sus tallas
+          anidadas y sus piquetes.
+          <Ayuda>
+            Exportá desde Illustrator con "Crear capas de Acrobat" activado, así cada capa llega con su
+            nombre. Cada capa se guarda como una pieza de la biblioteca, con una talla por contorno.
+          </Ayuda>
+        </div>
+        <ImportarPrenda onCambio={onCambio} />
+      </div>
+    </div>
+  );
+}
+
+function SubirPiezasSueltas({ onCambio }) {
   const [fichas, setFichas] = useState([]); // [{ id, archivo }]
   const [datosPorFicha, setDatosPorFicha] = useState({}); // id -> snapshot reportado por FichaPieza
   const [armarPrenda, setArmarPrenda] = useState(false);
@@ -359,10 +409,9 @@ export function Formulario({ onCambio }) {
   }
 
   return (
-    <div className="pagina flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold">Subir piezas</h2>
-        <div className="mt-1 flex max-w-2xl items-center gap-1.5 text-sm text-muted-foreground">
+        <div className="flex max-w-2xl items-center gap-1.5 text-sm text-muted-foreground">
           Un archivo por pieza, con una capa por talla.
           <Ayuda>
             Acepta .dxf o .pdf. Los piquetes sueltos van dentro de la misma capa de su talla. Cada

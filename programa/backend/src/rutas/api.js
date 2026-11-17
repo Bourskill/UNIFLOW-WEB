@@ -13,7 +13,7 @@ import { ajustarTexto, ajustarTextosDePiezas, calibrarCuerpo, advertenciasDeText
 import { obtenerMedidor, bytesFuenteBase } from '../motor/medidorFuentes.js';
 import fontkit from '@pdf-lib/fontkit';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
-import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf } from '../motor/importarPdf.js';
+import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf, analizarPrendaPdf } from '../motor/importarPdf.js';
 
 const router = Router();
 
@@ -428,6 +428,21 @@ router.post('/piezas/analizar-multitalla', async (req, res) => {
   }
 });
 
+// Prenda completa en UN PDF: una capa por pieza, con todas sus tallas
+// anidadas adentro (ver importarPdf.js·analizarPrendaPdf). Devuelve cada
+// pieza con sus tallas de MAYOR a MENOR, sin nombre de talla -- el frontend
+// los pone con la lista de tallas que escribe el usuario, y después guarda
+// cada pieza con POST /piezas como cualquier otra.
+router.post('/piezas/analizar-prenda', async (req, res) => {
+  const { texto } = req.body;
+  if (!texto) return res.status(400).json({ error: 'Falta el PDF (texto en base64)' });
+  try {
+    res.json(await analizarPrendaPdf(Buffer.from(texto, 'base64')));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 // Con el mapeo talla -> índice de candidato ya confirmado (automático +
 // correcciones a mano), calcula la geometría real de cada talla detectada.
 // No guarda nada todavía — el frontend arma la Pieza final con esto y llama
@@ -449,7 +464,7 @@ router.post('/piezas/resolver-multitalla', async (req, res) => {
 // Crea la Pieza con las geometrías YA resueltas por talla (el frontend
 // analizó y confirmó cada archivo del rango de tallas antes de llegar acá).
 router.post('/piezas', async (req, res) => {
-  const { nombre, categoria, angulosPermitidos, tela, geometriaPorTalla, archivoOriginal, formatoOriginal } = req.body;
+  const { nombre, categoria, angulosPermitidos, tela, geometriaPorTalla, archivoOriginal, formatoOriginal, tallaUnica } = req.body;
   if (!nombre || !geometriaPorTalla || Object.keys(geometriaPorTalla).length === 0) {
     return res.status(400).json({ error: 'Falta nombre o geometriaPorTalla' });
   }
@@ -472,6 +487,9 @@ router.post('/piezas', async (req, res) => {
     // N veces) -- URL de Storage, nunca el archivo embebido.
     archivoOriginal: archivoOriginal || null,
     formatoOriginal: formatoOriginal || null,
+    // Solo si viene marcada explícita (ver PUT /piezas/:id): el importador
+    // de prenda completa la marca cuando la capa trae un único contorno.
+    ...(tallaUnica ? { tallaUnica: true } : {}),
     geometriaPorTalla,
     dimensionesPorTalla,
     version: 1,
@@ -560,6 +578,13 @@ router.post('/piezas/:id/reprocesar', async (req, res) => {
   if (!pieza.archivoOriginal || !pieza.formatoOriginal) {
     return res.status(400).json({
       error: 'Esta pieza no tiene el archivo original guardado (se subió antes de Storage) -- hay que resubirla entera.',
+    });
+  }
+  if (pieza.formatoOriginal === 'pdf-prenda') {
+    // El archivo guardado es la prenda entera (todas las piezas): no hay
+    // de dónde saber qué capa era esta pieza ni qué nombre tenía cada talla.
+    return res.status(400).json({
+      error: 'Esta pieza vino de un PDF de prenda completa -- para actualizarla, importá la prenda de nuevo o usá "Reemplazar moldería".',
     });
   }
   const motor = motorPorFormato(pieza.formatoOriginal);

@@ -37,7 +37,9 @@ function tallasDelProducto(productoId, productos, grupos, piezas) {
   if (gp.length === 0) return [];
   const conjuntos = gp
     .map((x) => piezas.find((p) => p.id === x.piezaId))
-    .filter(Boolean)
+    // Una pieza de talla única (ej. tapacuellos) sirve para cualquier talla:
+    // no achica la lista de tallas posibles.
+    .filter((p) => p && !p.tallaUnica)
     .map((p) => new Set(Object.keys(p.dimensionesPorTalla || {})));
   if (conjuntos.length === 0) return [];
   const interseccion = [...conjuntos[0]].filter((t) => conjuntos.every((s) => s.has(t)));
