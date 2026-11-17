@@ -522,11 +522,9 @@ export function Piezas({ recargarSenal, onCambio }) {
     (!filtroCategoria || p.categoria === filtroCategoria) &&
     (!busquedaNormal || p.nombre.toLowerCase().includes(busquedaNormal));
 
-  // Una pieza que ya es parte de una prenda se ve DENTRO de esa prenda, no
-  // suelta en la lista: si no, la biblioteca repetía cada pieza de cada
-  // prenda. Sueltas quedan solo las que no están en ninguna.
-  const idsEnPrendas = new Set(grupos.flatMap((g) => g.piezas.map((gp) => gp.piezaId)));
-  const piezasSueltas = piezas.filter((p) => !idsEnPrendas.has(p.id)).filter(piezaCoincide);
+  // TODAS las piezas, también las que ya son parte de una prenda: así se ven
+  // y se pueden reutilizar en otra. Cada tarjeta dice en qué prendas está.
+  const piezasVisibles = piezas.filter(piezaCoincide);
   const prendasVisibles = grupos.filter((g) => {
     const suyas = g.piezas.map((gp) => piezas.find((p) => p.id === gp.piezaId)).filter(Boolean);
     if (busquedaNormal && g.nombre.toLowerCase().includes(busquedaNormal) && !filtroCategoria) return true;
@@ -598,14 +596,15 @@ export function Piezas({ recargarSenal, onCambio }) {
     onCambio?.();
   }
 
-  const nada = prendasVisibles.length === 0 && piezasSueltas.length === 0;
+  const nada = prendasVisibles.length === 0 && piezasVisibles.length === 0;
 
   return (
     <div className="pagina flex flex-col gap-6">
       <div>
         <h2 className="text-lg font-semibold">Biblioteca</h2>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Las prendas con sus piezas, y aparte las piezas sueltas. Reprocesar o reemplazar la moldería
+          Las prendas con sus piezas, y abajo todas las piezas (también las que ya están en una
+          prenda, para reutilizarlas en otra). Reprocesar o reemplazar la moldería
           de una pieza crea una versión nueva -- si algún producto ya guardado la usa, se pregunta cuál
           pasa a la versión nueva y cuál se queda en la que tenía.
         </p>
@@ -692,13 +691,13 @@ export function Piezas({ recargarSenal, onCambio }) {
             </section>
           )}
 
-          {piezasSueltas.length > 0 && (
+          {piezasVisibles.length > 0 && (
             <section className="flex flex-col gap-3">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">
-                Piezas sueltas · {piezasSueltas.length}
+                Todas las piezas · {piezasVisibles.length}
               </h3>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
-                {piezasSueltas.map((p) => tarjetaDePieza(p))}
+                {piezasVisibles.map((p) => tarjetaDePieza(p))}
               </div>
             </section>
           )}

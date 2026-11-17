@@ -2,6 +2,7 @@ import { Stage, Layer, Rect, Text, Image as ImagenKonva, Group, Shape } from 're
 import { useImagenCargada } from './useImagenCargada.js';
 import { useFuentesWeb, cssDeFamilia } from './useFuentesWeb.js';
 import { URL_FUENTE_BASE } from '../api.js';
+import { colocarArte } from '../utilidades/colocarArte.js';
 
 // Un pixel por cm es suficiente para la vista previa; no es la resolución del
 // PDF final (eso lo decide exportarPdf.js en el backend con puntos reales).
@@ -81,17 +82,30 @@ function PiezaEnLienzo({ pieza, familias }) {
         });
         ctx.closePath();
       }
-    : undefined;
+    : pieza.ajusteArte
+      ? (ctx) => { ctx.beginPath(); ctx.rect(0, 0, ancho, alto); ctx.closePath(); }
+      : undefined;
+  // Con ajuste del arte (Diseño), mismo cálculo que el PDF (colocarArte.js).
+  const rectArte = imagen && pieza.ajusteArte
+    ? colocarArte({
+        anchoCm: pieza.anchoCm, altoCm: pieza.altoCm,
+        anchoImagen: imagen.naturalWidth || imagen.width, altoImagen: imagen.naturalHeight || imagen.height,
+        ajuste: pieza.ajusteArte,
+      })
+    : null;
+  const imagenKonva = imagen && (
+    rectArte
+      ? <ImagenKonva image={imagen} x={rectArte.x * PX_POR_CM} y={rectArte.y * PX_POR_CM} width={rectArte.ancho * PX_POR_CM} height={rectArte.alto * PX_POR_CM} />
+      : <ImagenKonva image={imagen} width={ancho} height={alto} />
+  );
 
   return (
     <Group x={x} y={y}>
       {imagen ? (
-        tieneContornoReal ? (
-          <Group clipFunc={clipFunc}>
-            <ImagenKonva image={imagen} width={ancho} height={alto} />
-          </Group>
+        clipFunc ? (
+          <Group clipFunc={clipFunc}>{imagenKonva}</Group>
         ) : (
-          <ImagenKonva image={imagen} width={ancho} height={alto} />
+          imagenKonva
         )
       ) : (
         <Rect width={ancho} height={alto} fill={esRotada ? '#ffe0cc' : '#cce5ff'} stroke="#333" strokeWidth={1} />

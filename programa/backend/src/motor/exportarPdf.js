@@ -17,6 +17,7 @@ import ClipperLib from 'clipper-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { bytesDeFuente, obtenerMedidor, urlDeStoragePermitida, leerConTope } from './medidorFuentes.js';
 import { ajustarTexto } from './ajusteTexto.js';
+import { colocarArte } from './colocarArte.js';
 
 const CM_A_PUNTOS = 28.3465;
 
@@ -167,11 +168,29 @@ export async function generarPdfNesting(resultadoNesting) {
       // sin geometría real cargada todavía), se mantiene el estirado al
       // rectángulo de siempre -- nunca deja de dibujarse el diseño por
       // faltar el contorno.
-      if (pieza.contornoCm?.length >= 3) {
-        const puntos = pieza.contornoCm.map((v) => ({
-          x: xPt + v.x * CM_A_PUNTOS,
-          y: yPt + altoRectPt - v.y * CM_A_PUNTOS,
-        }));
+      // Con ajuste del arte (Diseño), la imagen va sin deformar donde la
+      // dejó el usuario -- mismo cálculo que el lienzo (colocarArte.js) -- y
+      // lo que sobresale de la pieza se recorta. Sin ajuste, se estira al
+      // rectángulo como siempre.
+      let rectImagen = { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt };
+      if (pieza.ajusteArte) {
+        const r = colocarArte({
+          anchoCm: pieza.anchoCm, altoCm: pieza.altoCm,
+          anchoImagen: imagen.width, altoImagen: imagen.height, ajuste: pieza.ajusteArte,
+        });
+        rectImagen = {
+          x: xPt + r.x * CM_A_PUNTOS,
+          y: yPt + altoRectPt - (r.y + r.alto) * CM_A_PUNTOS,
+          width: r.ancho * CM_A_PUNTOS,
+          height: r.alto * CM_A_PUNTOS,
+        };
+      }
+      const puntos = pieza.contornoCm?.length >= 3
+        ? pieza.contornoCm.map((v) => ({ x: xPt + v.x * CM_A_PUNTOS, y: yPt + altoRectPt - v.y * CM_A_PUNTOS }))
+        : pieza.ajusteArte
+          ? [{ x: xPt, y: yPt }, { x: xPt + anchoRectPt, y: yPt }, { x: xPt + anchoRectPt, y: yPt + altoRectPt }, { x: xPt, y: yPt + altoRectPt }]
+          : null;
+      if (puntos) {
         pagina.pushOperators(
           pushGraphicsState(),
           moveTo(puntos[0].x, puntos[0].y),
@@ -180,10 +199,10 @@ export async function generarPdfNesting(resultadoNesting) {
           clip(),
           endPath()
         );
-        pagina.drawImage(imagen, { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt });
+        pagina.drawImage(imagen, rectImagen);
         pagina.pushOperators(popGraphicsState());
       } else {
-        pagina.drawImage(imagen, { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt });
+        pagina.drawImage(imagen, rectImagen);
       }
     }
 

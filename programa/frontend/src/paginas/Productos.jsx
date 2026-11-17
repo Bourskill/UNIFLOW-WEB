@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
   crearDiseno,
@@ -19,6 +19,8 @@ import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } 
 import { InputNumero } from '../componentes/InputNumero.jsx';
 import { PanelDock } from '../componentes/PanelDock.jsx';
 import { PanelTexto } from '../componentes/PanelTexto.jsx';
+import { PanelAjusteArte } from '../componentes/PanelAjusteArte.jsx';
+import { normalizarAjusteArte } from '../utilidades/colocarArte.js';
 import { LienzoAnclaje, COLOR } from '../componentes/LienzoAnclaje.jsx';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
 
@@ -342,9 +344,74 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   async function quitarImagenDePieza(clave) {
     if (!disenoSeleccionado) return;
     const { [clave]: _quitada, ...resto } = disenoSeleccionado.imagenesPorPieza || {};
+    const { [clave]: _ajuste, ...restoAjustes } = disenoSeleccionado.ajusteArtePorPieza || {};
     try {
-      guardarDisenoLocal(await editarDiseno(disenoSeleccionado.id, { imagenesPorPieza: resto }));
+      guardarDisenoLocal(await editarDiseno(disenoSeleccionado.id, { imagenesPorPieza: resto, ajusteArtePorPieza: restoAjustes }));
+      setAjusteArteLocal((prev) => { const { [clave]: _x, ...r } = prev; return r; });
     } catch (e) { setErrorDiseno(e.message); }
+  }
+
+  // ---- Ajuste del arte (escala/alineación/corrimiento) --------------------
+  // Se ve al instante (estado local) y se guarda en el diseño medio segundo
+  // después del último cambio, para no mandar una petición por cada paso
+  // del deslizador.
+  const [ajusteArteLocal, setAjusteArteLocal] = useState({}); // clave -> ajuste | null, aún sin guardar
+  const [editandoArte, setEditandoArte] = useState(false);
+  const pendientesArteRef = useRef({ disenoId: null, cambios: {} });
+  const temporizadorArteRef = useRef(null);
+  const disenosRef = useRef(disenos);
+  disenosRef.current = disenos;
+  const disenoRef = useRef(disenoSeleccionado);
+  disenoRef.current = disenoSeleccionado;
+  // Al cambiar de diseño, lo pendiente del anterior se guarda EN ESE diseño.
+  useEffect(() => {
+    if (temporizadorArteRef.current) guardarAjustesArteRef.current();
+    setAjusteArteLocal({});
+  }, [disenoId]);
+
+  function ajusteArteDe(clave) {
+    return clave in ajusteArteLocal ? ajusteArteLocal[clave] : disenoSeleccionado?.ajusteArtePorPieza?.[clave] || null;
+  }
+  async function guardarAjustesArte() {
+    clearTimeout(temporizadorArteRef.current);
+    temporizadorArteRef.current = null;
+    const { disenoId: idDiseno, cambios: pendientes } = pendientesArteRef.current;
+    pendientesArteRef.current = { disenoId: null, cambios: {} };
+    const diseno = disenosRef.current.find((d) => d.id === idDiseno);
+    if (!diseno || Object.keys(pendientes).length === 0) return;
+    const mapa = { ...(diseno.ajusteArtePorPieza || {}) };
+    for (const [clave, ajuste] of Object.entries(pendientes)) {
+      if (ajuste) mapa[clave] = ajuste; else delete mapa[clave];
+    }
+    try {
+      guardarDisenoLocal(await editarDiseno(diseno.id, { ajusteArtePorPieza: mapa }));
+      // Lo ya guardado deja de ser "local" (salvo que haya cambiado otra vez mientras tanto).
+      setAjusteArteLocal((prev) => {
+        if (disenoRef.current?.id !== idDiseno) return prev;
+        const r = { ...prev };
+        for (const clave of Object.keys(pendientes)) if (r[clave] === pendientes[clave]) delete r[clave];
+        return r;
+      });
+    } catch (e) { setErrorDiseno('No se pudo guardar el ajuste del diseño: ' + e.message); }
+  }
+  const guardarAjustesArteRef = useRef(guardarAjustesArte);
+  guardarAjustesArteRef.current = guardarAjustesArte;
+  // Al salir de la pantalla, lo pendiente se guarda igual.
+  useEffect(() => () => { if (temporizadorArteRef.current) guardarAjustesArteRef.current(); }, []);
+
+  function cambiarAjusteArte(clave, ajuste) {
+    if (!disenoSeleccionado) return;
+    setAjusteArteLocal((prev) => ({ ...prev, [clave]: ajuste }));
+    pendientesArteRef.current = {
+      disenoId: disenoSeleccionado.id,
+      cambios: { ...pendientesArteRef.current.cambios, [clave]: ajuste },
+    };
+    clearTimeout(temporizadorArteRef.current);
+    temporizadorArteRef.current = setTimeout(() => guardarAjustesArteRef.current(), 500);
+  }
+  function moverArte(clave, dx, dy) {
+    const a = normalizarAjusteArte(ajusteArteDe(clave));
+    cambiarAjusteArte(clave, { ...a, dxCm: Math.round((a.dxCm + dx) * 100) / 100, dyCm: Math.round((a.dyCm + dy) * 100) / 100 });
   }
 
   async function renombrarDiseno() {
@@ -953,7 +1020,18 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 onSoltarImagen={ponerImagenEnPieza}
                 subiendoImagen={subiendoImagen}
                 idVista={piezaActiva}
+                ajusteArte={ajusteArteDe(piezaActiva)}
+                editandoArte={editandoArte && !!disenoSeleccionado?.imagenesPorPieza?.[piezaActiva]}
+                onMoverArte={(dx, dy) => moverArte(piezaActiva, dx, dy)}
               />
+              {disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] && (
+                <PanelAjusteArte
+                  ajuste={ajusteArteDe(piezaActiva)}
+                  onCambiar={(a) => cambiarAjusteArte(piezaActiva, a)}
+                  editando={editandoArte}
+                  onEditando={setEditandoArte}
+                />
+              )}
               <p className="mt-1 text-xs text-faint-foreground">
                 {modo === 'zona' && 'Hacé clic sobre la pieza: ahí nace la zona, enganchada al rasgo más cercano.'}
                 {modo === 'cruzar' && 'Hacé clic en el segundo punto: entre los dos vas a poder elegir la esquina del cruce, o el punto medio.'}

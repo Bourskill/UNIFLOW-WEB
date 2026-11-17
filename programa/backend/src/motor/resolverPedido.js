@@ -197,6 +197,10 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         altoCm: dimension.altoCm,
         rotable: !!pieza.rotable,
         imagenDataUrl: diseno?.imagenesPorPieza?.[pieza.nombre] || null,
+        // Escala/alineación/corrimiento del arte elegidos en Diseño (ver
+        // colocarArte.js). Sin ajuste guardado, el arte se estira a la pieza
+        // como siempre.
+        ajusteArte: diseno?.ajusteArtePorPieza?.[pieza.nombre] || null,
         textos,
         imagenes,
         // El contorno REAL de la pieza (no el rectángulo del bounding box)

@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from '
 import ClipperLib from 'clipper-lib';
 import { ajustarTextos, URL_FUENTE_BASE } from '../api.js';
 import { useFuentesWeb } from './useFuentesWeb.js';
+import { colocarArte } from '../utilidades/colocarArte.js';
 
 // Puerto FIEL del lienzo de Anclajes del panel de Illustrator
 // (programa/panel/js/main.js: dibujarLienzo/candidatosDe/sinMontonera) --
@@ -500,6 +501,10 @@ export function LienzoAnclaje({
   // pieza (Productos.jsx decide dónde se guarda). `idVista` = la pieza que
   // se está viendo: al cambiar de pieza, el zoom vuelve a "toda la pieza".
   onSoltarImagen, subiendoImagen = false, idVista,
+  // Ajuste del arte (escala/alineación/corrimiento, ver colocarArte.js). Con
+  // `editandoArte`, la imagen se ve entera (lo que queda fuera, en
+  // transparencia) y arrastrarla la corre: onMoverArte(dxCm, dyCm) al soltar.
+  ajusteArte = null, editandoArte = false, onMoverArte,
 }) {
   const svgRef = useRef(null);
   const idRecorte = 'recorte-' + useId().replace(/[^a-zA-Z0-9]/g, '');
@@ -541,6 +546,65 @@ export function LienzoAnclaje({
   const [archivoEncima, setArchivoEncima] = useState(false);
   useEffect(() => { setVista(null); }, [idVista]);
   const hayGeo = !!geo;
+
+  // Tamaño real de la imagen: sin él no se sabe su proporción para ubicarla.
+  const [tamImagen, setTamImagen] = useState(null);
+  useEffect(() => {
+    setTamImagen(null);
+    if (!imagenUrl) return undefined;
+    const img = new Image();
+    img.onload = () => setTamImagen({ ancho: img.naturalWidth, alto: img.naturalHeight });
+    img.src = imagenUrl;
+    return () => { img.onload = null; };
+  }, [imagenUrl]);
+
+  // Arrastre del arte (solo con editandoArte): visual hasta soltar.
+  const [arrastreArte, setArrastreArte] = useState(null); // { inicio:{x,y}, matriz, delta:{x,y} }
+  const arrastreArteRef = useRef(null);
+  useEffect(() => {
+    if (!arrastreArte?.matriz) return undefined;
+    function alMover(ev) {
+      const actual = arrastreArteRef.current;
+      const svg = svgRef.current;
+      if (!actual || !svg) return;
+      const pt = svg.createSVGPoint();
+      pt.x = ev.clientX; pt.y = ev.clientY;
+      const r = pt.matrixTransform(actual.matriz);
+      const nuevo = { ...actual, delta: { x: r1(r.x - actual.inicio.x), y: r1(r.y - actual.inicio.y) } };
+      arrastreArteRef.current = nuevo;
+      setArrastreArte(nuevo);
+    }
+    function alSoltar() {
+      const final = arrastreArteRef.current;
+      arrastreArteRef.current = null;
+      setArrastreArte(null);
+      if (final && (Math.abs(final.delta.x) >= 0.05 || Math.abs(final.delta.y) >= 0.05)) {
+        onMoverArte?.(final.delta.x, final.delta.y);
+      }
+    }
+    window.addEventListener('mousemove', alMover);
+    window.addEventListener('mouseup', alSoltar);
+    return () => {
+      window.removeEventListener('mousemove', alMover);
+      window.removeEventListener('mouseup', alSoltar);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arrastreArte?.matriz]);
+  function iniciarArrastreArte(ev) {
+    if (ev.button !== 0 || modo) return;
+    const svg = svgRef.current;
+    const ctm = svg?.getScreenCTM();
+    if (!ctm) return;
+    ev.preventDefault();
+    ev.stopPropagation(); // que no arranque además un paneo del fondo
+    const matriz = ctm.inverse();
+    const pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    const inicio = pt.matrixTransform(matriz);
+    const nuevo = { inicio: { x: inicio.x, y: inicio.y }, matriz, delta: { x: 0, y: 0 } };
+    arrastreArteRef.current = nuevo;
+    setArrastreArte(nuevo);
+  }
 
   const ajustes = useAjustesDeTexto(zonasResueltas);
   const familias = useFuentesWeb([URL_FUENTE_BASE, ...Object.values(ajustes).map((a) => a.fuenteUrl)]);
@@ -806,6 +870,15 @@ export function LienzoAnclaje({
   const pxPorCm = 1 / cmPorPx;
   const extension = Math.max(W, H) * 12;
 
+  // Dónde va la imagen (mismo cálculo que el PDF). Hasta saber su tamaño
+  // real, se ve como siempre: cubriendo la pieza, centrada.
+  const rectArte = imagenUrl && tamImagen
+    ? (() => {
+        const r = colocarArte({ anchoCm: W, altoCm: H, anchoImagen: tamImagen.ancho, altoImagen: tamImagen.alto, ajuste: ajusteArte });
+        return arrastreArte ? { ...r, x: r.x + arrastreArte.delta.x, y: r.y + arrastreArte.delta.y } : r;
+      })()
+    : null;
+
   return (
     <div
       className={
@@ -848,7 +921,24 @@ export function LienzoAnclaje({
                 no a un rectángulo -- mismo pedido de la pasada anterior,
                 ahora en el lienzo fiel de Illustrator. */}
             <clipPath id={idRecorte}><polygon points={puntos} /></clipPath>
-            <image data-fondo="1" href={imagenUrl} x={0} y={0} width={W} height={H} clipPath={'url(#' + idRecorte + ')'} preserveAspectRatio="xMidYMid slice" />
+            {rectArte ? (
+              <>
+                {editandoArte && (
+                  <image href={imagenUrl} x={rectArte.x} y={rectArte.y} width={rectArte.ancho} height={rectArte.alto}
+                    preserveAspectRatio="none" opacity={0.3} pointerEvents="none" />
+                )}
+                <image data-fondo={editandoArte ? undefined : '1'} href={imagenUrl}
+                  x={rectArte.x} y={rectArte.y} width={rectArte.ancho} height={rectArte.alto}
+                  clipPath={'url(#' + idRecorte + ')'} preserveAspectRatio="none" pointerEvents={editandoArte ? 'none' : undefined} />
+                {editandoArte && (
+                  <rect x={rectArte.x} y={rectArte.y} width={rectArte.ancho} height={rectArte.alto}
+                    fill="transparent" stroke="#4c8dff" strokeWidth={cmPorPx * 1.5} strokeDasharray={cmPorPx * 6 + ' ' + cmPorPx * 4}
+                    style={{ cursor: arrastreArte ? 'grabbing' : 'move' }} onMouseDown={iniciarArrastreArte} />
+                )}
+              </>
+            ) : (
+              <image data-fondo="1" href={imagenUrl} x={0} y={0} width={W} height={H} clipPath={'url(#' + idRecorte + ')'} preserveAspectRatio="xMidYMid slice" />
+            )}
           </>
         )}
         {!imagenUrl && (

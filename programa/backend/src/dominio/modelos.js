@@ -214,6 +214,8 @@
  * @property {string} [grupoId]     LEGACY, igual que Producto.grupoId
  * @property {string[]} [grupoIds]  ver el comentario de arriba
  * @property {Record<string, string>} imagenesPorPieza  rol (o grupoId::rol) -> URL de Storage
+ * @property {Record<string, object>} [ajusteArtePorPieza]  misma clave -> escala/alineación/corrimiento
+ *   del arte sobre la pieza (ver motor/colocarArte.js). Sin entrada, el arte se estira a la pieza.
  */
 
 /**
