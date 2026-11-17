@@ -3,6 +3,7 @@ import ClipperLib from 'clipper-lib';
 import { ajustarTextos, URL_FUENTE_BASE } from '../api.js';
 import { useFuentesWeb } from './useFuentesWeb.js';
 import { colocarArte } from '../utilidades/colocarArte.js';
+import { fondoActivo, ejeDegradado } from '../utilidades/fondoPieza.js';
 
 // Puerto FIEL del lienzo de Anclajes del panel de Illustrator
 // (programa/panel/js/main.js: dibujarLienzo/candidatosDe/sinMontonera) --
@@ -505,7 +506,11 @@ export function LienzoAnclaje({
   // `editandoArte`, la imagen se ve entera (lo que queda fuera, en
   // transparencia) y arrastrarla la corre: onMoverArte(dxCm, dyCm) al soltar.
   ajusteArte = null, editandoArte = false, onMoverArte,
+  // Fondo de color de todas las piezas del diseño (ver fondoPieza.js).
+  fondo = null,
 }) {
+  const fondoVivo = fondoActivo(fondo);
+  const idDegradado = 'degradado-' + useId().replace(/[^a-zA-Z0-9]/g, '');
   const svgRef = useRef(null);
   const idRecorte = 'recorte-' + useId().replace(/[^a-zA-Z0-9]/g, '');
   const idCuadricula = 'cuadricula-' + useId().replace(/[^a-zA-Z0-9]/g, '');
@@ -915,6 +920,22 @@ export function LienzoAnclaje({
         />
         <rect x={0} y={0} width={W} height={H} fill="none" stroke="#2b303d" strokeWidth={R * 0.4} pointerEvents="none" />
 
+        {/* Fondo de color del diseño (sólido o degradado), debajo del arte. */}
+        {fondoVivo && (
+          <>
+            {fondoVivo.tipo === 'degradado' && (() => {
+              const eje = ejeDegradado({ anchoCm: W, altoCm: H, anguloGrados: fondoVivo.anguloGrados });
+              return (
+                <linearGradient id={idDegradado} gradientUnits="userSpaceOnUse" x1={eje.x1} y1={eje.y1} x2={eje.x2} y2={eje.y2}>
+                  <stop offset="0" stopColor={fondoVivo.color1} />
+                  <stop offset="1" stopColor={fondoVivo.color2} />
+                </linearGradient>
+              );
+            })()}
+            <polygon data-fondo="1" points={puntos}
+              fill={fondoVivo.tipo === 'degradado' ? 'url(#' + idDegradado + ')' : fondoVivo.color1} />
+          </>
+        )}
         {imagenUrl && (
           <>
             {/* El diseño se recorta a la forma REAL del molde (máscara SVG),
@@ -942,7 +963,7 @@ export function LienzoAnclaje({
           </>
         )}
         {!imagenUrl && (
-          <polygon data-fondo="1" points={puntos} fill="rgba(76,141,255,0.06)" stroke="#4c8dff" strokeWidth={R * 0.5} vectorEffect="non-scaling-stroke" />
+          <polygon data-fondo="1" points={puntos} fill={fondoVivo ? 'none' : 'rgba(76,141,255,0.06)'} stroke="#4c8dff" strokeWidth={R * 0.5} vectorEffect="non-scaling-stroke" />
         )}
         {/* El contorno para láser es independiente de que haya diseño o no --
             es el corte real, no un adorno del arte. Antes vivía adentro del

@@ -3,6 +3,7 @@ import { useImagenCargada } from './useImagenCargada.js';
 import { useFuentesWeb, cssDeFamilia } from './useFuentesWeb.js';
 import { URL_FUENTE_BASE } from '../api.js';
 import { colocarArte } from '../utilidades/colocarArte.js';
+import { fondoActivo, ejeDegradado } from '../utilidades/fondoPieza.js';
 
 // Un pixel por cm es suficiente para la vista previa; no es la resolución del
 // PDF final (eso lo decide exportarPdf.js en el backend con puntos reales).
@@ -64,7 +65,9 @@ function PiezaEnLienzo({ pieza, familias }) {
   const alto = pieza.altoCm * PX_POR_CM;
   const esRotada = pieza.rotacionGrados === 180;
   const imagen = useImagenCargada(pieza.imagenDataUrl);
-  const tieneContenidoReal = imagen || (pieza.textos && pieza.textos.length > 0);
+  // Fondo de color del Diseño (sólido o degradado), debajo del arte -- mismo cálculo que el PDF (fondoPieza.js).
+  const fondo = fondoActivo(pieza.fondo);
+  const tieneContenidoReal = imagen || fondo || (pieza.textos && pieza.textos.length > 0);
 
   // Recorte real a la forma de la pieza, no al rectángulo -- mismo
   // contornoCm (mismas coordenadas cm que zonas/textos) que exportarPdf.js
@@ -82,7 +85,7 @@ function PiezaEnLienzo({ pieza, familias }) {
         });
         ctx.closePath();
       }
-    : pieza.ajusteArte
+    : pieza.ajusteArte || fondo
       ? (ctx) => { ctx.beginPath(); ctx.rect(0, 0, ancho, alto); ctx.closePath(); }
       : undefined;
   // Con ajuste del arte (Diseño), mismo cálculo que el PDF (colocarArte.js).
@@ -99,13 +102,24 @@ function PiezaEnLienzo({ pieza, familias }) {
       : <ImagenKonva image={imagen} width={ancho} height={alto} />
   );
 
+  const fondoKonva = fondo && (() => {
+    if (fondo.tipo === 'solido') return <Rect width={ancho} height={alto} fill={fondo.color1} listening={false} />;
+    const eje = ejeDegradado({ anchoCm: pieza.anchoCm, altoCm: pieza.altoCm, anguloGrados: fondo.anguloGrados });
+    return (
+      <Rect width={ancho} height={alto} listening={false}
+        fillLinearGradientStartPoint={{ x: eje.x1 * PX_POR_CM, y: eje.y1 * PX_POR_CM }}
+        fillLinearGradientEndPoint={{ x: eje.x2 * PX_POR_CM, y: eje.y2 * PX_POR_CM }}
+        fillLinearGradientColorStops={[0, fondo.color1, 1, fondo.color2]} />
+    );
+  })();
+
   return (
     <Group x={x} y={y}>
-      {imagen ? (
+      {imagen || fondo ? (
         clipFunc ? (
-          <Group clipFunc={clipFunc}>{imagenKonva}</Group>
+          <Group clipFunc={clipFunc}>{fondoKonva}{imagenKonva}</Group>
         ) : (
-          imagenKonva
+          <>{fondoKonva}{imagenKonva}</>
         )
       ) : (
         <Rect width={ancho} height={alto} fill={esRotada ? '#ffe0cc' : '#cce5ff'} stroke="#333" strokeWidth={1} />

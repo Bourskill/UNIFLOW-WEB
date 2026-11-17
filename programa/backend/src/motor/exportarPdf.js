@@ -8,7 +8,7 @@
 
 import {
   PDFDocument, rgb, degrees, StandardFonts,
-  pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath,
+  pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath, fill,
   beginText, endText, setFontAndSize, setFillingColor, showText,
   setCharacterSpacing, setCharacterSqueeze, rotateAndSkewTextRadiansAndTranslate,
   setStrokingColor, setLineWidth, setLineJoin, LineJoinStyle, setTextRenderingMode, TextRenderingMode,
@@ -18,6 +18,7 @@ import fontkit from '@pdf-lib/fontkit';
 import { bytesDeFuente, obtenerMedidor, urlDeStoragePermitida, leerConTope } from './medidorFuentes.js';
 import { ajustarTexto } from './ajusteTexto.js';
 import { colocarArte } from './colocarArte.js';
+import { fondoActivo, ejeDegradado, colorEn } from './fondoPieza.js';
 
 const CM_A_PUNTOS = 28.3465;
 
@@ -159,6 +160,26 @@ export async function generarPdfNesting(resultadoNesting) {
     const yPt = altoPt - (pieza.posicion.y + pieza.altoCm) * CM_A_PUNTOS;
     const anchoRectPt = pieza.anchoCm * CM_A_PUNTOS;
     const altoRectPt = pieza.altoCm * CM_A_PUNTOS;
+
+    // Fondo de color del Diseño (sólido o degradado), DEBAJO del arte y
+    // recortado a la forma de la pieza. Ver fondoPieza.js.
+    const fondo = fondoActivo(pieza.fondo);
+    if (fondo) {
+      const aPt = (x, y) => ({ x: xPt + x * CM_A_PUNTOS, y: yPt + altoRectPt - y * CM_A_PUNTOS });
+      const forma = pieza.contornoCm?.length >= 3
+        ? pieza.contornoCm.map((v) => aPt(v.x, v.y))
+        : [aPt(0, 0), aPt(pieza.anchoCm, 0), aPt(pieza.anchoCm, pieza.altoCm), aPt(0, pieza.altoCm)];
+      pagina.pushOperators(
+        pushGraphicsState(),
+        moveTo(forma[0].x, forma[0].y),
+        ...forma.slice(1).map((p) => lineTo(p.x, p.y)),
+        closePath(),
+        clip(),
+        endPath()
+      );
+      pagina.pushOperators(...operadoresDeFondo(fondo, pieza.anchoCm, pieza.altoCm, aPt));
+      pagina.pushOperators(popGraphicsState());
+    }
 
     if (pieza.imagenDataUrl) {
       const imagen = await incrustarImagen(pdf, pieza.imagenDataUrl);
@@ -388,7 +409,7 @@ export async function generarPdfNesting(resultadoNesting) {
       });
     }
 
-    if (!pieza.imagenDataUrl && (!pieza.textos || pieza.textos.length === 0) && (!pieza.imagenes || pieza.imagenes.length === 0)) {
+    if (!fondo && !pieza.imagenDataUrl && (!pieza.textos || pieza.textos.length === 0) && (!pieza.imagenes || pieza.imagenes.length === 0)) {
       const etiqueta = pieza.piezaId + ' · ' + pieza.talla +
         (pieza.rotacionGrados === 180 ? ' · 180°' : '');
       pagina.drawText(etiqueta, {
@@ -407,6 +428,39 @@ export async function generarPdfNesting(resultadoNesting) {
 // Acepta tanto un data: URL (compatibilidad con lo que se haya guardado
 // antes de mover las imágenes a Storage) como una URL http(s) real -- en
 // ese caso hace falta bajarla, ya no viene embebida en el propio campo.
+// Pinta el fondo sobre todo el rectángulo de la pieza (el recorte a su forma
+// ya está puesto). El degradado va en franjas finas de color perpendiculares
+// a su eje: una por cada escalón de color (hasta 256), así no se nota el
+// paso de una a otra -- vectorial puro, sin depender de imágenes.
+export function operadoresDeFondo(fondo, anchoCm, altoCm, aPt) {
+  const cuadro = (pts, [r, g, b]) => [
+    setFillingColor(rgb(r / 255, g / 255, b / 255)),
+    moveTo(pts[0].x, pts[0].y),
+    ...pts.slice(1).map((p) => lineTo(p.x, p.y)),
+    closePath(),
+    fill(),
+  ];
+  if (fondo.tipo === 'solido') {
+    return cuadro([aPt(0, 0), aPt(anchoCm, 0), aPt(anchoCm, altoCm), aPt(0, altoCm)], colorEn(fondo, 0));
+  }
+  const eje = ejeDegradado({ anchoCm, altoCm, anguloGrados: fondo.anguloGrados });
+  const largo = Math.hypot(eje.x2 - eje.x1, eje.y2 - eje.y1) || 1;
+  const d = { x: (eje.x2 - eje.x1) / largo, y: (eje.y2 - eje.y1) / largo };
+  const n = { x: -d.y, y: d.x };
+  const ancho = Math.hypot(anchoCm, altoCm); // de sobra para cubrir la pieza de costado a costado
+  const a = colorEn(fondo, 0), b = colorEn(fondo, 1);
+  const franjas = Math.min(256, Math.max(1, ...a.map((v, i) => Math.abs(b[i] - v))));
+  const ops = [];
+  for (let i = 0; i < franjas; i++) {
+    // Cada franja se estira un poco sobre la siguiente: sin hilos sin pintar entre ellas.
+    const t0 = i === 0 ? -0.01 : i / franjas;
+    const t1 = i === franjas - 1 ? 1.01 : (i + 1.5) / franjas;
+    const p = (t, s) => aPt(eje.x1 + d.x * t * largo + n.x * s, eje.y1 + d.y * t * largo + n.y * s);
+    ops.push(...cuadro([p(t0, -ancho), p(t1, -ancho), p(t1, ancho), p(t0, ancho)], colorEn(fondo, franjas === 1 ? 0 : i / (franjas - 1))));
+  }
+  return ops;
+}
+
 async function incrustarImagen(pdf, urlODataUrl) {
   let contentType;
   let bytes;

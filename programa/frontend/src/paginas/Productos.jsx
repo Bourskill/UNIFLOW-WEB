@@ -20,6 +20,7 @@ import { InputNumero } from '../componentes/InputNumero.jsx';
 import { PanelDock } from '../componentes/PanelDock.jsx';
 import { PanelTexto } from '../componentes/PanelTexto.jsx';
 import { PanelAjusteArte } from '../componentes/PanelAjusteArte.jsx';
+import { PanelFondo } from '../componentes/PanelFondo.jsx';
 import { normalizarAjusteArte } from '../utilidades/colocarArte.js';
 import { LienzoAnclaje, COLOR } from '../componentes/LienzoAnclaje.jsx';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
@@ -409,6 +410,58 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     clearTimeout(temporizadorArteRef.current);
     temporizadorArteRef.current = setTimeout(() => guardarAjustesArteRef.current(), 500);
   }
+  // ---- Fondo de color de todas las piezas (sólido/degradado) ----------------
+  // Igual que el ajuste del arte: se ve al instante y se guarda en el diseño
+  // un rato después del último cambio (el selector de color dispara muchos).
+  // Sin diseño todavía, el primer cambio crea uno.
+  const [fondoLocal, setFondoLocal] = useState(undefined); // undefined = nada sin guardar
+  const [creandoDisenoFondo, setCreandoDisenoFondo] = useState(false);
+  const pendienteFondoRef = useRef(null); // { disenoId, fondo }
+  const temporizadorFondoRef = useRef(null);
+  const fondoVigente = fondoLocal !== undefined ? fondoLocal : disenoSeleccionado?.fondo || null;
+  async function guardarFondo() {
+    clearTimeout(temporizadorFondoRef.current);
+    temporizadorFondoRef.current = null;
+    const pendiente = pendienteFondoRef.current;
+    pendienteFondoRef.current = null;
+    if (!pendiente) return;
+    try {
+      guardarDisenoLocal(await editarDiseno(pendiente.disenoId, { fondo: pendiente.fondo }));
+      if (disenoRef.current?.id === pendiente.disenoId) setFondoLocal((prev) => (prev === pendiente.fondo ? undefined : prev));
+    } catch (e) { setErrorDiseno('No se pudo guardar el fondo: ' + e.message); }
+  }
+  const guardarFondoRef = useRef(guardarFondo);
+  guardarFondoRef.current = guardarFondo;
+  useEffect(() => () => { if (temporizadorFondoRef.current) guardarFondoRef.current(); }, []);
+  useEffect(() => {
+    if (temporizadorFondoRef.current) guardarFondoRef.current();
+    setFondoLocal(undefined);
+  }, [disenoId]);
+
+  async function cambiarFondo(fondo) {
+    setErrorDiseno(null);
+    if (!disenoSeleccionado) {
+      setCreandoDisenoFondo(true);
+      try {
+        const nombrePrendas = gruposSeleccionados.map((g) => g.nombre).join(' + ');
+        const creado = await crearDiseno({
+          nombre: 'Diseño ' + (nombre.trim() || nombrePrendas || 'nuevo'),
+          grupoIds,
+          imagenesPorPieza: {},
+          fondo,
+        });
+        guardarDisenoLocal(creado);
+        setDisenoId(creado.id);
+      } catch (e) { setErrorDiseno(e.message); }
+      finally { setCreandoDisenoFondo(false); }
+      return;
+    }
+    setFondoLocal(fondo);
+    pendienteFondoRef.current = { disenoId: disenoSeleccionado.id, fondo };
+    clearTimeout(temporizadorFondoRef.current);
+    temporizadorFondoRef.current = setTimeout(() => guardarFondoRef.current(), 400);
+  }
+
   function moverArte(clave, dx, dy) {
     const a = normalizarAjusteArte(ajusteArteDe(clave));
     cambiarAjusteArte(clave, { ...a, dxCm: Math.round((a.dxCm + dx) * 100) / 100, dyCm: Math.round((a.dyCm + dy) * 100) / 100 });
@@ -920,6 +973,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                     : 'ninguna pieza todavía') + ' — arrastrá una imagen sobre el molde para sumar o cambiar la de esa pieza.'
                 : 'Arrastrá una imagen PNG o JPG sobre el molde de abajo para ponerle diseño a esa pieza.'}
             </p>
+            {grupoIds.length > 0 && (
+              <PanelFondo fondo={fondoVigente} onCambiar={cambiarFondo} deshabilitado={creandoDisenoFondo} />
+            )}
             {errorDiseno && <div className="mt-2"><Aviso tono="error">{errorDiseno}</Aviso></div>}
           </div>
 
@@ -1023,6 +1079,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 ajusteArte={ajusteArteDe(piezaActiva)}
                 editandoArte={editandoArte && !!disenoSeleccionado?.imagenesPorPieza?.[piezaActiva]}
                 onMoverArte={(dx, dy) => moverArte(piezaActiva, dx, dy)}
+                fondo={fondoVigente}
               />
               {disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] && (
                 <PanelAjusteArte

@@ -15,6 +15,7 @@
 import { resolver as resolverAnclaje } from './anclaje/resolver.js';
 import { geometriaDelGrupo } from './geometriaAnclaje.js';
 import { resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
+import { fondoActivo } from './fondoPieza.js';
 
 // Un Producto de un solo grupo sigue guardando `grupoId` (nunca se migró
 // data existente); uno multi-prenda ("kit") guarda `grupoIds`. Normalizar
@@ -201,6 +202,9 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         // colocarArte.js). Sin ajuste guardado, el arte se estira a la pieza
         // como siempre.
         ajusteArte: diseno?.ajusteArtePorPieza?.[pieza.nombre] || null,
+        // Fondo de color del diseño (sólido o degradado), igual para todas
+        // las piezas, debajo del arte. Ver fondoPieza.js.
+        fondo: fondoActivo(diseno?.fondo),
         textos,
         imagenes,
         // El contorno REAL de la pieza (no el rectángulo del bounding box)
