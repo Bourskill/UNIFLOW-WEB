@@ -48,43 +48,64 @@ console.log('\n--- La tilde no cambia el cuerpo (la altura se mide con la "H", n
   comprobar('la base queda en el mismo lugar (la tilde sobresale por arriba)', cerca(a.dyCm, b.dyCm, 1e-9));
 }
 
-console.log('\n--- Número calibrado: todos al MISMO cuerpo, el que da la referencia "55" ---');
+console.log('\n--- Número: la cifra plana ocupa TODO el alto de la zona, y todos salen a la misma altura ---');
+const bandaNum = medidor.bandaNumeros;
+const altoCifra = bandaNum.maxY - bandaNum.minY;
 {
-  const W = 10, H = 12;
+  const W = 20, H = 12;
   const cuerpo = calibrarCuerpo({ medidor, candidatos: ['55'], anchoCm: W, altoCm: H });
+  comprobar('el cuerpo común hace que un "1" mida exactamente el alto de la zona', cerca(cuerpo * altoCifra, H, 1e-6), String(cuerpo * altoCifra));
   const r7 = ajustarTexto({ medidor, texto: '7', anchoCm: W, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo });
   const r10 = ajustarTexto({ medidor, texto: '10', anchoCm: W, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo });
   const r55 = ajustarTexto({ medidor, texto: '55', anchoCm: W, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo });
-  comprobar('el 7, el 10 y el 55 salen del mismo cuerpo',
+  comprobar('el 7, el 10 y el 55 salen del mismo cuerpo (misma altura)',
     cerca(r7.cuerpoCm, cuerpo, 1e-9) && cerca(r10.cuerpoCm, cuerpo, 1e-9) && cerca(r55.cuerpoCm, cuerpo, 1e-9));
-  comprobar('el 7 queda más angosto que la zona (no se agranda a llenarla)', r7.tintaCm.ancho < W - 1);
-  comprobar('el 55 (el más exigente) llena exactamente lo que le da la zona', r55.cabe && (cerca(r55.tintaCm.ancho, W, 0.05) || cerca(r55.cuerpoCm * altoBanda, H, 0.05)));
+  comprobar('el 7 queda más angosto que la zona (el alto manda, no se estira a lo ancho)', r7.tintaCm.ancho < W - 1);
+  comprobar('sin cuerpo común (zona nueva en el lienzo) da el mismo alto completo',
+    cerca(ajustarTexto({ medidor, texto: '10', anchoCm: W, altoCm: H, modo: 'calibrado' }).cuerpoCm, cuerpo, 1e-9));
+  // Colocación: base de la cifra en el borde de abajo, tope en el de arriba.
+  // dyCm = dónde cae la línea de base respecto del centro (Y hacia abajo).
+  const baseCifra = r10.dyCm + (-bandaNum.minY) * r10.cuerpoCm; // borde inferior de la banda de la cifra
+  comprobar('la base de la cifra queda en el borde inferior de la zona', cerca(baseCifra, H / 2, 1e-6), String(baseCifra));
 }
 
-console.log('\n--- Un dato que no cabe al cuerpo común baja por la escalera, sin pasarse ---');
+console.log('\n--- El desborde de las cifras redondas se permite (puede salirse de la zona) ---');
+{
+  const W = 20, H = 12;
+  const r = ajustarTexto({ medidor, texto: '10', anchoCm: W, altoCm: H, modo: 'calibrado' });
+  const glifo0 = medidor.glifos('0')[0];
+  comprobar('el "0" es más alto que el "1" en esta fuente (tiene desborde)', glifo0.arriba > bandaNum.maxY || glifo0.abajo < bandaNum.minY,
+    '0: ' + glifo0.abajo + '..' + glifo0.arriba + ' · 1: ' + bandaNum.minY + '..' + bandaNum.maxY);
+  comprobar('la tinta del "10" mide más que la zona...', r.tintaCm.alto > H, String(r.tintaCm.alto));
+  comprobar('...y aun así cuenta como que cabe (no se achica por eso)', r.cabe && r.escalaH === 100 && r.trackingMil === 0);
+}
+
+console.log('\n--- Un número demasiado ancho: tracking, condensar y RECIÉN AHÍ achicar ---');
 {
   const W = 10, H = 12;
   const cuerpo = calibrarCuerpo({ medidor, candidatos: ['55'], anchoCm: W, altoCm: H });
-  const r = ajustarTexto({ medidor, texto: '555', anchoCm: W, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo });
-  comprobar('no supera el cuerpo calibrado', r.cuerpoCm <= cuerpo + 1e-9);
-  comprobar('termina cabiendo en la zona', r.cabe && r.tintaCm.ancho <= W + 0.02, 'ancho = ' + r.tintaCm.ancho);
-  comprobar('registra qué pasos hizo', r.pasos.length > 0, JSON.stringify(r.pasos));
-  // Un dato absurdo (7 dígitos donde la zona se calibró para 2) agota la
-  // escalera -- cuerpo mínimo 50% y condensado 90% -- y se AVISA, no se
-  // deforma más: mismo criterio que el panel ("NO cabe en su guía").
+  const r = ajustarTexto({ medidor, texto: '55', anchoCm: W, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo });
+  const iCondensa = r.pasos.findIndex((p) => p.startsWith('condensado'));
+  const iAchica = r.pasos.findIndex((p) => p.startsWith('cuerpo '));
+  comprobar('condensa antes de achicar', iCondensa !== -1 && (iAchica === -1 || iCondensa < iAchica), JSON.stringify(r.pasos));
+  comprobar('termina cabiendo a lo ancho', r.cabe && r.tintaCm.ancho <= W + 0.02, 'ancho = ' + r.tintaCm.ancho);
+  comprobar('no supera el cuerpo de alto completo', r.cuerpoCm <= cuerpo + 1e-9);
+  // Si condensar alcanza, conserva el alto completo.
+  const justo = ajustarTexto({ medidor, texto: '10', anchoCm: r10Ancho() * 0.93, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo });
+  comprobar('si con condensar alcanza, el alto sigue completo', cerca(justo.cuerpoCm, cuerpo, 1e-9) && justo.escalaH < 100 && justo.cabe, JSON.stringify(justo.pasos));
+  function r10Ancho() { return ajustarTexto({ medidor, texto: '10', anchoCm: 100, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo }).tintaCm.ancho; }
+  // Un dato absurdo agota la escalera y se AVISA ("NO cabe en su guía").
   const absurdo = ajustarTexto({ medidor, texto: '1000000', anchoCm: W, altoCm: H, modo: 'calibrado', cuerpoCalibradoCm: cuerpo });
   comprobar('un dato imposible de encajar lo dice (cabe = false) y no baja de la mitad del cuerpo',
     absurdo.cabe === false && absurdo.cuerpoCm >= cuerpo * 0.5 - 1e-9);
 }
 
-console.log('\n--- Calibrar con datos reales: el percentil 85 no deja que UN dato largo encoja a todos ---');
+console.log('\n--- El cuerpo común ya no depende de los datos: un número larguísimo no encoge a nadie ---');
 {
   const normales = ['7', '10', '23', '11', '9', '8', '14', '5', '12'];
   const conExtremo = calibrarCuerpo({ medidor, candidatos: [...normales, '88888888'], anchoCm: 10, altoCm: 12 });
-  const mandaElMasLargo = calibrarCuerpo({ medidor, candidatos: [...normales, '88888888'], anchoCm: 10, altoCm: 12, reglas: { ...REGLAS_TEXTO, percentilCalibracion: 100 } });
-  const soloNormales = calibrarCuerpo({ medidor, candidatos: normales, anchoCm: 10, altoCm: 12, reglas: { ...REGLAS_TEXTO, percentilCalibracion: 100 } });
-  comprobar('con percentil 85 un número larguísimo NO manda: el cuerpo es como el de los normales', cerca(conExtremo, soloNormales, 1e-9), conExtremo + ' vs ' + soloNormales);
-  comprobar('con percentil 100 sí mandaría (y encogería a todo el equipo)', mandaElMasLargo < conExtremo / 2, String(mandaElMasLargo));
+  const soloNormales = calibrarCuerpo({ medidor, candidatos: normales, anchoCm: 10, altoCm: 12 });
+  comprobar('mismo cuerpo con o sin el número larguísimo', cerca(conExtremo, soloNormales, 1e-9), conExtremo + ' vs ' + soloNormales);
   const sinDatos = calibrarCuerpo({ medidor, candidatos: [], anchoCm: 10, altoCm: 12 });
   comprobar('sin candidatos no inventa un cuerpo (null)', sinDatos === null);
 }
@@ -103,7 +124,7 @@ console.log('\n--- Vuelta completa: resolver textos de un pedido -> PDF -> leer 
     id: 'p0', piezaId: 'Espalda', talla: 'm', anchoCm: 50, altoCm: 70, posicion: { x: 0, y: 0 }, rotacionGrados: 0,
     textos: [
       { ...textoBase, texto: 'PEÑA', cxCm: 25, cyCm: 10, anchoCm: 30, altoCm: 5, modo: 'llenar', zonaClave: 'nombre|m' },
-      { ...textoBase, texto: '7', cxCm: 25, cyCm: 30, anchoCm: 20, altoCm: 20, modo: 'calibrado', zonaClave: 'numero|m' },
+      { ...textoBase, texto: '7', cxCm: 25, cyCm: 30, anchoCm: 30, altoCm: 20, modo: 'calibrado', zonaClave: 'numero|m' },
     ],
   };
   const otra = { ...pieza, id: 'p1', textos: [{ ...pieza.textos[1], texto: '10' }] };

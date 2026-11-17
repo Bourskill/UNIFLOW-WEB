@@ -7,18 +7,27 @@
 // Dos modos, igual que `politica` en panel/esquemas/produccion.json:
 //   - "llenar"    (nombre, texto fijo): el texto ocupa TODO EL ALTO de su zona
 //                 y solo baja de cuerpo cuando el ancho no da.
-//   - "calibrado" (número): todos los números de una misma zona van al MISMO
-//                 cuerpo (el que sale de medir los datos reales, percentil 85,
-//                 o la cadena de referencia "55" si todavía no hay pedido);
-//                 un dato que no cabe a ese cuerpo baja por la escalera.
+//   - "calibrado" (número): la cifra OCUPA TODO EL ALTO de la zona, siempre:
+//                 el alto de una cifra plana ("1", de la línea de base a su
+//                 tope) es exactamente el alto de la zona, así todos los
+//                 números de una zona salen a la misma altura. Las cifras
+//                 redondas (0, 3, 6, 8, 9) sobresalen un poco arriba y abajo
+//                 -- es su "desborde" óptico, el mismo de cualquier tipografía
+//                 -- y PUEDEN salirse de la zona: no cuenta como "no cabe".
+//                 (Pedido explícito: antes el cuerpo lo mandaba el ancho de
+//                 un "55" y el número quedaba más bajo que la zona.)
 //
-// La ALTURA siempre se mide con la banda de una mayúscula sin tilde ("H"),
-// nunca con la tinta del propio dato: si no, "GARCÍA" saldría con menos
-// cuerpo que "ESTIVEN" por culpa del acento. El ANCHO sí es el de la tinta
-// real (primer pixel a último), no el avance tipográfico.
+// La ALTURA de un nombre o texto se mide con la banda de una mayúscula sin
+// tilde ("H"), nunca con la tinta del propio dato: si no, "GARCÍA" saldría
+// con menos cuerpo que "ESTIVEN" por culpa del acento. La de un número, con
+// la banda de una cifra plana ("1"). El ANCHO sí es el de la tinta real
+// (primer pixel a último), no el avance tipográfico.
 //
-// La escalera (solo cuando no cabe): tracking negativo -> reducir cuerpo ->
-// condensar. Es el orden de host.jsx -- lo último deforma la letra.
+// La escalera (solo cuando no cabe a lo ancho):
+//   - nombre/texto: tracking negativo -> reducir cuerpo -> condensar (el
+//     orden de host.jsx -- lo último deforma la letra).
+//   - número: tracking negativo -> condensar -> reducir cuerpo. Al revés que
+//     un nombre, porque el alto completo es lo que manda: achicar es lo último.
 //
 // Todo en cm. El "medidor" abstrae la fuente (ver medidorDeFontkit): este
 // módulo no sabe de archivos ni de red.
@@ -32,9 +41,7 @@ export const REGLAS_TEXTO = {
   trackingMinimo: -30, // milésimas de em, como el "tracking" de Illustrator
   condensacionMaxima: 90, // % mínimo de escala horizontal
   cuerpoMinimoFactor: 0.5, // nunca por debajo de la mitad del cuerpo base
-  percentilCalibracion: 85, // el 15% más ancho se ajusta solo, no manda
-  maxCandidatosCalibracion: 40,
-  referenciaNumero: '55', // el caso más exigente de dos dígitos
+  referenciaNumero: '55', // solo para saber que la zona es de números (el cuerpo sale del alto)
 };
 
 /**
@@ -71,9 +78,16 @@ export function medidorDeFontkit(fk) {
   const banda = bboxH && Number.isFinite(bboxH.minY) && bboxH.maxY > bboxH.minY
     ? { minY: bboxH.minY / upm, maxY: bboxH.maxY / upm }
     : { minY: 0, maxY: (fk.capHeight || upm * 0.7) / upm };
+  // La banda de las cifras: la de un "1" (plano arriba y abajo, sin el
+  // desborde de las redondas). Sin "1" en la fuente, la de mayúsculas.
+  const bbox1 = fk.hasGlyphForCodePoint(0x31) ? fk.layout('1').glyphs[0]?.bbox : null;
+  const bandaNumeros = bbox1 && Number.isFinite(bbox1.minY) && bbox1.maxY > bbox1.minY
+    ? { minY: bbox1.minY / upm, maxY: bbox1.maxY / upm }
+    : banda;
 
   return {
     banda,
+    bandaNumeros,
     /** Caracteres del texto que esta fuente NO trae (se imprimirían como un cuadrito vacío). */
     sinGlifo(texto) {
       const faltan = new Set();
@@ -114,6 +128,7 @@ export function medidorDeFontkit(fk) {
 export function medidorDeAvances(fuentePdfLib, alturaMayuscula = 0.718) {
   return {
     banda: { minY: 0, maxY: alturaMayuscula },
+    bandaNumeros: { minY: 0, maxY: alturaMayuscula },
     sinGlifo() { return []; },
     glifos(texto) {
       const ancho = fuentePdfLib.widthOfTextAtSize(texto, 1);
@@ -145,28 +160,28 @@ function medirTinta(glifos, cuerpo, trackingMil, escalaH) {
   };
 }
 
+function bandaDe(medidor, modo) {
+  return modo === 'calibrado' ? (medidor.bandaNumeros || medidor.banda) : medidor.banda;
+}
+
 /**
- * Cuerpo común de una zona "calibrada": el cuerpo al que cabe el candidato
- * del percentil elegido (no el más ancho de todos -- un solo "100" no tiene
- * que encoger a todo el equipo).
+ * Cuerpo común de una zona "calibrada" (números): el que hace que una cifra
+ * plana mida EXACTAMENTE el alto de la zona. Ya no depende del ancho de los
+ * datos -- el número que no entra a lo ancho se resuelve solo, en su propio
+ * ajuste (tracking, condensar y, recién al final, achicar), sin bajarle la
+ * altura a todos los demás.
+ *
+ * `candidatos` y `anchoCm` se siguen recibiendo para no cambiar quién la
+ * llama; solo se usan para saber si hay algo que medir.
  *
  * @returns {number|null} cuerpo en cm, o null si ningún candidato se pudo medir
  */
+// eslint-disable-next-line no-unused-vars
 export function calibrarCuerpo({ medidor, candidatos, anchoCm, altoCm, reglas = REGLAS_TEXTO }) {
-  const unicos = [...new Set((candidatos || []).map(String).filter((c) => c !== ''))];
-  // Se miden como mucho N, los más largos: el más ancho está entre ellos seguro.
-  unicos.sort((a, b) => b.length - a.length);
-  const medidos = unicos
-    .slice(0, reglas.maxCandidatosCalibracion)
-    .map((texto) => medirTinta(medidor.glifos(texto), 1, 0, 100).ancho)
-    .filter((ancho) => ancho > 0)
-    .sort((a, b) => a - b);
-  if (medidos.length === 0) return null;
-
-  let indice = Math.ceil((reglas.percentilCalibracion / 100) * medidos.length) - 1;
-  indice = Math.max(0, Math.min(medidos.length - 1, indice));
-  const alturaBanda = medidor.banda.maxY - medidor.banda.minY;
-  return limitarCuerpo(Math.min(anchoCm / medidos[indice], altoCm / alturaBanda));
+  const hayAlgo = (candidatos || []).some((c) => String(c) !== '' && medidor.glifos(String(c)).length > 0);
+  if (!hayAlgo || !(altoCm > 0)) return null;
+  const banda = bandaDe(medidor, 'calibrado');
+  return limitarCuerpo(altoCm / (banda.maxY - banda.minY));
 }
 
 /**
@@ -200,13 +215,18 @@ export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCali
   const glifos = medidor.glifos(valor);
   if (glifos.length === 0) return null;
 
-  const alturaBanda = medidor.banda.maxY - medidor.banda.minY;
+  const esNumero = modo === 'calibrado';
+  const banda = bandaDe(medidor, modo);
+  const alturaBanda = banda.maxY - banda.minY;
   const ancho1 = medirTinta(glifos, 1, 0, 100).ancho;
   const pasos = [];
 
   let cuerpo;
-  if (modo === 'calibrado' && cuerpoCalibradoCm > 0) {
-    cuerpo = limitarCuerpo(cuerpoCalibradoCm);
+  if (esNumero) {
+    // Un número siempre ocupa todo el alto (ver arriba); el cuerpo común de
+    // la zona, si viene, es ese mismo valor.
+    cuerpo = limitarCuerpo(cuerpoCalibradoCm > 0 ? cuerpoCalibradoCm : altoCm / alturaBanda);
+    pasos.push('cifra al alto de la zona: ' + cuerpo.toFixed(2) + ' cm');
   } else {
     cuerpo = limitarCuerpo(Math.min(anchoCm / ancho1, altoCm / alturaBanda));
     pasos.push('al alto de la zona: ' + cuerpo.toFixed(2) + ' cm');
@@ -215,11 +235,29 @@ export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCali
   let tracking = 0;
   let escalaH = 100;
   let tinta = medirTinta(glifos, cuerpo, tracking, escalaH);
-  // El alto se compara por la BANDA de mayúsculas, no por la tinta: una letra
-  // redonda (G, O, S) o una tilde sobresalen unas décimas por arriba/abajo y
-  // eso es la tipografía de toda la vida, no un texto que no cabe.
+  // El alto se compara por la BANDA (mayúsculas, o cifras planas), no por la
+  // tinta: una letra o cifra redonda (G, O, S, 0, 8) o una tilde sobresalen
+  // unas décimas por arriba/abajo -- es la tipografía de toda la vida (y en
+  // un número se deja salir de la zona a propósito), no un texto que no cabe.
   const cabe = () => tinta.ancho <= anchoCm + TOLERANCIA_CM && alturaBanda * cuerpo <= altoCm + TOLERANCIA_CM;
   const remedir = () => { tinta = medirTinta(glifos, cuerpo, tracking, escalaH); };
+
+  const reducirCuerpo = () => {
+    if (cabe() || !(reglas.cuerpoMinimoFactor < 1)) return;
+    // Para un número, solo el ancho decide (su alto ya es el de la zona); para
+    // un nombre, el que más apriete de los dos.
+    const k = esNumero ? anchoCm / tinta.ancho : Math.min(anchoCm / tinta.ancho, altoCm / tinta.alto);
+    cuerpo = limitarCuerpo(Math.max(cuerpo * k, nominal * reglas.cuerpoMinimoFactor));
+    pasos.push('cuerpo ' + cuerpo.toFixed(2) + ' cm (base ' + nominal.toFixed(2) + ')');
+    remedir();
+  };
+  const condensar = () => {
+    if (cabe() || !(reglas.condensacionMaxima < 100) || !(tinta.ancho > anchoCm)) return;
+    const necesaria = Math.floor(escalaH * (anchoCm / tinta.ancho));
+    escalaH = Math.max(reglas.condensacionMaxima, Math.min(100, necesaria));
+    pasos.push('condensado al ' + escalaH + '%');
+    remedir();
+  };
 
   // Paso 1: tracking negativo.
   if (!cabe() && reglas.trackingMinimo < 0 && tinta.ancho > anchoCm) {
@@ -227,23 +265,15 @@ export function ajustarTexto({ medidor, texto, anchoCm, altoCm, modo, cuerpoCali
     pasos.push('tracking ' + tracking);
     remedir();
   }
-  // Paso 2: reducir el cuerpo, con el factor exacto sobre la medida actual.
-  if (!cabe() && reglas.cuerpoMinimoFactor < 1) {
-    const k = Math.min(anchoCm / tinta.ancho, altoCm / tinta.alto);
-    cuerpo = limitarCuerpo(Math.max(cuerpo * k, nominal * reglas.cuerpoMinimoFactor));
-    pasos.push('cuerpo ' + cuerpo.toFixed(2) + ' cm (base ' + nominal.toFixed(2) + ')');
-    remedir();
-  }
-  // Paso 3: condensar -- el último, porque deforma la letra.
-  if (!cabe() && reglas.condensacionMaxima < 100 && tinta.ancho > anchoCm) {
-    const necesaria = Math.floor(escalaH * (anchoCm / tinta.ancho));
-    escalaH = Math.max(reglas.condensacionMaxima, Math.min(100, necesaria));
-    pasos.push('condensado al ' + escalaH + '%');
-    remedir();
-  }
+  // Pasos 2 y 3: un nombre achica y recién después condensa (condensar
+  // deforma la letra); un número condensa primero y achica solo si hace
+  // falta (achicar le quita el alto completo, que es lo que manda).
+  if (esNumero) { condensar(); reducirCuerpo(); } else { reducirCuerpo(); condensar(); }
 
-  // Colocación: tinta centrada en horizontal, banda de mayúsculas centrada en vertical.
-  const centroBanda = ((medidor.banda.minY + medidor.banda.maxY) / 2) * cuerpo;
+  // Colocación: tinta centrada en horizontal, banda (de mayúsculas, o de
+  // cifras planas) centrada en vertical -- un número a alto completo queda
+  // con la base de la cifra en el borde de abajo y su tope en el de arriba.
+  const centroBanda = ((banda.minY + banda.maxY) / 2) * cuerpo;
   return {
     texto: valor, // el texto normalizado que se midió: es EL que hay que dibujar
     sinGlifo: medidor.sinGlifo(valor),
