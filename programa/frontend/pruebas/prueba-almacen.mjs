@@ -100,12 +100,14 @@ console.log('\n--- Un cambio mientras una carga estaba en vuelo fuerza una segun
   const primera = almacen.cargar('piezas');
   almacen.guardarLocal('piezas', { id: 'z' }); // colección aún vacía de datos: no hace nada
   almacen.invalidar(['piezas']); // pide otra vez mientras la primera sigue en vuelo
+  let primeraTermino = false;
+  primera.then(() => { primeraTermino = true; });
   respuestas[0].resolver([{ id: 'a' }]);
-  await primera;
-  await esperar();
+  for (let i = 0; i < 5; i++) await esperar();
   comprobar('se pidió una segunda vez para no quedarse con la respuesta vieja', llamadas.piezas === 2, 'llamadas = ' + llamadas.piezas);
+  comprobar('quien esperaba la primera sigue esperando la segunda', primeraTermino === false);
   respuestas[1].resolver([{ id: 'a' }, { id: 'nuevo' }]);
-  await esperar(); await esperar();
+  await primera;
   comprobar('y quedó la respuesta más reciente', almacen.leer('piezas').datos.map((r) => r.id).join() === 'a,nuevo');
 }
 
@@ -166,6 +168,40 @@ console.log('\n--- enVuelo: avisa mientras la petición está en el aire (lo usa
   await p;
   await esperar();
   comprobar('al llegar la respuesta: ya no', almacen.enVuelo('piezas') === false);
+}
+
+console.log('\n--- Varios guardados seguidos (importar una prenda): quien espera recibe la lista con TODOS ---');
+{
+  // El servidor: cada respuesta es lo que había en la base al SALIR la petición.
+  const enBase = [{ id: 'a' }];
+  const respuestas = [];
+  const { almacen } = nuevo({
+    listar: () => {
+      const foto = enBase.slice();
+      const d = diferida();
+      respuestas.push(() => d.resolver(foto));
+      return d.promesa;
+    },
+  });
+  const primera = almacen.cargar('piezas');
+  await esperar();
+  respuestas.shift()();
+  await primera;
+
+  enBase.push({ id: 'b' });
+  almacen.cargar('piezas'); // guardado 1: sale una petición que solo conoce "b"
+  await esperar();
+  enBase.push({ id: 'c' });
+  const quienEspera = almacen.cargar('piezas'); // guardado 2, con la anterior en el aire
+  // Se responde todo lo que vaya saliendo, en orden.
+  let listo = false;
+  quienEspera.then(() => { listo = true; });
+  for (let i = 0; i < 10 && !listo; i++) {
+    if (respuestas.length) respuestas.shift()();
+    await esperar();
+  }
+  const ids = (almacen.leer('piezas').datos || []).map((r) => r.id).join(',');
+  comprobar('al terminar de esperar, la lista ya trae la pieza del último guardado', ids === 'a,b,c', ids);
 }
 
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');

@@ -98,11 +98,15 @@ export function crearAlmacen({ listadores, avisar = () => {}, vigenciaMs = 30000
         // Con datos a la vista, un fallo de fondo no los tumba: se quedan.
         poner(nombre, { cargando: false, error: estados[nombre].datos === null ? e.message : null });
       })
-      .finally(() => {
+      .then(() => {
         delete enCurso[nombre];
+        // La repetición se ENCADENA (no se larga suelta): quien esperaba esta
+        // carga tras un guardado recibe la lista que ya incluye ese guardado.
+        // Suelta, importar una prenda (varias piezas seguidas) entregaba la
+        // lista sin las últimas piezas y la prenda las mostraba como borradas.
         if (sucioDuranteCarga[nombre]) {
           sucioDuranteCarga[nombre] = false;
-          cargar(nombre, { silencioso: true });
+          return cargar(nombre, { silencioso: true });
         }
       });
     return enCurso[nombre];
