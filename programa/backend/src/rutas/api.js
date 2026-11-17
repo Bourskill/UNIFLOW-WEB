@@ -412,8 +412,27 @@ function agregarVersion(pieza, { geometriaPorTalla, dimensionesPorTalla, archivo
 // por forma y sin unidad física declarada.
 
 router.get('/piezas', async (req, res) => {
-  res.json(await leerColeccion('piezas'));
+  res.json((await leerColeccion('piezas')).map(piezaParaListar));
 });
+
+// Lo que la Biblioteca necesita de cada pieza, sin el peso muerto: del
+// historial de versiones solo usa número, fecha, motivo y medidas (no el
+// contorno de cada talla de cada versión vieja, que es lo más pesado de la
+// fila), y del archivo original solo saber si existe (reprocesar lo vuelve a
+// leer de la base). La pieza guardada no cambia; producción sigue leyendo
+// las versiones completas.
+export function piezaParaListar(pieza) {
+  const liviana = { ...pieza };
+  if (Array.isArray(pieza.versiones)) {
+    liviana.versiones = pieza.versiones.map(({ version, creadoEn, motivo, dimensionesPorTalla, formatoOriginal }) => (
+      { version, creadoEn, motivo, dimensionesPorTalla, formatoOriginal }
+    ));
+  }
+  if (typeof pieza.archivoOriginal === 'string' && pieza.archivoOriginal.startsWith('data:')) {
+    liviana.archivoOriginal = 'guardado'; // un archivo viejo incrustado en la fila: no se manda entero
+  }
+  return liviana;
+}
 
 function motorPorFormato(formato) {
   if (formato === 'dxf') return { analizar: analizarDxf, resolver: resolverDxf, decodificar: (texto) => texto };

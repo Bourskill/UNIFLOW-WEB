@@ -48,10 +48,40 @@ const supabase = createClient(url, process.env.SUPABASE_SERVICE_KEY || key);
 const claveStorage = process.env.SUPABASE_SERVICE_KEY;
 const supabaseStorage = claveStorage ? createClient(url, claveStorage) : null;
 
-export async function leerColeccion(nombre) {
-  const { data, error } = await supabase.from(nombre).select('datos').order('creado_en');
-  if (error) throw new Error('Supabase (leer ' + nombre + '): ' + error.message);
-  return data.map((fila) => fila.datos);
+// Leer una colección ENTERA de una sola consulta dejó de andar con las
+// piezas: cada fila trae el contorno de cada talla (y otra vez en su
+// historial de versiones), y con suficientes piezas la consulta pasaba el
+// límite de tiempo de Supabase ("canceling statement due to statement
+// timeout", 2026-11-17, después de importar una moldería). Ahora se lee en
+// tandas: cada consulta trae pocas filas y termina rápido. Si aun así una
+// tanda se pasa de tiempo, se reintenta con la mitad de filas (hasta de a
+// una), y ese tamaño se recuerda para la próxima lectura.
+const TANDA_INICIAL = { piezas: 8 };
+const tandaAprendida = {};
+
+export async function leerColeccion(nombre, { cliente = supabase } = {}) {
+  const filas = [];
+  let tanda = tandaAprendida[nombre] || TANDA_INICIAL[nombre] || 100;
+  let desde = 0;
+  for (;;) {
+    const { data, error } = await cliente
+      .from(nombre)
+      .select('datos')
+      .order('creado_en')
+      .order('id')
+      .range(desde, desde + tanda - 1);
+    if (error) {
+      if (/statement timeout/i.test(error.message) && tanda > 1) {
+        tanda = Math.max(1, Math.floor(tanda / 2));
+        tandaAprendida[nombre] = tanda;
+        continue;
+      }
+      throw new Error('Supabase (leer ' + nombre + '): ' + error.message);
+    }
+    for (const fila of data) filas.push(fila.datos);
+    if (data.length < tanda) return filas;
+    desde += tanda;
+  }
 }
 
 // Trae UN registro sin pasar por el resto de la colección -- para un PUT
