@@ -24,21 +24,31 @@ function ColorCampo({ etiqueta, valor, onCambiar }) {
   );
 }
 
-export function PanelFondo({ fondo, onCambiar, deshabilitado }) {
-  const f = normalizarFondo(fondo);
+// `heredable`: es el fondo de UNA pieza, que puede seguir al general
+// (fondo === null → "Igual que todas", mostrando `base`) o tener el suyo.
+export function PanelFondo({ fondo, onCambiar, deshabilitado, titulo = 'Fondo de todas las piezas', heredable = false, base = null }) {
+  const heredando = heredable && fondo == null;
+  const f = normalizarFondo(heredando ? base : fondo);
+  // Al pasar de "Igual que todas" a uno propio, arranca con los colores del general.
   const poner = (cambios) => onCambiar({ ...f, ...cambios });
   const muestra = f.tipo === 'solido' ? f.color1
     : f.tipo === 'degradado' ? 'linear-gradient(' + (f.anguloGrados + 90) + 'deg, ' + f.color1 + ', ' + f.color2 + ')'
       : 'transparent';
+  const claseBoton = (activo) => 'rounded-md border px-2.5 py-1 ' + (activo ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary');
 
   return (
     <div className={'mt-3 rounded-lg border border-border bg-surface p-3 text-xs ' + (deshabilitado ? 'pointer-events-none opacity-50' : '')}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold uppercase tracking-wide text-faint-foreground">Fondo de todas las piezas</span>
-        <div className="flex gap-1">
+        <span className="font-semibold uppercase tracking-wide text-faint-foreground">{titulo}</span>
+        <div className="flex flex-wrap gap-1">
+          {heredable && (
+            <button type="button" onClick={() => onCambiar(null)} className={claseBoton(heredando)}
+              title="Usa el fondo general del diseño">
+              Igual que todas
+            </button>
+          )}
           {TIPOS.map(([id, texto]) => (
-            <button key={id} type="button" onClick={() => poner({ tipo: id })}
-              className={'rounded-md border px-2.5 py-1 ' + (f.tipo === id ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary')}>
+            <button key={id} type="button" onClick={() => poner({ tipo: id })} className={claseBoton(!heredando && f.tipo === id)}>
               {texto}
             </button>
           ))}
@@ -48,7 +58,7 @@ export function PanelFondo({ fondo, onCambiar, deshabilitado }) {
         )}
       </div>
 
-      {f.tipo !== 'ninguno' && (
+      {!heredando && f.tipo !== 'ninguno' && (
         <div className="mt-3 flex flex-wrap items-center gap-4">
           <ColorCampo etiqueta={f.tipo === 'degradado' ? 'Color 1' : 'Color'} valor={f.color1} onCambiar={(c) => poner({ color1: c })} />
           {f.tipo === 'degradado' && (
@@ -76,9 +86,15 @@ export function PanelFondo({ fondo, onCambiar, deshabilitado }) {
         </div>
       )}
       <p className="mt-2 text-faint-foreground">
-        {f.tipo === 'ninguno'
-          ? 'Poné un color o degradado a todas las piezas de una vez y subí los diseños en PNG con fondo transparente encima.'
-          : 'Se aplica a todas las piezas, debajo de la imagen de cada una. Las partes transparentes del PNG dejan ver este fondo.'}
+        {heredable
+          ? heredando
+            ? 'Esta pieza usa el fondo general' + (f.tipo === 'ninguno' ? ' (ahora, sin fondo)' : '') + '. Elegí Sólido o Degradado para darle uno propio solo a ella.'
+            : f.tipo === 'ninguno'
+              ? 'Esta pieza va sin fondo, aunque las demás lo tengan.'
+              : 'Solo esta pieza lleva este fondo; las demás siguen con el general.'
+          : f.tipo === 'ninguno'
+            ? 'Poné un color o degradado a todas las piezas de una vez y subí los diseños en PNG con fondo transparente encima.'
+            : 'Se aplica a todas las piezas (salvo las que tengan uno propio), debajo de la imagen de cada una. Las partes transparentes del PNG dejan ver este fondo.'}
       </p>
     </div>
   );

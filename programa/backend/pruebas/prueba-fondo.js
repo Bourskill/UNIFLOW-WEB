@@ -6,7 +6,7 @@
 // vuelta por exportarPdf.js leyendo los colores que quedan en el PDF.
 
 import { readFileSync } from 'node:fs';
-import { normalizarFondo, fondoActivo, ejeDegradado, colorEn } from '../src/motor/fondoPieza.js';
+import { normalizarFondo, fondoActivo, fondoDePieza, ejeDegradado, colorEn } from '../src/motor/fondoPieza.js';
 import { generarPdfNesting } from '../src/motor/exportarPdf.js';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 
@@ -24,6 +24,18 @@ console.log('\n--- Datos del fondo ---');
   comprobar('colores en minúscula, uno inválido vuelve al de siempre, ángulo entre 0 y 359',
     f.color1 === '#ff0000' && f.color2 === '#000000' && f.anguloGrados === 270, JSON.stringify(f));
   comprobar('color en la mitad del degradado', colorEn({ color1: '#000000', color2: '#ffffff' }, 0.5).join() === '128,128,128');
+}
+
+console.log('\n--- Fondo propio de una pieza ---');
+{
+  const diseno = {
+    fondo: { tipo: 'solido', color1: '#111111' },
+    fondoPorPieza: { Manga: { tipo: 'degradado', color1: '#ff0000', color2: '#0000ff' }, Cuello: { tipo: 'ninguno' } },
+  };
+  comprobar('sin fondo propio: usa el general', fondoDePieza(diseno, 'Delantero')?.color1 === '#111111');
+  comprobar('con fondo propio: usa el suyo', fondoDePieza(diseno, 'Manga')?.tipo === 'degradado');
+  comprobar('con "sin fondo" propio: esa pieza queda sin fondo aunque haya general', fondoDePieza(diseno, 'Cuello') === null);
+  comprobar('sin general: solo las que tienen el suyo', fondoDePieza({ fondoPorPieza: diseno.fondoPorPieza }, 'Delantero') === null);
 }
 
 console.log('\n--- Eje del degradado (llega justo a los bordes de la pieza) ---');

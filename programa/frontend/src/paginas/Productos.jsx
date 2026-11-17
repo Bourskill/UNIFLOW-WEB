@@ -414,20 +414,55 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // Igual que el ajuste del arte: se ve al instante y se guarda en el diseño
   // un rato después del último cambio (el selector de color dispara muchos).
   // Sin diseño todavía, el primer cambio crea uno.
-  const [fondoLocal, setFondoLocal] = useState(undefined); // undefined = nada sin guardar
+  //
+  // Hay un fondo GENERAL (todas las piezas) y, encima, el PROPIO de cada
+  // pieza que lo pida (fondoPorPieza). Cambios sin guardar, por clave:
+  // GENERAL para el general; la clave de la pieza para el suyo (null = vuelve
+  // a usar el general).
+  const GENERAL = '*';
+  const [fondosLocales, setFondosLocales] = useState({});
   const [creandoDisenoFondo, setCreandoDisenoFondo] = useState(false);
-  const pendienteFondoRef = useRef(null); // { disenoId, fondo }
+  const pendienteFondoRef = useRef({ disenoId: null, cambios: {} });
   const temporizadorFondoRef = useRef(null);
-  const fondoVigente = fondoLocal !== undefined ? fondoLocal : disenoSeleccionado?.fondo || null;
+  const fondoVigente = GENERAL in fondosLocales ? fondosLocales[GENERAL] : disenoSeleccionado?.fondo || null;
+  function fondoPropioDe(clave) {
+    if (clave in fondosLocales) return fondosLocales[clave];
+    const propios = disenoSeleccionado?.fondoPorPieza || {};
+    return Object.prototype.hasOwnProperty.call(propios, clave) ? propios[clave] : null;
+  }
+  // Lo que de verdad lleva la pieza (lo que se ve en el lienzo).
+  function fondoEfectivoDe(clave) {
+    const propio = fondoPropioDe(clave);
+    return propio !== null ? propio : fondoVigente;
+  }
+  function cambiosAlDiseno(diseno, cambios) {
+    const datos = {};
+    if (GENERAL in cambios) datos.fondo = cambios[GENERAL];
+    const dePiezas = Object.entries(cambios).filter(([k]) => k !== GENERAL);
+    if (dePiezas.length) {
+      const mapa = { ...(diseno?.fondoPorPieza || {}) };
+      for (const [clave, fondo] of dePiezas) { if (fondo) mapa[clave] = fondo; else delete mapa[clave]; }
+      datos.fondoPorPieza = mapa;
+    }
+    return datos;
+  }
   async function guardarFondo() {
     clearTimeout(temporizadorFondoRef.current);
     temporizadorFondoRef.current = null;
-    const pendiente = pendienteFondoRef.current;
-    pendienteFondoRef.current = null;
-    if (!pendiente) return;
+    const { disenoId: idDiseno, cambios } = pendienteFondoRef.current;
+    pendienteFondoRef.current = { disenoId: null, cambios: {} };
+    const diseno = disenosRef.current.find((d) => d.id === idDiseno);
+    if (!diseno || Object.keys(cambios).length === 0) return;
     try {
-      guardarDisenoLocal(await editarDiseno(pendiente.disenoId, { fondo: pendiente.fondo }));
-      if (disenoRef.current?.id === pendiente.disenoId) setFondoLocal((prev) => (prev === pendiente.fondo ? undefined : prev));
+      guardarDisenoLocal(await editarDiseno(diseno.id, cambiosAlDiseno(diseno, cambios)));
+      // Lo ya guardado deja de ser "local" (salvo que haya cambiado otra vez mientras tanto).
+      if (disenoRef.current?.id === idDiseno) {
+        setFondosLocales((prev) => {
+          const r = { ...prev };
+          for (const k of Object.keys(cambios)) if (r[k] === cambios[k]) delete r[k];
+          return r;
+        });
+      }
     } catch (e) { setErrorDiseno('No se pudo guardar el fondo: ' + e.message); }
   }
   const guardarFondoRef = useRef(guardarFondo);
@@ -435,12 +470,14 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   useEffect(() => () => { if (temporizadorFondoRef.current) guardarFondoRef.current(); }, []);
   useEffect(() => {
     if (temporizadorFondoRef.current) guardarFondoRef.current();
-    setFondoLocal(undefined);
+    setFondosLocales({});
   }, [disenoId]);
 
-  async function cambiarFondo(fondo) {
+  // `clave` = GENERAL o la de una pieza; `fondo` null en una pieza = usar el general.
+  async function cambiarFondo(clave, fondo) {
     setErrorDiseno(null);
     if (!disenoSeleccionado) {
+      if (fondo === null) return;
       setCreandoDisenoFondo(true);
       try {
         const nombrePrendas = gruposSeleccionados.map((g) => g.nombre).join(' + ');
@@ -448,7 +485,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
           nombre: 'Diseño ' + (nombre.trim() || nombrePrendas || 'nuevo'),
           grupoIds,
           imagenesPorPieza: {},
-          fondo,
+          ...cambiosAlDiseno(null, { [clave]: fondo }),
         });
         guardarDisenoLocal(creado);
         setDisenoId(creado.id);
@@ -456,8 +493,11 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       finally { setCreandoDisenoFondo(false); }
       return;
     }
-    setFondoLocal(fondo);
-    pendienteFondoRef.current = { disenoId: disenoSeleccionado.id, fondo };
+    setFondosLocales((prev) => ({ ...prev, [clave]: fondo }));
+    pendienteFondoRef.current = {
+      disenoId: disenoSeleccionado.id,
+      cambios: { ...pendienteFondoRef.current.cambios, [clave]: fondo },
+    };
     clearTimeout(temporizadorFondoRef.current);
     temporizadorFondoRef.current = setTimeout(() => guardarFondoRef.current(), 400);
   }
@@ -974,7 +1014,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 : 'Arrastrá una imagen PNG o JPG sobre el molde de abajo para ponerle diseño a esa pieza.'}
             </p>
             {grupoIds.length > 0 && (
-              <PanelFondo fondo={fondoVigente} onCambiar={cambiarFondo} deshabilitado={creandoDisenoFondo} />
+              <PanelFondo fondo={fondoVigente} onCambiar={(f) => cambiarFondo(GENERAL, f)} deshabilitado={creandoDisenoFondo} />
             )}
             {errorDiseno && <div className="mt-2"><Aviso tono="error">{errorDiseno}</Aviso></div>}
           </div>
@@ -1079,7 +1119,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 ajusteArte={ajusteArteDe(piezaActiva)}
                 editandoArte={editandoArte && !!disenoSeleccionado?.imagenesPorPieza?.[piezaActiva]}
                 onMoverArte={(dx, dy) => moverArte(piezaActiva, dx, dy)}
-                fondo={fondoVigente}
+                fondo={fondoEfectivoDe(piezaActiva)}
               />
               {disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] && (
                 <PanelAjusteArte
@@ -1089,6 +1129,14 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                   onEditando={setEditandoArte}
                 />
               )}
+              <PanelFondo
+                titulo="Fondo de esta pieza"
+                fondo={fondoPropioDe(piezaActiva)}
+                base={fondoVigente}
+                heredable
+                onCambiar={(f) => cambiarFondo(piezaActiva, f)}
+                deshabilitado={creandoDisenoFondo}
+              />
               <p className="mt-1 text-xs text-faint-foreground">
                 {modo === 'zona' && 'Hacé clic sobre la pieza: ahí nace la zona, enganchada al rasgo más cercano.'}
                 {modo === 'cruzar' && 'Hacé clic en el segundo punto: entre los dos vas a poder elegir la esquina del cruce, o el punto medio.'}

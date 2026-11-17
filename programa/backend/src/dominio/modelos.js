@@ -216,6 +216,8 @@
  * @property {Record<string, string>} imagenesPorPieza  rol (o grupoId::rol) -> URL de Storage
  * @property {{tipo: string, color1: string, color2: string, anguloGrados: number}} [fondo]  color sólido o
  *   degradado de TODAS las piezas, debajo del arte (ver motor/fondoPieza.js).
+ * @property {Record<string, object>} [fondoPorPieza]  misma clave que imagenesPorPieza -> fondo
+ *   propio de esa pieza (reemplaza al general; tipo "ninguno" = esa pieza sin fondo).
  * @property {Record<string, object>} [ajusteArtePorPieza]  misma clave -> escala/alineación/corrimiento
  *   del arte sobre la pieza (ver motor/colocarArte.js). Sin entrada, el arte se estira a la pieza.
  */

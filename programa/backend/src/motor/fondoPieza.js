@@ -29,6 +29,16 @@ export function fondoActivo(fondo) {
 }
 
 /**
+ * El fondo que lleva una pieza: el suyo propio si tiene (fondoPorPieza, que
+ * puede ser "ninguno" para dejar SOLO esa pieza sin fondo), o si no, el
+ * general del diseño. null si no lleva fondo.
+ */
+export function fondoDePieza(diseno, clave) {
+  const propios = diseno?.fondoPorPieza || {};
+  return fondoActivo(Object.prototype.hasOwnProperty.call(propios, clave) ? propios[clave] : diseno?.fondo);
+}
+
+/**
  * Los dos extremos del degradado sobre una pieza de anchoCm × altoCm: la
  * línea pasa por el centro y llega justo a las esquinas más lejanas (como el
  * linear-gradient de CSS), así color1 y color2 tocan los bordes de la pieza.
