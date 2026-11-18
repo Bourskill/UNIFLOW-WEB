@@ -23,10 +23,24 @@ import { PanelAjusteArte } from '../componentes/PanelAjusteArte.jsx';
 import { PanelFondo } from '../componentes/PanelFondo.jsx';
 import { PanelEspejoPrenda } from '../componentes/PanelEspejoPrenda.jsx';
 import { normalizarAjusteArte } from '../utilidades/colocarArte.js';
+import {
+  firmaEditor, haySinGuardar, puedeGuardarseSolo, guardarBorrador, leerBorrador, borrarBorrador, borradorParaOfrecer, haceCuanto,
+} from '../utilidades/borradorDiseno.js';
 import { LienzoAnclaje, COLOR } from '../componentes/LienzoAnclaje.jsx';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
 
 const BORDE_POR_DEFECTO = { activo: false, colorHex: '#000000', grosorCm: 0.03, desplazamientoCm: 0 };
+// Un producto guardado tal como lo pone el editor al abrirlo (prenda vieja
+// suelta, sin borde guardado...): así abrirlo no cuenta como un cambio.
+function estadoDeProducto(p) {
+  return {
+    nombre: p.nombre || '',
+    grupoIds: p.grupoIds || (p.grupoId ? [p.grupoId] : []),
+    disenoId: p.disenoId || '',
+    anclaje: p.anclaje || { anclas: [], zonas: [] },
+    bordeContraste: p.bordeContraste || BORDE_POR_DEFECTO,
+  };
+}
 const LEYENDA_POR_DEFECTO = { piquetes: true, extremos: true, bordes: true, vertices: false, zonas: true };
 const ORIGENES_ZONA = [
   ['centro', 'el centro de la zona'], ['supIzq', 'su esquina de arriba a la izquierda'],
@@ -162,6 +176,12 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // plantillaParaUsar más abajo): hidratar grupoIds/anclaje/disenoId en el
   // mismo estado que ya maneja el lienzo, no un editor aparte.
   const [editandoId, setEditandoId] = useState(null);
+  // Guardado (ver más abajo, "Guardado automático"): huella de lo que está
+  // en el servidor (null = producto nuevo que nunca se guardó) y cómo va.
+  const [firmaGuardada, setFirmaGuardada] = useState(null);
+  const [estadoGuardado, setEstadoGuardado] = useState(null); // null | 'pendiente' | 'guardando' | 'guardado' | 'error'
+  const [guardadoEn, setGuardadoEn] = useState(null);
+  const [borradorOfrecido, setBorradorOfrecido] = useState(null);
 
   // El diseño ya no se arma en un panel aparte: se suelta la imagen sobre el
   // molde (LienzoAnclaje·onSoltarImagen) y queda en el diseño de este
@@ -217,6 +237,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // reentra a Diseño más tarde sin haber elegido otra plantilla.
   useEffect(() => {
     if (!plantillaParaUsar) return;
+    setEditandoId(null);
+    setFirmaGuardada(null);
+    setNombre('');
     setGrupoIds(plantillaParaUsar.grupoIds || (plantillaParaUsar.grupoId ? [plantillaParaUsar.grupoId] : []));
     setAnclaje(plantillaParaUsar.anclaje || { anclas: [], zonas: [] });
     if (plantillaParaUsar.bordeContraste) setBordeContraste(plantillaParaUsar.bordeContraste);
@@ -290,6 +313,10 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // así que cualquier ancla/zona ya armada quedaría apuntando a algo que ya
   // no es lo mismo. Mismo criterio que ya tenía el selector simple de antes.
   function alternarGrupo(id) {
+    if ((anclaje.zonas.length > 0 || anclaje.anclas.length > 0) &&
+        !window.confirm('Cambiar las prendas del producto borra las ' + anclaje.zonas.length + ' zona(s) que armaste (quedan apuntando a otras piezas). ¿Seguir?')) {
+      return;
+    }
     setGrupoIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
     setAnclaje({ anclas: [], zonas: [] });
     setSeleccion(null);
@@ -829,29 +856,137 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     });
   }
 
+  // ---- Guardado automático ---------------------------------------------
+  // Antes, "Guardar producto" vaciaba el editor (las zonas desaparecían de
+  // la pantalla aunque se hubieran guardado) y nada se guardaba hasta ese
+  // clic: una recarga, un corte o tocar otra prenda se llevaba el trabajo.
+  // Ahora:
+  //  - un producto con nombre y prenda (y, si es nuevo, al menos una zona)
+  //    se guarda SOLO en el servidor ~1,5 s después del último cambio;
+  //  - todo lo que no está en el servidor queda además como borrador en
+  //    este navegador, y al volver se ofrece recuperarlo;
+  //  - guardar NO vacía el editor: se sigue con el mismo producto.
+  const estadoEditor = { nombre, grupoIds, disenoId, anclaje, bordeContraste };
+  const firmaActual = firmaEditor(estadoEditor);
+  const sinGuardar = haySinGuardar(estadoEditor, firmaGuardada);
+  const autoguardable = puedeGuardarseSolo(estadoEditor, !editandoId);
+  const guardandoRef = useRef(false);
+  const estadoRef = useRef({});
+  estadoRef.current = { estadoEditor, editandoId, firmaActual };
+
+  async function guardarEnServidor() {
+    if (guardandoRef.current) return false;
+    const { estadoEditor: datosAhora, editandoId: idAhora, firmaActual: firmaAhora } = estadoRef.current;
+    guardandoRef.current = true;
+    setEstadoGuardado('guardando');
+    try {
+      const datos = {
+        nombre: datosAhora.nombre, grupoIds: datosAhora.grupoIds, disenoId: datosAhora.disenoId || null,
+        anclaje: datosAhora.anclaje, bordeContraste: datosAhora.bordeContraste,
+      };
+      const r = idAhora ? await editarProducto(idAhora, datos) : await crearProducto(datos);
+      confirmarGuardado('productos', r);
+      setProductos((prev) => (prev.some((x) => x.id === r.id) ? prev.map((x) => (x.id === r.id ? r : x)) : [...prev, r]));
+      setEditandoId(r.id);
+      setFirmaGuardada(firmaAhora);
+      setGuardadoEn(Date.now());
+      setEstadoGuardado('guardado');
+      setError(null);
+      if (estadoRef.current.firmaActual === firmaAhora) borrarBorrador();
+      return true;
+    } catch (e) {
+      setEstadoGuardado('error');
+      setError('No se pudo guardar: ' + e.message + '. Tus cambios siguen acá y en este navegador; se reintenta solo.');
+      return false;
+    } finally {
+      guardandoRef.current = false;
+    }
+  }
+
+  // Guardar solo en el servidor, un rato después del último cambio (y
+  // reintentar si falló). Si se cambia algo mientras guarda, al terminar
+  // la huella no coincide y vuelve a correr.
+  const guardandoAhora = estadoGuardado === 'guardando';
+  useEffect(() => {
+    if (!sinGuardar || !autoguardable || guardandoAhora) return undefined;
+    setEstadoGuardado((e) => (e === 'error' ? e : 'pendiente'));
+    const t = setTimeout(() => { guardarEnServidor(); }, estadoGuardado === 'error' ? 8000 : 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firmaActual, firmaGuardada, autoguardable, guardandoAhora]);
+
+  // Al abrir Diseño: si quedó un borrador de antes (recarga, corte...), ofrecer recuperarlo.
+  // Hasta revisarlo, el borrador de abajo no se toca (el editor recién
+  // abierto está vacío y lo borraría antes de poder ofrecerlo).
+  const [borradorRevisado, setBorradorRevisado] = useState(false);
+  useEffect(() => {
+    if (cargando || borradorRevisado) return;
+    const b = borradorParaOfrecer(leerBorrador(), productos, estadoDeProducto);
+    if (b) setBorradorOfrecido(b); else borrarBorrador();
+    setBorradorRevisado(true);
+  }, [cargando, productos, borradorRevisado]);
+
+  // Borrador en este navegador de todo lo que todavía no está en el servidor.
+  useEffect(() => {
+    if (!borradorRevisado || borradorOfrecido) return undefined; // no pisar el que se está ofreciendo recuperar
+    if (!sinGuardar) { borrarBorrador(); return undefined; }
+    const t = setTimeout(() => guardarBorrador({ editandoId, ...estadoRef.current.estadoEditor }), 400);
+    return () => clearTimeout(t);
+  }, [firmaActual, sinGuardar, editandoId, borradorOfrecido, borradorRevisado]);
+
+  function recuperarBorrador() {
+    const b = borradorOfrecido;
+    const guardado = b.productoExiste ? productos.find((x) => x.id === b.editandoId) : null;
+    setEditandoId(guardado ? guardado.id : null);
+    setFirmaGuardada(guardado ? firmaEditor(estadoDeProducto(guardado)) : null);
+    setEstadoGuardado(null);
+    setNombre(b.nombre);
+    setGrupoIds(b.grupoIds);
+    setDisenoId(b.disenoId || '');
+    setAnclaje(b.anclaje);
+    setBordeContraste(b.bordeContraste || BORDE_POR_DEFECTO);
+    setSeleccion(null);
+    setModo(null);
+    setTallaTrabajoPorRol({});
+    setBorradorOfrecido(null);
+  }
+  function descartarBorrador() {
+    borrarBorrador();
+    setBorradorOfrecido(null);
+  }
+
+  // Avisar antes de cerrar o recargar la pestaña con cambios que no llegaron al servidor.
+  useEffect(() => {
+    if (!sinGuardar) return undefined;
+    const alSalir = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', alSalir);
+    return () => window.removeEventListener('beforeunload', alSalir);
+  }, [sinGuardar]);
+
+  // Antes de cambiar de producto: lo pendiente se guarda (o se pregunta si no se puede).
+  async function dejarProductoActual() {
+    if (!sinGuardar) return true;
+    if (autoguardable) return guardarEnServidor();
+    return window.confirm('Este producto tiene cambios que todavía no se guardaron (le falta nombre, prenda o una zona). ¿Descartarlos?');
+  }
+
   async function guardar(evento) {
     evento.preventDefault();
     setError(null);
     if (!nombre.trim() || grupoIds.length === 0) { setError('Falta el nombre del producto o la prenda.'); return; }
-    try {
-      const datos = { nombre, grupoIds, disenoId: disenoId || null, anclaje, bordeContraste };
-      if (editandoId) await editarProducto(editandoId, datos);
-      else await crearProducto(datos);
-      setNombre('');
-      setAnclaje({ anclas: [], zonas: [] });
-      setSeleccion(null);
-      setEditandoId(null);
-      await recargar();
-      onCambio?.();
-    } catch (e) { setError(e.message); }
+    if (await guardarEnServidor()) onCambio?.();
   }
 
   // Carga un producto ya guardado de vuelta al mismo formulario/lienzo que
   // arma uno nuevo -- no reconstruye nada por separado, así el editor que
   // ya está probado (resolverAnclaje en vivo, PanelDock, etc.) se comporta
   // exactamente igual para editar que para crear.
-  function cargarParaEditar(producto) {
+  async function cargarParaEditar(producto) {
+    if (producto.id === editandoId) return;
+    if (!(await dejarProductoActual())) return;
     setEditandoId(producto.id);
+    setFirmaGuardada(firmaEditor(estadoDeProducto(producto)));
+    setEstadoGuardado(null);
     setNombre(producto.nombre);
     setGrupoIds(producto.grupoIds || (producto.grupoId ? [producto.grupoId] : []));
     setDisenoId(producto.disenoId || '');
@@ -863,8 +998,17 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setError(null);
   }
 
+  // Empieza un producto nuevo (lo del actual, guardado antes si se puede).
+  async function nuevoProducto() {
+    if (!(await dejarProductoActual())) return;
+    cancelarEdicionProducto();
+  }
+
   function cancelarEdicionProducto() {
     setEditandoId(null);
+    setFirmaGuardada(null);
+    setEstadoGuardado(null);
+    borrarBorrador();
     setNombre('');
     setAnclaje({ anclas: [], zonas: [] });
     setSeleccion(null);
@@ -984,6 +1128,18 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
         <p className="text-sm text-muted-foreground">Creá primero una prenda (Moldería → Biblioteca → + Nueva prenda).</p>
       ) : (
         <Tarjeta as="form" onSubmit={guardar} className="flex flex-col gap-4">
+          {borradorOfrecido && (
+            <Aviso tono="info">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="flex-1">
+                  Quedaron cambios sin guardar de «{borradorOfrecido.nombre || 'producto sin nombre'}» ({borradorOfrecido.anclaje.zonas.length} zona(s),
+                  {' '}{haceCuanto(borradorOfrecido.en)}){borradorOfrecido.productoExiste ? '' : ', de un producto que todavía no estaba guardado'}.
+                </span>
+                <Boton tamano="sm" variante="primario" type="button" onClick={recuperarBorrador}>Recuperar</Boton>
+                <Boton tamano="sm" variante="fantasma" type="button" onClick={descartarBorrador}>Descartar</Boton>
+              </div>
+            </Aviso>
+          )}
           <Campo etiqueta="Nombre del producto" className="max-w-3xl">
             <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Camiseta titular" />
           </Campo>
@@ -1275,8 +1431,11 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
           {editandoId && (
             <p className="text-xs font-semibold uppercase tracking-wide text-primary">Editando producto existente</p>
           )}
-          <div className="flex items-center gap-2">
-            <Boton variante="primario" type="submit">{editandoId ? 'Guardar cambios' : 'Guardar producto'}</Boton>
+          <div className="flex flex-wrap items-center gap-2">
+            <Boton variante="primario" type="submit" disabled={estadoGuardado === 'guardando'}>
+              {estadoGuardado === 'guardando' ? 'Guardando…' : editandoId ? 'Guardar cambios' : 'Guardar producto'}
+            </Boton>
+            <EstadoDeGuardado estado={estadoGuardado} sinGuardar={sinGuardar} autoguardable={autoguardable} guardadoEn={guardadoEn} esNuevo={!editandoId} />
             <Boton
               variante="fantasma" type="button"
               disabled={grupoIds.length === 0 || anclaje.zonas.length === 0}
@@ -1286,7 +1445,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
               Guardar como plantilla
             </Boton>
             {editandoId && (
-              <Boton variante="fantasma" type="button" onClick={cancelarEdicionProducto}>Cancelar edición</Boton>
+              <Boton variante="fantasma" type="button" onClick={nuevoProducto}>+ Producto nuevo</Boton>
             )}
           </div>
           {error && <Aviso tono="error">{error}</Aviso>}
@@ -1799,3 +1958,19 @@ function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasR
   );
 }
 
+// Cómo va el guardado del producto, al lado del botón Guardar.
+function EstadoDeGuardado({ estado, sinGuardar, autoguardable, guardadoEn, esNuevo }) {
+  let texto, color = 'text-faint-foreground';
+  if (estado === 'guardando') texto = 'Guardando…';
+  else if (estado === 'error') { texto = 'No se pudo guardar: se reintenta solo'; color = 'text-danger'; }
+  else if (sinGuardar && autoguardable) texto = 'Cambios sin guardar · se guarda solo en un momento';
+  else if (sinGuardar) {
+    texto = esNuevo ? 'Sin guardar · con nombre, prenda y una zona se guarda solo' : 'Sin guardar · falta el nombre o la prenda';
+    color = 'text-amber-400';
+  } else if (guardadoEn) {
+    texto = '✓ Guardado ' + new Date(guardadoEn).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    color = 'text-emerald-400';
+  } else if (!esNuevo) texto = '✓ Todo guardado';
+  if (!texto) return null;
+  return <span className={'text-xs ' + color} role="status" aria-live="polite">{texto}</span>;
+}

@@ -132,7 +132,13 @@ export function Arranque({ children }) {
     setFase('servidor');
   }
 
-  const appMontada = fase === 'cargando' || fase === 'listo';
+  const cargandoOListo = fase === 'cargando' || fase === 'listo';
+  // Una vez armada, la app NO se desarma si el servidor vuelve a pedir la
+  // clave: la clave se pide encima y lo que se estaba haciendo (zonas sin
+  // guardar, por ejemplo) sigue intacto debajo.
+  const [yaMontada, setYaMontada] = useState(false);
+  useEffect(() => { if (cargandoOListo) setYaMontada(true); }, [cargandoOListo]);
+  const appMontada = cargandoOListo || yaMontada;
   const pantallaVisible = fase !== 'listo' || saliendo;
   const servidorListo = servidorTardo !== null;
   const progreso = fase === 'listo' ? 100 : progresoTotal({
@@ -188,9 +194,9 @@ export function Arranque({ children }) {
                 </li>
               )}
               <Paso
-                estado={fase === 'clave' ? 'actual' : appMontada ? 'listo' : 'pendiente'}
+                estado={fase === 'clave' ? 'actual' : cargandoOListo ? 'listo' : 'pendiente'}
                 titulo="Acceso"
-                detalle={fase === 'clave' ? 'Ingresá la clave del taller' : appMontada ? 'Clave del taller' : ''}
+                detalle={fase === 'clave' ? (yaMontada ? 'El servidor pidió la clave de nuevo · tu trabajo sigue abierto' : 'Ingresá la clave del taller') : cargandoOListo ? 'Clave del taller' : ''}
               />
               {fase === 'clave' && <FormularioClave onEntrar={() => setFase('cargando')} />}
               {GRUPOS_DE_DATOS.map((g) => (
