@@ -153,7 +153,7 @@ export async function generarPdfPaginas(paginas) {
     if (cacheFuentes.has(url)) return cacheFuentes.get(url);
     let embebida = null;
     try {
-      embebida = await pdf.embedFont(await bytesDeFuente(url));
+      embebida = await incrustarFuente(pdf, await bytesDeFuente(url));
     } catch (error) {
       console.error('No se pudo usar la fuente personalizada (' + url + '): ' + error.message + ' -- se usa la de base.');
     }
@@ -164,7 +164,7 @@ export async function generarPdfPaginas(paginas) {
   // contornos reales, para poder medirla igual que se dibuja.
   let fuenteBaseEmbebida = null;
   async function fuenteBase() {
-    if (!fuenteBaseEmbebida) fuenteBaseEmbebida = await pdf.embedFont(await bytesDeFuente(null));
+    if (!fuenteBaseEmbebida) fuenteBaseEmbebida = await incrustarFuente(pdf, await bytesDeFuente(null));
     return fuenteBaseEmbebida;
   }
 
@@ -517,6 +517,19 @@ export function operadoresDeRelleno(pdf, pagina, fondo, anchoCm, altoCm, aPt) {
   const nombre = 'Dg' + patrones.keys().length;
   patrones.set(PDFName.of(nombre), patron);
   return [PDFOperator.of('cs', [PDFName.of('Pattern')]), PDFOperator.of('scn', [PDFName.of(nombre)])];
+}
+
+// La fuente con su nombre REAL (el PostScript de la propia fuente): pdf-lib
+// por defecto le agrega un número ("BeloidGothic-Regular-7572") y entonces
+// Illustrator la pide como si fuera otra fuente, aunque esté instalada.
+async function incrustarFuente(pdf, bytes) {
+  let nombre;
+  try {
+    nombre = fontkit.create(bytes).postscriptName || undefined;
+  } catch {
+    nombre = undefined;
+  }
+  return pdf.embedFont(bytes, nombre ? { customName: nombre } : {});
 }
 
 function dibujarArte(pagina, arte, rect) {

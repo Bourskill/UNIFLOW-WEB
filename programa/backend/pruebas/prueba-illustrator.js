@@ -13,6 +13,17 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { armarMesas } from '../src/motor/mesas.js';
 import { generarPdfPaginas } from '../src/motor/exportarPdf.js';
 import { conDocumentoIllustrator, documentoAiDePdf, textoDePartes } from '../src/motor/illustrator/documentoAi.js';
+import { ajustarTextosDePiezas } from '../src/motor/ajusteTexto.js';
+import { obtenerMedidor, bytesDeFuente } from '../src/motor/medidorFuentes.js';
+import fontkit from '@pdf-lib/fontkit';
+
+// Un color como lo escribe Illustrator: C M Y K R G B, de 0 a 1.
+function colorAiDe(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const k = 1 - Math.max(r, g, b);
+  const red = (v) => String(Math.round(v * 10000) / 10000);
+  return [(1 - r - k) / (1 - k), (1 - g - k) / (1 - k), (1 - b - k) / (1 - k), k, r, g, b].map(red).join(' ');
+}
 
 let fallos = 0, pasadas = 0;
 function comprobar(desc, cond, detalle) {
@@ -38,8 +49,10 @@ function png2x1() {
 }
 
 const cuadro = (w, h) => [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }];
+// Un molde con forma (una esquina cortada): ahí el diseño sí se recorta.
+const conForma = (w, h) => [{ x: 0, y: 0 }, { x: w - 10, y: 0 }, { x: w, y: 10 }, { x: w, y: h }, { x: 0, y: h }];
 const piezas = [
-  { piezaId: 'Delantero', talla: 'M', anchoCm: 50, altoCm: 70, contornoCm: cuadro(50, 70), piquetesCm: [{ x: 25, y: 0, ancho_cm: 0, alto_cm: 1 }],
+  { piezaId: 'Delantero', talla: 'M', anchoCm: 50, altoCm: 70, contornoCm: conForma(50, 70), piquetesCm: [{ x: 25, y: 0, ancho_cm: 0, alto_cm: 1 }],
     fondo: { tipo: 'solido', color1: '#6d1d1d' }, imagenDataUrl: 'data:image/png;base64,' + png2x1().toString('base64'), textos: [], imagenes: [] },
   { piezaId: 'Puño', talla: 'M', anchoCm: 30, altoCm: 6, contornoCm: cuadro(30, 6), piquetesCm: [],
     fondo: { tipo: 'degradado', color1: '#ffe100', color2: '#1d2a6b', anguloGrados: 90 }, textos: [], imagenes: [] },
@@ -79,6 +92,39 @@ comprobar('la imagen va incrustada con su transparencia aparte', raster && raste
 comprobar('la imagen va recortada a la forma de la pieza (una sola máscara)', (ai.match(/\nq\n/g) || []).length === 1 && /\nh\nW\nn\nQ\n/.test(ai));
 comprobar('los trazados cerrados repiten el primer punto (así los cierra Illustrator)', /\n28\.3465 2012\.6014 m\n[\s\S]*?\n28\.3465 2012\.6014 L\nf\n/.test(ai));
 comprobar('cada mesa es un grupo', (ai.match(/\nu\n/g) || []).length === 2 && (ai.match(/\nU\n/g) || []).length === 2);
+
+console.log('\n--- Máscaras: solo las que recortan ---');
+{
+  // El mismo diseño sobre un molde rectangular del tamaño de la imagen: el
+  // recorte no corta nada, así que no va.
+  const rect = armarMesas([{ ...piezas[0], contornoCm: cuadro(50, 70) }]);
+  const t = textoDePartes(await documentoAiDePdf(await generarPdfPaginas(rect)));
+  const capa = t.slice(t.indexOf('%AI5_BeginLayer'));
+  comprobar('un recorte que no corta nada no se escribe', !/\nq\n/.test(capa) && /\nXI\n/.test(capa));
+}
+
+console.log('\n--- Texto editable, con la fuente por su nombre real ---');
+{
+  const conTexto = await ajustarTextosDePiezas([{
+    ...piezas[1], fondo: { tipo: 'solido', color1: '#ffffff' }, anchoCm: 40, altoCm: 20, contornoCm: cuadro(40, 20),
+    textos: [{ modo: 'llenar', texto: 'Pérez (10)', anchoCm: 30, altoCm: 5, cxCm: 20, cyCm: 10, colorHex: '#123456', rotacionGrados: 0, alineacion: 'centro', espaciadoMil: 0, contorno: { grosorCm: 0.2, colorHex: '#ff0000' } }],
+  }], obtenerMedidor);
+  const pdfTexto = await generarPdfPaginas(armarMesas(conTexto));
+  const docTexto = await PDFDocument.load(pdfTexto);
+  const nombresFuentes = [];
+  docTexto.context.enumerateIndirectObjects().forEach(([, o]) => {
+    const tipo = o.get?.(PDFName.of('Type'));
+    if (String(tipo) === '/Font' && o.get(PDFName.of('BaseFont'))) nombresFuentes.push(String(o.get(PDFName.of('BaseFont'))));
+  });
+  const real = '/' + fontkit.create(await bytesDeFuente(null)).postscriptName;
+  comprobar('la fuente va con su nombre PostScript real, sin el número que agrega pdf-lib', nombresFuentes.includes(real), nombresFuentes.join(' '));
+  const t = textoDePartes(await documentoAiDePdf(pdfTexto));
+  const capa = t.slice(t.indexOf('%AI5_BeginLayer'));
+  comprobar('el texto va como texto de Illustrator (contorno detrás + relleno), no como trazados', (capa.match(/\/AI11Text :/g) || []).length === 2);
+  comprobar('va el documento de texto de Illustrator', t.includes('%AI11_BeginTextDocument') && t.includes(' /RulerOrigin ,'));
+  comprobar('sus colores, como estilos con nombre', (t.match(/\/KnownStyle :\n\(Anon [A-Za-z0-9+/=]+\) \/Name ,\n\/SimpleStyle :/g) || []).length === 2 &&
+    t.includes(colorAiDe('#123456') + ' Xa') && t.includes(colorAiDe('#ff0000') + ' Xa'));
+}
 
 console.log('\n--- El PDF sigue siendo el mismo para todo lo demás ---');
 const lector = await pdfjs.getDocument({ data: new Uint8Array(bytes), verbosity: 0 }).promise;

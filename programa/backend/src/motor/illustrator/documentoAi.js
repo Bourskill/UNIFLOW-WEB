@@ -18,7 +18,7 @@
 
 import zlib from 'node:zlib';
 import { readFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 import { PDFDocument, PDFName, PDFNumber, PDFString } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 
@@ -124,7 +124,9 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
   // Coordenadas del lienzo de Illustrator (Y hacia abajo), con el centro
   // de la primera mesa en el centro del lienzo: ahí vive la matriz de los degradados.
   const m1 = mesas[0];
-  const degradados = new Degradados({ kx: 8191 - (m1.izq + m1.der) / 2, ky: 8191 + (m1.abajo + m1.arriba) / 2 });
+  const lienzo = { kx: 8191 - (m1.izq + m1.der) / 2, ky: 8191 + (m1.abajo + m1.arriba) / 2 };
+  const degradados = new Degradados(lienzo);
+  const textos = new TextosEditables(lienzo);
   const arte = [];
   for (let i = 0; i < paginas.length; i++) {
     const p = paginas[i], m = mesas[i];
@@ -140,7 +142,7 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
       if (!imagenes.has(id)) imagenes.set(id, await esperarObjeto(p.pagina, id));
     }
     const base = [1, 0, 0, 1, m.izq - p.origen[0], m.abajo - p.origen[1]];
-    const nodos = traducirPagina(ops, p.pagina, base, degradados, imagenes);
+    const nodos = traducirPagina(ops, p.pagina, base, degradados, imagenes, textos);
     arte.push('u');
     for (const nodo of nodos) arte.push(nodo);
     arte.push('U');
@@ -148,7 +150,7 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
     p.pagina.cleanup();
   }
   await lector.destroy();
-  return armarTexto({ mesas, nombres: nombresDeMesas, arte, degradados, titulo });
+  return armarTexto({ mesas, nombres: nombresDeMesas, arte, degradados, textos, titulo });
 }
 
 // Las mesas en filas, de izquierda a derecha y de arriba hacia abajo, como
@@ -193,12 +195,18 @@ function estadoInicial(base) {
   };
 }
 
-function traducirPagina(lista, pagina, base, degradados, imagenes) {
+function traducirPagina(lista, pagina, base, degradados, imagenes, textos) {
   const raiz = [];
   const pilaContenedores = [raiz]; // raíz + recortes abiertos
   const hijos = () => pilaContenedores[pilaContenedores.length - 1];
   // Sin "...": un arte en PDF complejo puede traer cientos de miles de líneas.
-  const meter = (lineas) => { const h = hijos(); for (const x of lineas) h.push(x); };
+  // Cada lista de líneas puede traer su caja (lineas.caja): se va sumando a la
+  // del contenedor, para saber después si un recorte corta algo de verdad.
+  const meter = (lineas) => {
+    const h = hijos();
+    for (const x of lineas) h.push(x);
+    if (lineas.caja) h.caja = unirCajas(h.caja, lineas.caja);
+  };
   let e = estadoInicial(base);
   const pila = [];
   let recortePendiente = null;
@@ -207,7 +215,7 @@ function traducirPagina(lista, pagina, base, degradados, imagenes) {
   const cerrarRecortesHasta = (n) => {
     while (pilaContenedores.length - 1 > n) {
       const c = pilaContenedores.pop();
-      meter(grupoDeRecorte(c));
+      meter(grupoDeRecorte(c, pilaContenedores));
     }
   };
 
@@ -275,6 +283,7 @@ function traducirPagina(lista, pagina, base, degradados, imagenes) {
         if (recortePendiente) {
           const c = [];
           c.recorte = subcaminos;
+          c.cajaRecorte = cajaDe(subcaminos);
           c.regla = recortePendiente;
           pilaContenedores.push(c);
           recortePendiente = null;
@@ -308,7 +317,7 @@ function traducirPagina(lista, pagina, base, degradados, imagenes) {
       case OPS.nextLine: if (texto) { texto.tm = texto.tlm = multiplicar(texto.tlm, [1, 0, 0, 1, 0, -e.interlineado]); } break;
       case OPS.showText:
       case OPS.showSpacedText:
-        if (texto) meter(letras(a[0], e, texto, pagina, degradados));
+        if (texto) meter(letras(a[0], e, texto, pagina, degradados, textos));
         break;
       default: break;
     }
@@ -424,6 +433,9 @@ function objetoCamino(subcaminos, pintura, e, degradados, { regla: reglaForzada 
     }
   });
   if (compuesto) l.push('*U');
+  const caja = cajaDe(subcaminos);
+  const margen = traza ? (e.grosor * escalaDe(e.ctm)) / 2 : 0;
+  l.caja = { x0: caja.x0 - margen, y0: caja.y0 - margen, x1: caja.x1 + margen, y1: caja.y1 + margen };
   return l;
 }
 
@@ -442,16 +454,85 @@ function atributosDe(e, { rellena, traza, regla }) {
 }
 
 // Recorte (máscara): q, lo recortado, el trazado de recorte y Q -- como lo
-// escribe Illustrator para un grupo con máscara de recorte.
-function grupoDeRecorte(c) {
+// escribe Illustrator para un grupo con máscara de recorte. Solo si de
+// verdad recorta: los PDF de logos y diseños traen recortes al borde de su
+// página que no cortan nada, y cada uno sería una máscara de más.
+function grupoDeRecorte(c, abiertos) {
   if (c.length === 0) return [];
+  const sobra = () => {
+    const l = c.slice();
+    l.caja = c.caja;
+    return l;
+  };
+  if (!c.caja) return sobra();
+  // Lo que igual se ve: lo recortado, limitado por los recortes de afuera.
+  let visible = c.caja;
+  for (let k = abiertos.length - 1; k >= 1; k--) {
+    if (abiertos[k].cajaRecorte) visible = intersecarCajas(visible, abiertos[k].cajaRecorte);
+  }
+  if (visible.x0 >= visible.x1 || visible.y0 >= visible.y1) return sobra();
+  // Eso entra entero en este recorte: no recorta nada.
+  if (cajaDentroDeRecorte(visible, c.recorte)) return sobra();
+  // Un recorte rectangular que abarca a otro de afuera: el de afuera ya manda.
+  if (esRectangulo(c.recorte)) {
+    for (let k = abiertos.length - 1; k >= 1; k--) {
+      const afuera = abiertos[k].cajaRecorte;
+      if (afuera && cajaContiene(c.cajaRecorte, afuera)) return sobra();
+    }
+  }
   const l = ['q'].concat(c);
   const subs = c.recorte;
   if (subs.length > 1) l.push('*u');
   for (const sub of subs) l.push(...textoDeCamino(sub, 'h', true).concat(['W', 'n']));
   if (subs.length > 1) l.push('*U');
   l.push('Q');
+  l.caja = intersecarCajas(c.caja, c.cajaRecorte);
   return l;
+}
+
+const TOLERANCIA = 0.5; // pt
+
+function unirCajas(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) };
+}
+function intersecarCajas(a, b) {
+  return { x0: Math.max(a.x0, b.x0), y0: Math.max(a.y0, b.y0), x1: Math.min(a.x1, b.x1), y1: Math.min(a.y1, b.y1) };
+}
+function cajaContiene(grande, chica) {
+  return grande.x0 <= chica.x0 + TOLERANCIA && grande.y0 <= chica.y0 + TOLERANCIA && grande.x1 >= chica.x1 - TOLERANCIA && grande.y1 >= chica.y1 - TOLERANCIA;
+}
+function puntosDe(sub) {
+  return sub.seg.map((s) => (s[0] === 'C' ? [s[5], s[6]] : [s[1], s[2]]));
+}
+// Un solo subcamino recto de 4 lados alineados a los ejes.
+function esRectangulo(subs) {
+  if (subs.length !== 1 || subs[0].seg.some((s) => s[0] === 'C')) return false;
+  const caja = cajaDe(subs);
+  return puntosDe(subs[0]).every(([x, y]) =>
+    (Math.abs(x - caja.x0) < TOLERANCIA || Math.abs(x - caja.x1) < TOLERANCIA) &&
+    (Math.abs(y - caja.y0) < TOLERANCIA || Math.abs(y - caja.y1) < TOLERANCIA));
+}
+// ¿La caja entera cae adentro del recorte? Para un rectángulo, comparar
+// cajas; para otra forma, las 4 esquinas adentro y ningún borde del recorte
+// cruzando la caja.
+function cajaDentroDeRecorte(caja, subs) {
+  if (esRectangulo(subs)) return cajaContiene(cajaDe(subs), caja);
+  if (subs.length !== 1) return false;
+  const pol = puntosDe(subs[0]);
+  if (subs[0].seg.some((s) => s[0] === 'C')) return false;
+  const esquinas = [[caja.x0, caja.y0], [caja.x1, caja.y0], [caja.x1, caja.y1], [caja.x0, caja.y1]];
+  if (!esquinas.every(([x, y]) => puntoEnPoligono(x, y, pol))) return false;
+  return pol.every(([x, y]) => x <= caja.x0 || x >= caja.x1 || y <= caja.y0 || y >= caja.y1);
+}
+function puntoEnPoligono(x, y, pol) {
+  let dentro = false;
+  for (let i = 0, j = pol.length - 1; i < pol.length; j = i++) {
+    const [xi, yi] = pol[i], [xj, yj] = pol[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) dentro = !dentro;
+  }
+  return dentro;
 }
 
 // --- imágenes ---
@@ -495,11 +576,13 @@ function raster(img, ctm, colorMascara) {
   }
   // Píxel (px,py), fila 0 arriba → mesa: la matriz de Illustrator.
   const [A, B, C, D, E, F] = ctm;
+  const esquinas = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([u, v]) => aplicar(ctm, u, v));
+  const caja = { x0: Math.min(...esquinas.map((p) => p[0])), y0: Math.min(...esquinas.map((p) => p[1])), x1: Math.max(...esquinas.map((p) => p[0])), y1: Math.max(...esquinas.map((p) => p[1])) };
   const m = [A / w, -B / w, -C / h, D / h, C + E, D + F];
   const matriz = '[ ' + m.map(n).join(' ') + ' ]';
   // Como Illustrator: los píxeles RGB y después, aparte, la transparencia
   // (ya sin premultiplicar). Van como Buffer: se escriben tal cual.
-  return [
+  const lineas = [
     '%AI5_File:', '%AI5_BeginRaster', '() 1 XG', '/DeviceRGB XN',
     matriz + ' ' + w + ' ' + h + ' 0 Xh',
     matriz + ' 0 0 ' + w + ' ' + h + ' ' + w + ' ' + h + ' 8 3 ' + (alfa ? '1 17' : '0 1') + ' 1 0 4 4 0 0',
@@ -509,14 +592,21 @@ function raster(img, ctm, colorMascara) {
     '%AI5_EndRaster',
     'N',
   ];
+  lineas.caja = caja;
+  return lineas;
 }
 
 // --- letras ---
-function letras(glifos, e, texto, pagina, degradados) {
+function letras(glifos, e, texto, pagina, degradados, textos) {
   const fuente = e.fuente ? objetoDe(pagina, e.fuente) : null;
   if (!fuente) return [];
   const mf = fuente.fontMatrix || [0.001, 0, 0, 0.001, 0, 0];
   const modo = e.modoTexto;
+  // Texto EDITABLE de Illustrator, con su fuente por nombre: lo normal. Solo
+  // si no se puede (fuente sin nombre, texto invisible o de recorte, color
+  // de degradado) va como contornos.
+  const editable = textoEditable(glifos, e, texto, fuente, mf, textos);
+  if (editable) return editable;
   const salida = [];
   const subcaminos = [];
   for (const g of glifos) {
@@ -537,9 +627,191 @@ function letras(glifos, e, texto, pagina, degradados) {
     const pintura = modo === 1 ? OPS.stroke : modo === 2 ? OPS.fillStroke : OPS.fill;
     // El grosor del contorno del texto está en el espacio del texto.
     const obj = objetoCamino(subcaminos, pintura, e, degradados, { regla: 'nonzero' });
-    if (obj) salida.push(...obj);
+    if (obj) { salida.push(...obj); salida.caja = obj.caja; }
   }
   return salida;
+}
+
+function nombreDeFuente(fuente) {
+  // pdf.js puede dejar el prefijo de subconjunto ("ABCDEF+Nombre").
+  const nombre = String(fuente.name || '').replace(/^[A-Z]{6}\+/, '');
+  return /^[\x21-\x7e]+$/.test(nombre) && !/^(g_d|Helvetica|Times|Courier|Symbol|ZapfDingbats)/.test(nombre) ? nombre : null;
+}
+
+function textoEditable(glifos, e, texto, fuente, mf, textos) {
+  const modo = e.modoTexto;
+  if (![0, 1, 2].includes(modo)) return null;
+  const nombre = nombreDeFuente(fuente);
+  if (!nombre) return null;
+  const rellena = modo !== 1, traza = modo !== 0;
+  if ((rellena && !e.relleno.rgb) || (traza && !e.trazo.rgb) || (rellena && e.relleno.degradado)) return null;
+  const inicio = multiplicar(e.ctm, texto.tm);
+  let cadena = '';
+  for (const g of glifos) {
+    if (typeof g === 'number') {
+      texto.tm = multiplicar(texto.tm, [1, 0, 0, 1, (-g / 1000) * e.cuerpo * e.escalaH, 0]);
+      continue;
+    }
+    cadena += g.unicode || '';
+    const avance = (g.width || 0) * mf[0] * e.cuerpo + e.espaciadoLetra + (g.isSpace ? e.espaciadoPalabra : 0);
+    texto.tm = multiplicar(texto.tm, [1, 0, 0, 1, avance * e.escalaH, 0]);
+  }
+  if (!cadena.trim()) return [];
+  // La matriz del texto (sin el tamaño): giro y posición de la línea de base.
+  const escala = escalaDe(inicio);
+  const m = [inicio[0] / escala, inicio[1] / escala, inicio[2] / escala, inicio[3] / escala, inicio[4], inicio[5]];
+  const m2 = multiplicar(m, [1, 0, 0, 1, 0, e.subida]);
+  const historia = textos.agregar({
+    texto: cadena, fuente: nombre, tipoFuente: 1,
+    tamano: e.cuerpo * escala, escalaH: e.escalaH, tracking: e.cuerpo ? (e.espaciadoLetra / e.cuerpo) * 1000 : 0,
+    matriz: m2, relleno: rellena ? e.relleno.rgb : null,
+    trazo: traza ? { rgb: e.trazo.rgb, grosor: e.grosor * escalaDe(e.ctm), union: e.union } : null,
+  });
+  // Caja aproximada: del inicio al fin de la línea, de la bajada a la altura del cuerpo.
+  const fin = aplicar(multiplicar(e.ctm, texto.tm), 0, 0);
+  const largo = Math.hypot(fin[0] - inicio[4], fin[1] - inicio[5]);
+  const esquinas = [[0, -0.3], [largo / (e.cuerpo * escala || 1), -0.3], [largo / (e.cuerpo * escala || 1), 1], [0, 1]]
+    .map(([u, v]) => aplicar(multiplicar(m2, [e.cuerpo * escala, 0, 0, e.cuerpo * escala, 0, 0]), u, v));
+  const lineasTexto = [
+    '/AI11Text :', '0 /FreeUndo ,', '0 /FrameIndex ,', historia + ' /StoryIndex ,', '2 /TextAntialiasing ,', ';', '',
+    '0 ' + n(Math.min(rellena ? e.opacidadRelleno : 1, traza ? e.opacidadTrazo : 1)) + ' 0 0 0 Xy',
+    '0 J 0 j 1 w 10 M []0 d', '0 XR', '0 0 Xd', '6 () XW',
+  ];
+  lineasTexto.caja = { x0: Math.min(...esquinas.map((p) => p[0])), y0: Math.min(...esquinas.map((p) => p[1])), x1: Math.max(...esquinas.map((p) => p[0])), y1: Math.max(...esquinas.map((p) => p[1])) };
+  return lineasTexto;
+}
+
+// El "documento de texto" de Illustrator: todas las historias (cada texto),
+// sus marcos y las fuentes, en el formato de su motor de texto (claves
+// numéricas, cadenas UTF-16), sobre una plantilla guardada por Illustrator.
+const PLANTILLA_TEXTO = readFileSync(new URL('./documentoTexto.bin', import.meta.url), 'latin1');
+const FUENTES_BASE = [
+  ['MyriadPro-Regular', 0, 'Version 2.106;PS 2.000;hotconv 1.0.70;makeotf.lib2.5.58329'],
+  ['TimesNewRomanPSMT', 1, 'Version 7.12'],
+  ['MyriadPro-Regular', 0, 'Version 2.106;PS 2.000;hotconv 1.0.70;makeotf.lib2.5.58329'],
+  ['AdobeInvisFont', 0, 'Version 1.003;hotconv 1.1.0;makeotfexe 2.6.0', ' /4 [ 30801920 53739520 ]'],
+];
+
+function cadenaUtf16(s) {
+  const b = Buffer.from('﻿' + s, 'utf16le').swap16();
+  let r = '(';
+  for (const byte of b) r += byte === 0x28 || byte === 0x29 || byte === 0x5c ? '\\' + String.fromCharCode(byte) : String.fromCharCode(byte);
+  return r + ')';
+}
+function real(v) {
+  const s = n(v);
+  return s.includes('.') ? s : s + '.0';
+}
+// El color de un texto NO va en el documento de texto: ahí va solo el nombre
+// de un estilo gráfico ("Anon ..."), y el color real está en ese estilo
+// (sección de estilos gráficos del documento). Ver TextosEditables.estilos().
+function pintura(rgb, estilos) {
+  const clave = rgb.map((v) => v.toFixed(4)).join(',');
+  let nombre = estilos.get(clave)?.nombre;
+  if (!nombre) {
+    nombre = 'Anon ' + randomBytes(8).toString('base64');
+    estilos.set(clave, { nombre, rgb });
+  }
+  const [r, g, b] = rgb;
+  return '<< /99 /CAITextPaint /5 ' + cadenaUtf16(nombre) + ' /0 << /0 1 /1 [ 1.0 ' + [r, g, b].map(real).join(' ') + ' ] >> >>';
+}
+
+class TextosEditables {
+  constructor(lienzo) {
+    this.lienzo = lienzo;
+    this.historias = [];
+    this.fuentes = FUENTES_BASE.map(([nombre]) => nombre);
+    this.fuentesNuevas = [];
+    this.estilosDeColor = new Map();
+  }
+
+  // Los estilos gráficos con los colores de los textos (después de documento()).
+  estilos() {
+    if (!this.estilosDeColor.size) return [];
+    const l = ['%AI5_Begin_NonPrinting', 'Np', '%AI9_BeginArtStyles'];
+    for (const { nombre, rgb } of this.estilosDeColor.values()) {
+      l.push('/KnownStyle :', '(' + nombre + ') /Name ,', '/SimpleStyle :', '0 O', colorAi(rgb) + ' Xa', '0 R', colorAi(rgb) + ' XA',
+        '0 1 0 0 0 Xy', '0 J 0 j 1 w 10 M []0 d\r0 XR', '0 1 Xd', '/Paint ;', ' /Def ;');
+    }
+    l.push('%AI9_EndArtStyles', '%AI5_End_NonPrinting--');
+    return l;
+  }
+
+  indiceDeFuente(nombre, tipo) {
+    const i = this.fuentes.indexOf(nombre, 1);
+    if (i >= 0) return i;
+    this.fuentes.push(nombre);
+    this.fuentesNuevas.push([nombre, tipo]);
+    return this.fuentes.length - 1;
+  }
+
+  agregar(t) {
+    t.indiceFuente = this.indiceDeFuente(t.fuente, t.tipoFuente);
+    this.historias.push(t);
+    return this.historias.length - 1;
+  }
+
+  documento() {
+    if (!this.historias.length) return [];
+    const fuente = ([nombre, tipo, version, extra = '']) =>
+      '<< /0 << /99 /CoolTypeFont /97 (' + randomUUID() + ') /0 << /0 ' + cadenaUtf16(nombre) + ' /2 ' + tipo + extra +
+      (version ? ' /5 ' + cadenaUtf16(version) : '') + ' >> >> >>';
+    const fuentes = [...FUENTES_BASE, ...this.fuentesNuevas].map(fuente).join(' ');
+    const historias = this.historias.map((t, i) => {
+      const largo = [...t.texto].length + 1;
+      const a = ['/0 ' + t.indiceFuente, '/1 ' + real(t.tamano)];
+      if (Math.abs(t.escalaH - 1) > 1e-4) a.push('/6 ' + real(t.escalaH));
+      if (Math.abs(t.tracking) > 0.01) a.push('/8 ' + Math.round(t.tracking));
+      a.push('/11 0'); // sin kerning automático: el ancho queda como lo midió la app
+      if (t.relleno) a.push('/53 ' + pintura(t.relleno, this.estilosDeColor));
+      if (t.trazo) a.push('/54 ' + pintura(t.trazo.rgb, this.estilosDeColor));
+      a.push('/56 ' + (t.relleno ? 'true' : 'false'), '/57 ' + (t.trazo ? 'true' : 'false'));
+      if (t.trazo) a.push('/62 ' + (t.trazo.union || 0), '/63 ' + real(t.trazo.grosor));
+      a.push('/89 ' + real(t.tamano), '/92 0.0');
+      return '<< /0 << /0 ' + cadenaUtf16(t.texto + '\r') +
+        ' /6 << /0 [ << /0 << /0 << /97 (' + randomUUID() + ') /0 ' + cadenaUtf16('') + ' /5 0 /6 << ' + a.join(' ') + ' >> >> >> /1 ' + largo + ' >> ] >>' +
+        ' /10 << /0 4 /2 true >> >> /1 << /4 << /0 7 /1 11 /2 0 /3 ' + cadenaUtf16('Illustrator') + ' >> /5 0 /0 [ << /0 ' + i + ' >> ]' +
+        ' /1 << /0 [ << /0 << /1 1 >> /1 ' + largo + ' >> ] >> >> >>';
+    }).join(' ');
+    // Marcos: texto de punto, matriz en coordenadas del lienzo (Y hacia
+    // abajo) alrededor del origen de regla.
+    const { kx, ky } = this.lienzo;
+    // El texto se arma en el origen de regla y la matriz (en coordenadas
+    // absolutas del lienzo) lo lleva a su lugar: M(origen) = línea de base.
+    const marcos = this.historias.map((t) => {
+      const [a, b, c, d, x, y] = t.matriz;
+      const [A, B, C, D] = [a, -b, -c, d];
+      const ax = x + kx, ay = ky - y;
+      const tx = ax - (A * kx + C * ky), ty = ay - (B * kx + D * ky);
+      return '<< /0 << /97 (' + randomUUID() + ') /0 [ ' + real(kx) + ' ' + real(ky) + ' ] /2 << /2 [ ' +
+        [A, B, C, D, tx, ty].map(real).join(' ') + ' ] >> >> >>';
+    }).join(' ');
+    const datos = PLANTILLA_TEXTO.replace('@@FUENTES@@', fuentes).replace('@@HISTORIAS@@', historias).replace('@@MARCOS@@', marcos);
+    return [
+      '%AI11_BeginTextDocument',
+      '/AI11TextDocument : /ASCII85Decode ,',
+      ...ascii85(Buffer.from(datos, 'latin1')).map((l) => '%' + l),
+      real(kx) + ' ' + real(ky) + ' /RulerOrigin ,',
+      ';',
+      '%AI11_EndTextDocument',
+    ];
+  }
+}
+
+function ascii85(buf) {
+  let s = '';
+  for (let i = 0; i < buf.length; i += 4) {
+    const trozo = buf.subarray(i, i + 4);
+    const relleno = 4 - trozo.length;
+    const v = ((trozo[0] << 24) | ((trozo[1] || 0) << 16) | ((trozo[2] || 0) << 8) | (trozo[3] || 0)) >>> 0;
+    if (v === 0 && relleno === 0) { s += 'z'; continue; }
+    let x = v;
+    const d = new Array(5);
+    for (let k = 4; k >= 0; k--) { d[k] = String.fromCharCode((x % 85) + 33); x = Math.floor(x / 85); }
+    s += d.slice(0, 5 - relleno).join('');
+  }
+  s += '~>';
+  return s.match(/.{1,100}/g);
 }
 
 // --- colores y degradados ---
@@ -667,17 +939,49 @@ function matrizDeDegradado({ kx, ky }, caja, p0, p1) {
   return [zr, zi, -zi, zr, P0[0] - (zr * L[0] - zi * L[1]), P0[1] - (zi * L[0] + zr * L[1])];
 }
 
+// La caja REAL del trazado (la de las curvas, no la de sus puntos de
+// control, que pueden quedar bien afuera): la misma que usa Illustrator.
 function cajaDe(subcaminos) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const sub of subcaminos) for (const s of sub.seg) {
-    // Con los puntos de control alcanza: es la caja que usa Illustrator
-    // salvo en curvas muy abiertas.
-    for (let k = 1; k < s.length; k += 2) {
-      x0 = Math.min(x0, s[k]); x1 = Math.max(x1, s[k]);
-      y0 = Math.min(y0, s[k + 1]); y1 = Math.max(y1, s[k + 1]);
+  const punto = (x, y) => {
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x);
+    y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  };
+  for (const sub of subcaminos) {
+    let px = 0, py = 0;
+    for (const s of sub.seg) {
+      if (s[0] !== 'C') {
+        punto(s[1], s[2]);
+        px = s[1]; py = s[2];
+        continue;
+      }
+      const [, ax, ay, bx, by, cx, cy] = s;
+      punto(cx, cy);
+      for (const t of extremosCubica(px, ax, bx, cx)) punto(cubica(px, ax, bx, cx, t), cubica(py, ay, by, cy, t));
+      for (const t of extremosCubica(py, ay, by, cy)) punto(cubica(px, ax, bx, cx, t), cubica(py, ay, by, cy, t));
+      px = cx; py = cy;
     }
   }
   return { x0, y0, x1, y1 };
+}
+function cubica(p0, p1, p2, p3, t) {
+  const u = 1 - t;
+  return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
+}
+// Los t (entre 0 y 1) donde la curva da la vuelta en ese eje.
+function extremosCubica(p0, p1, p2, p3) {
+  const a = -p0 + 3 * p1 - 3 * p2 + p3, b = 2 * (p0 - 2 * p1 + p2), c = p1 - p0;
+  const ts = [];
+  if (Math.abs(a) < 1e-12) {
+    if (Math.abs(b) > 1e-12) ts.push(-c / b);
+  } else {
+    const d = b * b - 4 * a * c;
+    if (d >= 0) {
+      const r = Math.sqrt(d);
+      ts.push((-b + r) / (2 * a), (-b - r) / (2 * a));
+    }
+  }
+  return ts.filter((t) => t > 0 && t < 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -695,7 +999,10 @@ function utf8(s) {
   return Buffer.from(String(s), 'utf8').toString('latin1');
 }
 
-function armarTexto({ mesas, nombres, arte, degradados, titulo }) {
+function armarTexto({ mesas, nombres, arte, degradados, textos, titulo }) {
+  // Primero el documento de texto: ahí se juntan los colores de los estilos.
+  const lineasTexto = textos.documento();
+  const documentoDeTexto = { lineas: lineasTexto, estilos: textos.estilos() };
   const izq = Math.min(...mesas.map((m) => m.izq)), der = Math.max(...mesas.map((m) => m.der));
   const abajo = Math.min(...mesas.map((m) => m.abajo)), arriba = Math.max(...mesas.map((m) => m.arriba));
   const m1 = mesas[0];
@@ -779,7 +1086,7 @@ function armarTexto({ mesas, nombres, arte, degradados, titulo }) {
   mesasTxt.push('%_; (ArtboardArray) ,');
   const datos = DATOS_DOCUMENTO.replace('@@MESAS@@', mesasTxt.join('\n')).replace('@@ULTIMA@@', String(mesas.length));
   const partes = [
-    ...cabecera, ...degradados.definiciones(), datos, '%%EndSetup',
+    ...cabecera, ...degradados.definiciones(), ...documentoDeTexto.estilos, datos, ...documentoDeTexto.lineas, '%%EndSetup',
     '%AI5_BeginLayer', '1 1 1 1 0 0 1 0 79 128 255 0 50 0 Lb', '(Capa 1) Ln', '0 A', '0 Xw',
   ];
   for (const a of arte) partes.push(a);
