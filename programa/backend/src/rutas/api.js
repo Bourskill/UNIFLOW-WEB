@@ -5,6 +5,7 @@ import { resolverPiezasDeGrupo, resolverPiezasDeGrupos } from '../dominio/resolv
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting, generarPdfPaginas } from '../motor/exportarPdf.js';
 import { armarMesas } from '../motor/mesas.js';
+import { conDocumentoIllustrator } from '../motor/illustrator/documentoAi.js';
 import { resolverPiezasDePedido, tallaRealDePieza } from '../motor/resolverPedido.js';
 import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
 import { geometriaDelGrupo, geometriaParaAnclaje } from '../motor/geometriaAnclaje.js';
@@ -1155,8 +1156,22 @@ router.post('/exportar-mesas/:id', async (req, res) => {
   }
   piezasDeMesas = await ajustarTextosDePiezas(piezasDeMesas, obtenerMedidor);
 
-  const pdfBytes = await generarPdfPaginas(armarMesas(piezasDeMesas));
-  const nombreArchivo = ((producto.nombre || 'produccion') + ' ' + pedido.lineas.map((l) => l.talla).join('-'))
+  const mesas = armarMesas(piezasDeMesas);
+  let pdfBytes = await generarPdfPaginas(mesas);
+  const titulo = (producto.nombre || 'produccion') + ' ' + pedido.lineas.map((l) => l.talla).join('-');
+  // Con el documento de Illustrator adentro: lo abre como suyo (RGB, una
+  // mesa con nombre por pieza, sin importar). Si eso fallara, sale igual
+  // el PDF común -- nunca se queda sin archivo.
+  const variasTallas = new Set(mesas.map((m) => m.talla)).size > 1;
+  try {
+    pdfBytes = await conDocumentoIllustrator(pdfBytes, {
+      titulo,
+      nombresDeMesas: mesas.map((m) => (variasTallas ? m.talla + ' · ' : '') + m.nombre),
+    });
+  } catch (error) {
+    console.error('No se pudo agregar el documento de Illustrator: ' + error.message);
+  }
+  const nombreArchivo = titulo
     .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 120);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', 'attachment; filename="' + nombreArchivo + '.pdf"');
