@@ -20,6 +20,7 @@ import { ajustarTexto } from './ajusteTexto.js';
 import { colocarArte } from './colocarArte.js';
 import { fondoActivo, ejeDegradado, colorEn } from './fondoPieza.js';
 import { medidasDeCapsula, caminoDeCapsula, COLOR_CAPSULA } from './capsulaTalla.js';
+import { leerDocumentoAi, arteNativoDe } from './illustrator/arteNativo.js';
 
 const CM_A_PUNTOS = 28.3465;
 
@@ -128,7 +129,7 @@ export async function generarPdfNesting(resultadoNesting) {
 // de una producción (motor/mesas.js): una página = una mesa de trabajo, que
 // Illustrator abre como una mesa por página. Fuentes y arte se incrustan una
 // sola vez para todo el documento.
-export async function generarPdfPaginas(paginas) {
+export async function generarPdfPaginas(paginas, { artesNativos } = {}) {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   const fuente = await pdf.embedFont(StandardFonts.Helvetica);
@@ -173,6 +174,7 @@ export async function generarPdfPaginas(paginas) {
     const anchoPt = resultadoNesting.anchoLienzoCm * CM_A_PUNTOS;
     const altoPt = resultadoNesting.altoLienzoCm * CM_A_PUNTOS;
     const pagina = pdf.addPage([anchoPt, altoPt]);
+    if (artesNativos) { pagina.__artesNativos = []; artesNativos.push(pagina.__artesNativos); }
     // La página se declara RGB (grupo de transparencia en DeviceRGB, igual
     // que los PDF de Illustrator): sin esto Illustrator abre el archivo como
     // documento CMYK y convierte los colores -- y es para sublimación, RGB.
@@ -558,7 +560,12 @@ async function incrustarFuente(pdf, bytes) {
 }
 
 function dibujarArte(pagina, arte, rect) {
-  if (arte.tipo === 'pdf') pagina.drawPage(arte.objeto, rect);
+  if (arte.tipo === 'pdf') {
+    // En orden: el documento de Illustrator reemplaza cada PDF incrustado
+    // por su arte original, si lo tiene (null si no).
+    pagina.__artesNativos?.push(arte.nativo || null);
+    pagina.drawPage(arte.objeto, rect);
+  }
   else pagina.drawImage(arte.objeto, rect);
 }
 
@@ -572,7 +579,12 @@ async function incrustarArte(pdf, urlODataUrl) {
   const pagina = origen.getPage(0);
   const caja = pagina.getCropBox();
   const objeto = await pdf.embedPage(pagina, { left: caja.x, bottom: caja.y, right: caja.x + caja.width, top: caja.y + caja.height });
-  return { tipo: 'pdf', objeto };
+  // Si el PDF viene de Illustrator con su copia editable, se guarda su arte
+  // ORIGINAL (efectos vivos incluidos) para el documento de Illustrator.
+  const textoAi = await leerDocumentoAi(bytes);
+  const nativo = textoAi ? arteNativoDe(textoAi) : null;
+  if (nativo) nativo.origenPagina = [caja.x, caja.y];
+  return { tipo: 'pdf', objeto, nativo };
 }
 
 function embeberImagen(pdf, contentType, bytes) {

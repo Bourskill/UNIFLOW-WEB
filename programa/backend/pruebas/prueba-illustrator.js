@@ -14,6 +14,7 @@ import { armarMesas } from '../src/motor/mesas.js';
 import { generarPdfPaginas } from '../src/motor/exportarPdf.js';
 import { conDocumentoIllustrator, documentoAiDePdf, textoDePartes } from '../src/motor/illustrator/documentoAi.js';
 import { ajustarTextosDePiezas } from '../src/motor/ajusteTexto.js';
+import { arteNativoDe, moverArte, escalarEstilo } from '../src/motor/illustrator/arteNativo.js';
 import { obtenerMedidor, bytesDeFuente } from '../src/motor/medidorFuentes.js';
 import fontkit from '@pdf-lib/fontkit';
 
@@ -124,6 +125,48 @@ console.log('\n--- Texto editable, con la fuente por su nombre real ---');
   comprobar('va el documento de texto de Illustrator', t.includes('%AI11_BeginTextDocument') && t.includes(' /RulerOrigin ,'));
   comprobar('sus colores, como estilos con nombre', (t.match(/\/KnownStyle :\n\(Anon [A-Za-z0-9+/=]+\) \/Name ,\n\/SimpleStyle :/g) || []).length === 2 &&
     t.includes(colorAiDe('#123456') + ' Xa') && t.includes(colorAiDe('#ff0000') + ' Xa'));
+}
+
+console.log('\n--- Arte original de Illustrator (efectos vivos) ---');
+{
+  // Un .ai mínimo: una mesa de 100 × 50 en (1000, 2000), un trazado normal
+  // y otro "para versiones nuevas" (%_) con un estilo de desenfoque.
+  const ai = [
+    '%!PS-Adobe-3.0 ', '%AI3_Cropmarks: 1000 2000 1100 2050', '%%EndComments', '%%BeginSetup',
+    '%AI5_Begin_NonPrinting', 'Np', '%AI9_BeginArtStyles',
+    '/KnownStyle :', '(Anon prueba=) /Name ,', '/ActiveStyle :', '(Adobe PSL Gaussian Blur) 1 0 /Filter ,', '10 /Real (blur) ,', '0 J 0 j 2 w 10 M []0 d\r0 XR', ';',
+    '%AI9_EndArtStyles', '%AI5_End_NonPrinting--', '%%EndSetup',
+    '%AI5_BeginLayer', '1 1 1 1 0 0 1 0 79 128 255 0 50 0 Lb', '(Capa 1) Ln', '0 A', '0 Xw',
+    '0 O', '0 J 0 j 1 w 10 M []0 d\r0 XR', '1000 2000 m', '1100 2000 L', '1100 2050 L', '1000 2000 L', 'f',
+    '%_1050 2025 m', '%_1060 2025 1070 2030 1080 2040 c', '%_n', '%_0 (Anon prueba=) XW',
+    'LB', '%AI5_EndLayer--', '%%PageTrailer', '%%Trailer', '%%EOF', '',
+  ].join('\r\n');
+  const nativo = arteNativoDe(ai);
+  comprobar('lee el arte de la capa y su estilo (con saltos de Windows)', nativo && nativo.lineas.length === 11 && nativo.estilos.has('Anon prueba='), nativo && nativo.lineas.length);
+  comprobar('la mesa del diseño', nativo && nativo.cajaMesa.x0 === 1000 && nativo.cajaMesa.y1 === 2050);
+  // A la mitad de tamaño, con su esquina en (10, 20).
+  const T = [0.5, 0, 0, 0.5, 10 - 500, 20 - 1000];
+  const lineas = moverArte(nativo, T, (nombre) => nombre + ' escalado');
+  comprobar('mueve y escala los trazados', lineas.includes('10 20 m') && lineas.includes('60 20 L'), lineas.join(' | '));
+  comprobar('también los de "%_" (los objetos con efectos)', lineas.includes('%_35 32.5 m') && lineas.includes('%_40 32.5 45 35 50 40 c'));
+  comprobar('el grosor del trazo, a la mitad', lineas.some((l) => l.startsWith('0 J 0 j 0.5 w')));
+  comprobar('el objeto usa el estilo escalado', lineas.includes('%_0 (Anon prueba= escalado) XW'));
+  const escalado = escalarEstilo(nativo.estilos.get('Anon prueba='), 'Anon nuevo=', 0.5);
+  comprobar('el desenfoque del estilo, a la mitad (como "Escalar trazos y efectos")', escalado[0].startsWith('(Anon nuevo=)') && escalado.includes('5 /Real (blur) ,') && escalado.some((l) => l.includes(' 1 w ')));
+  comprobar('con texto vivo no se usa (se traduce el PDF como siempre)', arteNativoDe(ai.replace('%_n', '/AI11Text :')) === null);
+
+  // De punta a punta: un diseño que es un PDF de Illustrator (uno de los
+  // nuestros, con su copia editable) puesto como arte de una pieza.
+  const disenoBase = await generarPdfPaginas(armarMesas([{ ...piezas[1], piezaId: 'Arte', fondo: { tipo: 'solido', color1: '#13579b' }, anchoCm: 20, altoCm: 10, contornoCm: cuadro(20, 10) }]));
+  const diseno = await conDocumentoIllustrator(disenoBase, { nombresDeMesas: ['Arte'] });
+  const conArte = [{ ...piezas[0], fondo: null, imagenDataUrl: 'data:application/pdf;base64,' + Buffer.from(diseno).toString('base64') }];
+  const artesNativos = [];
+  const pdfConArte = await generarPdfPaginas(armarMesas(conArte), { artesNativos });
+  comprobar('el exportador guarda el original del arte', artesNativos.length === 1 && artesNativos[0].length === 1 && artesNativos[0][0]?.lineas.length > 0);
+  const conOriginal = textoDePartes(await documentoAiDePdf(pdfConArte, { artesNativos }));
+  const traducido = textoDePartes(await documentoAiDePdf(pdfConArte));
+  const azul = ' 0.0745 0.3412 0.6078 Xa';
+  comprobar('el documento de Illustrator lleva el arte original (y no su traducción)', conOriginal.includes(azul) && conOriginal.split(azul).length === traducido.split(azul).length);
 }
 
 console.log('\n--- El PDF sigue siendo el mismo para todo lo demás ---');

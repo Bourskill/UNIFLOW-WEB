@@ -20,6 +20,7 @@ import zlib from 'node:zlib';
 import { readFileSync } from 'node:fs';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { PDFDocument, PDFName, PDFNumber, PDFString } from 'pdf-lib';
+import { moverArte, escalarEstilo } from './arteNativo.js';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const OPS = pdfjs.OPS;
@@ -30,8 +31,8 @@ const LIENZO_CENTRO = 8191.5;
 const BLOQUE = 65536;
 
 /** Devuelve el PDF con el documento de Illustrator adentro. */
-export async function conDocumentoIllustrator(bytesPdf, { nombresDeMesas = [], titulo = 'UNIFLOW' } = {}) {
-  const partes = await documentoAiDePdf(bytesPdf, { nombresDeMesas, titulo });
+export async function conDocumentoIllustrator(bytesPdf, { nombresDeMesas = [], titulo = 'UNIFLOW', artesNativos = null } = {}) {
+  const partes = await documentoAiDePdf(bytesPdf, { nombresDeMesas, titulo, artesNativos });
   return incrustarDocumentoAi(bytesPdf, partes);
 }
 
@@ -110,7 +111,7 @@ function fechaPdf(d) {
 // ---------------------------------------------------------------------------
 // Traducir el PDF a texto .ai
 
-export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo = 'UNIFLOW' } = {}) {
+export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo = 'UNIFLOW', artesNativos = null } = {}) {
   const lector = await pdfjs.getDocument({
     data: new Uint8Array(bytesPdf), disableFontFace: true, fontExtraProperties: true,
     useSystemFonts: false, isEvalSupported: false, verbosity: 0,
@@ -129,6 +130,7 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
   const lienzo = { kx: LIENZO_CENTRO - (caja.izq + caja.der) / 2, ky: LIENZO_CENTRO + (caja.abajo + caja.arriba) / 2 };
   const degradados = new Degradados(lienzo);
   const textos = new TextosEditables(lienzo);
+  const estilosNativos = new EstilosNativos();
   const arte = [];
   for (let i = 0; i < paginas.length; i++) {
     const p = paginas[i], m = mesas[i];
@@ -144,7 +146,8 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
       if (!imagenes.has(id)) imagenes.set(id, await esperarObjeto(p.pagina, id));
     }
     const base = [1, 0, 0, 1, m.izq - p.origen[0], m.abajo - p.origen[1]];
-    const nodos = traducirPagina(ops, p.pagina, base, degradados, imagenes, textos);
+    const nativos = artesNativos ? { cola: [...(artesNativos[i] || [])], estilo: (nativo, nombre, escala) => estilosNativos.nombre(nativo, nombre, escala) } : null;
+    const nodos = traducirPagina(ops, p.pagina, base, degradados, imagenes, textos, nativos);
     arte.push('u');
     for (const nodo of nodos) arte.push(nodo);
     arte.push('U');
@@ -152,7 +155,7 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
     p.pagina.cleanup();
   }
   await lector.destroy();
-  return armarTexto({ mesas, nombres: nombresDeMesas, arte, degradados, textos, titulo, lienzo });
+  return armarTexto({ mesas, nombres: nombresDeMesas, arte, degradados, textos, titulo, lienzo, estilosNativos });
 }
 
 // Las mesas en filas, de izquierda a derecha y de arriba hacia abajo, como
@@ -201,7 +204,7 @@ function estadoInicial(base) {
   };
 }
 
-function traducirPagina(lista, pagina, base, degradados, imagenes, textos) {
+function traducirPagina(lista, pagina, base, degradados, imagenes, textos, nativos) {
   const raiz = [];
   const pilaContenedores = [raiz]; // raíz + recortes abiertos
   const hijos = () => pilaContenedores[pilaContenedores.length - 1];
@@ -225,9 +228,36 @@ function traducirPagina(lista, pagina, base, degradados, imagenes, textos) {
     }
   };
 
+  let profundidadForm = 0; // PDFs incrustados abiertos
+  let saltar = 0; // > 0: adentro de un arte reemplazado por su original
   for (let i = 0; i < lista.fnArray.length; i++) {
     const fn = lista.fnArray[i];
     const a = lista.argsArray[i];
+    if (saltar > 0) {
+      if (fn === OPS.paintFormXObjectBegin) saltar++;
+      else if (fn === OPS.paintFormXObjectEnd) saltar--;
+      if (saltar > 0) continue;
+    }
+    if (fn === OPS.paintFormXObjectBegin && profundidadForm === 0 && nativos?.cola.length) {
+      // Un arte (diseño o logo) que trae su original de Illustrator: van sus
+      // objetos tal cual, con efectos vivos, en vez de traducir el PDF.
+      const nativo = nativos.cola.shift();
+      if (nativo) {
+        const ctm = Array.isArray(a[0]) || ArrayBuffer.isView(a[0]) ? multiplicar(e.ctm, Array.from(a[0])) : e.ctm;
+        // Del .ai del diseño a su página PDF (la mesa de trabajo exportada) y de ahí a la mesa.
+        const T = multiplicar(ctm, [1, 0, 0, 1, -nativo.cajaMesa.x0, -nativo.cajaMesa.y0]);
+        const escala = escalaDe(T);
+        const lineas = ['u', ...moverArte(nativo, T, (nombre) => nativos.estilo(nativo, nombre, escala)), 'U'];
+        const c = nativo.cajaMesa;
+        const esquinas = [[c.x0, c.y0], [c.x1, c.y0], [c.x1, c.y1], [c.x0, c.y1]].map(([x, y]) => aplicar(T, x, y));
+        lineas.caja = { x0: Math.min(...esquinas.map((q) => q[0])), y0: Math.min(...esquinas.map((q) => q[1])), x1: Math.max(...esquinas.map((q) => q[0])), y1: Math.max(...esquinas.map((q) => q[1])) };
+        meter(lineas);
+        saltar = 1;
+        continue;
+      }
+    }
+    if (fn === OPS.paintFormXObjectBegin) profundidadForm++;
+    else if (fn === OPS.paintFormXObjectEnd) profundidadForm = Math.max(0, profundidadForm - 1);
     switch (fn) {
       case OPS.save: pila.push({ ...e, contenedores: pilaContenedores.length - 1 }); break;
       case OPS.restore: {
@@ -732,9 +762,10 @@ class TextosEditables {
   }
 
   // Los estilos gráficos con los colores de los textos (después de documento()).
-  estilos() {
-    if (!this.estilosDeColor.size) return [];
+  estilos(extra = []) {
+    if (!this.estilosDeColor.size && !extra.length) return [];
     const l = ['%AI5_Begin_NonPrinting', 'Np', '%AI9_BeginArtStyles'];
+    for (const bloque of extra) l.push('/KnownStyle :', ...bloque);
     for (const { nombre, rgb } of this.estilosDeColor.values()) {
       l.push('/KnownStyle :', '(' + nombre + ') /Name ,', '/SimpleStyle :', '0 O', colorAi(rgb) + ' Xa', '0 R', colorAi(rgb) + ' XA',
         '0 1 0 0 0 Xy', '0 J 0 j 1 w 10 M []0 d\r0 XR', '0 1 Xd', '/Paint ;', ' /Def ;');
@@ -818,6 +849,29 @@ function ascii85(buf) {
   }
   s += '~>';
   return s.match(/.{1,100}/g);
+}
+
+// Los efectos vivos de los artes originales, uno por arte y escala: el
+// mismo desenfoque en un diseño achicado a la mitad tiene la mitad de radio.
+class EstilosNativos {
+  constructor() { this.porClave = new Map(); }
+  nombre(nativo, nombre, escala) {
+    const lineas = nativo.estilos.get(nombre);
+    if (!lineas) return nombre;
+    if (Math.abs(escala - 1) < 1e-4) {
+      if (!this.porClave.has(nombre)) this.porClave.set(nombre, { nombre, lineas });
+      return nombre;
+    }
+    const clave = nombre + '@' + escala.toFixed(4);
+    let def = this.porClave.get(clave);
+    if (!def) {
+      const nuevo = 'Anon ' + randomBytes(8).toString('base64');
+      def = { nombre: nuevo, lineas: escalarEstilo(lineas, nuevo, escala) };
+      this.porClave.set(clave, def);
+    }
+    return def.nombre;
+  }
+  bloques() { return [...this.porClave.values()].map((d) => d.lineas); }
 }
 
 // --- colores y degradados ---
@@ -1005,10 +1059,10 @@ function utf8(s) {
   return Buffer.from(String(s), 'utf8').toString('latin1');
 }
 
-function armarTexto({ mesas, nombres, arte, degradados, textos, titulo, lienzo }) {
+function armarTexto({ mesas, nombres, arte, degradados, textos, titulo, lienzo, estilosNativos }) {
   // Primero el documento de texto: ahí se juntan los colores de los estilos.
   const lineasTexto = textos.documento();
-  const documentoDeTexto = { lineas: lineasTexto, estilos: textos.estilos() };
+  const documentoDeTexto = { lineas: lineasTexto, estilos: textos.estilos(estilosNativos.bloques()) };
   const izq = Math.min(...mesas.map((m) => m.izq)), der = Math.max(...mesas.map((m) => m.der));
   const abajo = Math.min(...mesas.map((m) => m.abajo)), arriba = Math.max(...mesas.map((m) => m.arriba));
   const m1 = mesas[0];
