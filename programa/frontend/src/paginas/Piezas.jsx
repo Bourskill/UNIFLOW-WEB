@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
-  editarPieza, eliminarPieza, reprocesarPieza,
+  editarPieza, eliminarPieza, reprocesarPieza, espejarPieza,
   reemplazarArchivoPieza, eliminarVersionPieza, editarProducto, eliminarGrupo
 } from '../api.js';
 import { obtener, confirmarGuardado, borrarRegistro } from '../datos/index.js';
@@ -10,6 +10,7 @@ import { Boton, Campo, Input, Select, Chip, Aviso, Ayuda, ErrorCarga } from '../
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
 import { FichaPieza } from './Formulario.jsx';
 import { FormularioPrenda } from '../componentes/FormularioPrenda.jsx';
+import { nombreDeEspejo } from '../utilidades/nombreEspejo.js';
 
 function presetDe(angulosPermitidos) {
   if (angulosPermitidos === 'libre') return 'libre';
@@ -117,6 +118,11 @@ function PanelReemplazoArchivo({ pieza, onListo, onCancelar }) {
         <span className="text-xs font-semibold text-faint-foreground">Reemplazar moldería (archivo nuevo)</span>
         <Boton variante="fantasma" tamano="sm" onClick={onCancelar}>Cancelar</Boton>
       </div>
+      {pieza.espejada && (
+        <Aviso tono="info">
+          Esta pieza es un espejo: subí el molde del MISMO lado que la original, y se espeja solo al guardarlo.
+        </Aviso>
+      )}
       {!archivo ? (
         <div
           {...getRootProps()}
@@ -207,6 +213,54 @@ function PanelConfirmarActualizacion({ pieza, versionAnterior, productosAfectado
   );
 }
 
+// Duplicar en espejo: una pieza NUEVA, reflejada (izquierda ↔ derecha), con
+// todas las tallas -- para darle su propio diseño sin importar otro archivo.
+function PanelEspejo({ pieza, onCancelar, onCreada }) {
+  const [nombre, setNombre] = useState(() => nombreDeEspejo(pieza.nombre));
+  const [creando, setCreando] = useState(false);
+  const [error, setError] = useState(null);
+  async function crear() {
+    setCreando(true);
+    setError(null);
+    try {
+      const nueva = await espejarPieza(pieza.id, nombre.trim());
+      confirmarGuardado('piezas', nueva);
+      onCreada(nueva);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setCreando(false);
+    }
+  }
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface-muted p-3">
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground" aria-hidden="true">
+          <div className="h-16 w-14"><TrazosPreview geometriaPorTalla={pieza.geometriaPorTalla || {}} fluido /></div>
+          <span className="text-lg">→</span>
+          <div className="h-16 w-14 -scale-x-100"><TrazosPreview geometriaPorTalla={pieza.geometriaPorTalla || {}} fluido /></div>
+        </div>
+        <div className="min-w-[220px] flex-1">
+          <Campo etiqueta="Nombre de la pieza en espejo">
+            <Input value={nombre} onChange={(e) => setNombre(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && nombre.trim()) crear(); }} />
+          </Campo>
+        </div>
+      </div>
+      <p className="text-xs text-faint-foreground">
+        Se crea otra pieza, igual pero reflejada, con todas sus tallas, piquetes y medidas. Esta no se toca. Si más
+        adelante la reprocesás o le reemplazás el molde, se sigue espejando sola.
+      </p>
+      {error && <Aviso tono="error">{error}</Aviso>}
+      <div className="flex gap-2">
+        <Boton variante="primario" tamano="sm" onClick={crear} disabled={!nombre.trim() || creando}>
+          {creando ? 'Creando…' : 'Crear pieza en espejo'}
+        </Boton>
+        <Boton variante="fantasma" tamano="sm" onClick={onCancelar}>Cancelar</Boton>
+      </div>
+    </div>
+  );
+}
+
 function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar }) {
   const [editando, setEditando] = useState(false);
   const [categoria, setCategoria] = useState(pieza.categoria || '');
@@ -217,6 +271,8 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
   const [resultadoReproceso, setResultadoReproceso] = useState(null);
   const [mostrandoVersiones, setMostrandoVersiones] = useState(false);
   const [reemplazando, setReemplazando] = useState(false);
+  const [espejando, setEspejando] = useState(false);
+  const [creadaEnEspejo, setCreadaEnEspejo] = useState(null); // nombre de la que se acaba de crear
   // Cuando reprocesar/reemplazar crea una versión nueva Y hay productos
   // usando esta pieza, queda acá pendiente hasta que se resuelva el panel
   // de confirmación de arriba.
@@ -267,7 +323,7 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
   const medidaMayor = tallas.length > 0 ? pieza.dimensionesPorTalla[tallas[tallas.length - 1]] : null;
   // Mientras se edita, se revisan versiones o hay un panel abierto, la
   // tarjeta ocupa toda la fila: los formularios no entran en una columna.
-  const expandida = editando || reemplazando || mostrandoVersiones || !!pendienteConfirmar || !!resultadoReproceso;
+  const expandida = editando || reemplazando || espejando || !!creadaEnEspejo || mostrandoVersiones || !!pendienteConfirmar || !!resultadoReproceso;
   const puedeReprocesar = !!pieza.archivoOriginal && tallas.length > 0 && pieza.formatoOriginal !== 'pdf-prenda';
 
   return (
@@ -290,6 +346,9 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
           </span>
           {pieza.tallaUnica && (
             <span className="rounded-md bg-primary-soft px-1.5 py-0.5 text-[10px] font-medium text-primary">talla única</span>
+          )}
+          {pieza.espejada && (
+            <span className="rounded-md bg-primary-soft px-1.5 py-0.5 text-[10px] font-medium text-primary" title="Sacada en espejo de otra pieza">espejo</span>
           )}
         </div>
       </div>
@@ -342,6 +401,10 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
         <Boton variante={reemplazando ? 'acento' : 'fantasma'} tamano="sm" onClick={() => setReemplazando((v) => !v)}>
           {reemplazando ? 'Cancelar' : 'Reemplazar'}
         </Boton>
+        <Boton variante={espejando ? 'acento' : 'fantasma'} tamano="sm" onClick={() => { setEspejando((v) => !v); setCreadaEnEspejo(null); }}
+          title="Crea otra pieza igual pero reflejada (izquierda ↔ derecha), para darle su propio diseño sin importar otro archivo.">
+          {espejando ? 'Cancelar' : 'Espejo'}
+        </Boton>
         {puedeReprocesar && (
           <Boton variante="fantasma" tamano="sm" onClick={reprocesar} disabled={reprocesando} title="Vuelve a leer el archivo original guardado y recalcula contorno y piquetes de cada talla. Si no coincide con las medidas guardadas, no toca nada. Crea una versión nueva.">
             {reprocesando ? 'Recalculando…' : 'Reprocesar'}
@@ -371,6 +434,22 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
             alDespuesDeVersionar(pieza.version);
           }}
         />
+      )}
+
+      {espejando && (
+        <PanelEspejo
+          pieza={pieza}
+          onCancelar={() => setEspejando(false)}
+          onCreada={(nueva) => { setEspejando(false); setCreadaEnEspejo(nueva.nombre); onCambio(); }}
+        />
+      )}
+      {creadaEnEspejo && (
+        <Aviso tono="info">
+          Listo: se creó «{creadaEnEspejo}», reflejada, en todas las tallas. Ya está en la Biblioteca (abajo, en
+          Todas las piezas). Para usarla, sumala a la prenda con «Editar prenda» y dale su rol (ej. la manga del
+          otro lado); después le ponés su propio diseño en Diseño.{' '}
+          <button type="button" className="underline" onClick={() => setCreadaEnEspejo(null)}>Cerrar</button>
+        </Aviso>
       )}
 
       {mostrandoVersiones && (

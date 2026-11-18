@@ -12,6 +12,7 @@ import { verificarCobertura, CARACTERES_CRITICOS } from '../motor/fuentes.js';
 import { ajustarTexto, ajustarTextosDePiezas, calibrarCuerpo, advertenciasDeTextos, REGLAS_TEXTO, ESPACIADO_MIL, CONTORNO_MAX_CM } from '../motor/ajusteTexto.js';
 import { obtenerMedidor, bytesFuenteBase } from '../motor/medidorFuentes.js';
 import fontkit from '@pdf-lib/fontkit';
+import { espejarGeometria, espejarGeometriaPorTalla, nombreDeEspejo } from '../motor/espejoPieza.js';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
 import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf, analizarPrendaPdf, detectarTipoPdf } from '../motor/importarPdf.js';
 
@@ -547,6 +548,43 @@ router.post('/piezas', async (req, res) => {
   res.status(201).json(registro);
 });
 
+// Duplica una pieza EN ESPEJO (izquierda ↔ derecha): una pieza nueva, con
+// todas las tallas reflejadas, para darle su propio diseño sin importar otro
+// archivo. Queda marcada `espejada` (y de cuál salió): si se reprocesa desde
+// el archivo original, la geometría se vuelve a espejar -- si no, el
+// reproceso la dejaría igual a la original sin que se note (mismas medidas).
+router.post('/piezas/:id/espejo', async (req, res) => {
+  const original = await leerRegistro('piezas', req.params.id);
+  if (!original) return res.status(404).json({ error: 'Pieza no encontrada' });
+  const nombre = String(req.body?.nombre || '').trim() || nombreDeEspejo(original.nombre);
+  const geometriaPorTalla = espejarGeometriaPorTalla(original.geometriaPorTalla);
+  const dimensionesPorTalla = { ...original.dimensionesPorTalla }; // reflejar no cambia las medidas
+  const registro = {
+    id: nanoid(),
+    nombre,
+    categoria: original.categoria || null,
+    angulosPermitidos: original.angulosPermitidos?.length ? original.angulosPermitidos : [0, 180],
+    tela: original.tela || null,
+    archivoOriginal: original.archivoOriginal || null,
+    formatoOriginal: original.formatoOriginal || null,
+    ...(original.tallaUnica ? { tallaUnica: true } : {}),
+    // Espejo de un espejo = vuelve a ser "derecha" respecto del archivo: se alterna.
+    espejada: !original.espejada,
+    espejoDe: original.id,
+    geometriaPorTalla,
+    dimensionesPorTalla,
+    version: 1,
+    versiones: [{
+      version: 1, geometriaPorTalla, dimensionesPorTalla,
+      archivoOriginal: original.archivoOriginal || null, formatoOriginal: original.formatoOriginal || null,
+      creadoEn: new Date().toISOString(), motivo: 'Espejo de "' + original.nombre + '"',
+    }],
+  };
+  await crearRegistro('piezas', registro);
+  await registrarEvento('piezas', 'crear', registro.id, registro.nombre + ' -- espejo de ' + original.nombre);
+  res.status(201).json(registro);
+});
+
 router.put('/piezas/:id', async (req, res) => {
   const { nombre, categoria, angulosPermitidos, tela, tallaUnica } = req.body;
   const pieza = await leerRegistro('piezas', req.params.id);
@@ -706,7 +744,9 @@ router.post('/piezas/:id/reprocesar', async (req, res) => {
   const geometriaPorTalla = { ...pieza.geometriaPorTalla };
   const dimensionesPorTalla = { ...pieza.dimensionesPorTalla };
   for (const [talla, geo] of Object.entries(resuelto.geometriasPorTalla)) {
-    geometriaPorTalla[talla] = geo;
+    // Una pieza sacada en espejo (POST /piezas/:id/espejo) comparte el
+    // archivo con la original: lo que sale de releerlo hay que espejarlo.
+    geometriaPorTalla[talla] = pieza.espejada ? espejarGeometria(geo) : geo;
     dimensionesPorTalla[talla] = {
       anchoCm: round2(geo.boundingBoxMm.anchoMm / 10),
       altoCm: round2(geo.boundingBoxMm.altoMm / 10),
@@ -729,12 +769,16 @@ router.post('/piezas/:id/reprocesar', async (req, res) => {
 // pero termina acá en vez de en POST /piezas). Versiona igual que los otros
 // dos caminos que tocan geometría.
 router.post('/piezas/:id/reemplazar-archivo', async (req, res) => {
-  const { geometriaPorTalla, archivoOriginal, formatoOriginal } = req.body;
+  const { archivoOriginal, formatoOriginal } = req.body;
+  let { geometriaPorTalla } = req.body;
   if (!geometriaPorTalla || Object.keys(geometriaPorTalla).length === 0) {
     return res.status(400).json({ error: 'Falta geometriaPorTalla' });
   }
   const pieza = await leerRegistro('piezas', req.params.id);
   if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
+  // Una pieza en espejo sigue siéndolo: el molde nuevo (el mismo lado que
+  // la original) entra espejado, igual que al reprocesar.
+  if (pieza.espejada) geometriaPorTalla = espejarGeometriaPorTalla(geometriaPorTalla);
 
   const dimensionesPorTalla = Object.fromEntries(
     Object.entries(geometriaPorTalla).map(([talla, geo]) => [

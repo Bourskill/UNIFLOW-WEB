@@ -230,6 +230,11 @@ export function reprocesarPieza(id) {
   return pedirJson('/piezas/' + id + '/reprocesar', { method: 'POST' });
 }
 
+// Duplica la pieza en espejo (izquierda ↔ derecha): devuelve la pieza NUEVA.
+export function espejarPieza(id, nombre) {
+  return pedirJson('/piezas/' + id + '/espejo', { method: 'POST', body: JSON.stringify({ nombre }) });
+}
+
 // Reemplaza la geometría de UNA talla puntual sin resubir todo el rango --
 // versiona la pieza entera (ver rutas/api.js).
 export function reemplazarTallaPieza(id, talla, geometriaResuelta) {

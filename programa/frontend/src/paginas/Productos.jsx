@@ -21,6 +21,7 @@ import { PanelDock } from '../componentes/PanelDock.jsx';
 import { PanelTexto } from '../componentes/PanelTexto.jsx';
 import { PanelAjusteArte } from '../componentes/PanelAjusteArte.jsx';
 import { PanelFondo } from '../componentes/PanelFondo.jsx';
+import { PanelEspejoPrenda } from '../componentes/PanelEspejoPrenda.jsx';
 import { normalizarAjusteArte } from '../utilidades/colocarArte.js';
 import { LienzoAnclaje, COLOR } from '../componentes/LienzoAnclaje.jsx';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
@@ -263,6 +264,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(grupoIds), piezasDisponibles.length]);
 
+  // Qué pieza usa cada rol (ej. un rol que pasó a usar su espejo): si cambia, se resuelve de nuevo.
+  const firmaPiezasDeGrupos = JSON.stringify(gruposSeleccionados.map((g) => g.piezas));
   // Resuelve el grafo entero contra la geometría real -- aritmética pura,
   // se pide de nuevo cada vez que algo cambia, nada se guarda para verlo.
   useEffect(() => {
@@ -279,7 +282,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       .catch((e) => { if (!cancelado) setResuelto({ errores: [e.message], avisos: [], sinResolver: [], lista: { anclas: [], zonas: [] } }); });
     return () => { cancelado = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(grupoIds), JSON.stringify(tallaTrabajoPorRol), JSON.stringify(anclaje), piezas.length]);
+  }, [JSON.stringify(grupoIds), JSON.stringify(tallaTrabajoPorRol), JSON.stringify(anclaje), piezas.length,
+    firmaPiezasDeGrupos]);
 
   // Elegir/sacar una prenda de la combinación reinicia el anclaje en curso
   // -- combinar otras prendas cambia qué claves existen (namespace incluido),
@@ -359,6 +363,18 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     } finally {
       setSubiendoImagen(false);
     }
+  }
+
+  // Espejo de la pieza activa (izquierda ↔ derecha), que queda en la prenda
+  // como otra pieza para darle su propio diseño -- ver PanelEspejoPrenda.
+  const [espejando, setEspejando] = useState(false);
+  useEffect(() => { setEspejando(false); }, [piezaActiva]);
+  function alCrearEspejo({ grupo, pieza, rol }) {
+    setGrupos((prev) => prev.map((g) => (g.id === grupo.id ? grupo : g)));
+    setPiezas((prev) => (prev.some((p) => p.id === pieza.id) ? prev : [...prev, pieza]));
+    setEspejando(false);
+    setPiezaActiva(namespacear ? grupo.id + '::' + rol : rol);
+    onCambio?.();
   }
 
   async function quitarImagenDePieza(clave) {
@@ -1101,12 +1117,28 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                   onChange={(e) => setTallaTrabajoPorRol((prev) => ({ ...prev, [piezaActiva]: e.target.value }))}>
                   {tallasDePieza.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
                 </Select>
-                {disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] && (
-                  <Boton variante="fantasma" tamano="sm" type="button" className="ml-auto" onClick={() => quitarImagenDePieza(piezaActiva)}>
-                    Quitar imagen de esta pieza
-                  </Boton>
-                )}
+                <div className="ml-auto flex flex-wrap items-center gap-1">
+                  {piezaObj && (
+                    <Boton variante={espejando ? 'acento' : 'fantasma'} tamano="sm" type="button" onClick={() => setEspejando((v) => !v)}
+                      title="Saca el lado opuesto de esta pieza (izquierda ↔ derecha) y lo suma a la prenda, para ponerle otro diseño sin importar otro archivo.">
+                      {espejando ? 'Cancelar espejo' : '⇋ Espejo'}
+                    </Boton>
+                  )}
+                  {disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] && (
+                    <Boton variante="fantasma" tamano="sm" type="button" onClick={() => quitarImagenDePieza(piezaActiva)}>
+                      Quitar imagen de esta pieza
+                    </Boton>
+                  )}
+                </div>
               </div>
+              {espejando && piezaObj && (() => {
+                const pd = piezasDisponibles.find((x) => x.clave === piezaActiva);
+                const grupo = pd && grupos.find((g) => g.id === pd.grupoId);
+                return grupo ? (
+                  <PanelEspejoPrenda grupo={grupo} rol={pd.rol} pieza={piezaObj} piezas={piezas}
+                    onListo={alCrearEspejo} onCancelar={() => setEspejando(false)} />
+                ) : null;
+              })()}
 
               <div className="mb-2 flex flex-wrap items-center gap-3 text-xs">
                 {[['piquetes', '#f5a623'], ['extremos', '#4ade80'], ['bordes', '#6b7389'], ['vertices', '#6b7389'], ['zonas', COLOR.zona]].map(([campo, color]) => (
