@@ -13,6 +13,7 @@
 // esta línea, ninguna otra se entera.
 
 import { MARGEN_CAPSULA_CM, COLOR_CAPSULA } from './capsulaTalla.js';
+import { campoDeZona } from './campoDeZona.js';
 import { resolver as resolverAnclaje } from './anclaje/resolver.js';
 import { geometriaDelGrupo } from './geometriaAnclaje.js';
 import { resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
@@ -128,10 +129,13 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         .filter((zona) => zona.tipo !== 'logo')
         .map((zona) => {
           const cruda = zonaCruda[zona.id];
-          const campo = cruda?.campoPedido || 'fijo';
+          const campo = campoDeZona(cruda);
+          // Exportar "con el ejemplo" (Producción): cada zona con SU ejemplo,
+          // el mismo que se ve en Diseño.
+          const delPedido = (v) => (linea.conEjemplo ? (cruda?.valorEjemplo || v) : v);
           const valor =
-            campo === 'nombre' ? linea.nombre :
-            campo === 'numero' ? linea.numero :
+            campo === 'nombre' ? delPedido(linea.nombre) :
+            campo === 'numero' ? delPedido(linea.numero) :
             campo === 'talla' ? linea.talla :
             cruda?.valorFijo;
           if (!valor) return null;

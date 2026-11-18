@@ -5,6 +5,7 @@ import { resolverPiezasDeGrupo, resolverPiezasDeGrupos } from '../dominio/resolv
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting, generarPdfPaginas } from '../motor/exportarPdf.js';
 import { armarMesas } from '../motor/mesas.js';
+import { campoDeZona } from '../motor/campoDeZona.js';
 import { conDocumentoIllustrator } from '../motor/illustrator/documentoAi.js';
 import { resolverPiezasDePedido, tallaRealDePieza } from '../motor/resolverPedido.js';
 import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
@@ -1140,12 +1141,12 @@ router.post('/exportar-mesas/:id', async (req, res) => {
 
   const ejemplo = (campo) => {
     if (!conEjemplo) return '';
-    const zona = (producto.anclaje?.zonas || []).find((z) => z.campoPedido === campo && z.valorEjemplo);
+    const zona = (producto.anclaje?.zonas || []).find((z) => campoDeZona(z) === campo && z.valorEjemplo);
     return zona ? String(zona.valorEjemplo) : '';
   };
   const pedido = {
     lineas: [...new Set(tallas)].map((talla, i) => ({
-      id: 'mesa' + i, productoId: producto.id, talla, nombre: ejemplo('nombre'), numero: ejemplo('numero'),
+      id: 'mesa' + i, productoId: producto.id, talla, nombre: ejemplo('nombre'), numero: ejemplo('numero'), conEjemplo: !!conEjemplo,
     })),
   };
   let piezasDeMesas;
@@ -1166,7 +1167,8 @@ router.post('/exportar-mesas/:id', async (req, res) => {
   try {
     pdfBytes = await conDocumentoIllustrator(pdfBytes, {
       titulo,
-      nombresDeMesas: mesas.map((m) => (variasTallas ? m.talla + ' · ' : '') + m.nombre),
+      // Solo la pieza: Illustrator ya les pone su número adelante ("01 - ...").
+      nombresDeMesas: mesas.map((m) => (variasTallas ? m.talla + ' · ' : '') + (m.piezas[0]?.piezaId || m.nombre)),
     });
   } catch (error) {
     console.error('No se pudo agregar el documento de Illustrator: ' + error.message);

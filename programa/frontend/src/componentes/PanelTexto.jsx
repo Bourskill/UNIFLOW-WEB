@@ -1,3 +1,4 @@
+import { campoDeZona } from '../utilidades/campoDeZona.js';
 import { useEffect, useState } from 'react';
 import { URL_FUENTE_BASE, buscarEnBancoDeFuentes, agregarFuenteDelBanco } from '../api.js';
 import { confirmarGuardado } from '../datos/index.js';
@@ -231,9 +232,9 @@ function SelectorFuente({ fuentes, fuenteId, muestra, onElegir, onFuenteAgregada
  * @param {(fuente: object) => void} [props.onFuenteAgregada]  una fuente del banco que se acaba de traer al catálogo
  */
 export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
-  const esNumero = zona.campoPedido === 'numero';
+  const esNumero = campoDeZona(zona) === 'numero';
   const muestra =
-    (zona.campoPedido === 'fijo' ? zona.valorFijo : zona.valorEjemplo) || (esNumero ? '10' : 'PEÑA');
+    (campoDeZona(zona) === 'fijo' ? zona.valorFijo : zona.valorEjemplo) || (esNumero ? '10' : 'PEÑA');
   const contorno = { ...CONTORNO_POR_DEFECTO, ...(zona.contorno || {}) };
   const espaciado = Number(zona.espaciadoMil) || 0;
   const alineacion = zona.alineacion || 'centro';

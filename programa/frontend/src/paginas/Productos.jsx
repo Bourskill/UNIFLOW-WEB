@@ -1,3 +1,4 @@
+import { campoDeZona } from '../utilidades/campoDeZona.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
@@ -100,11 +101,12 @@ function tallaDeTrabajoPorDefecto(pieza) {
 
 function etiquetaZona(zona) {
   if (zona.tipo === 'logo') return zona.logoRuta ? 'Logo · ' + nombreDeArchivo(zona.logoRuta) : 'Logo (sin elegir)';
-  if (zona.campoPedido === 'fijo') return zona.valorFijo || zona.id;
-  if (zona.campoPedido === 'talla') return 'Talla';
+  const campo = campoDeZona(zona);
+  if (campo === 'fijo') return zona.valorFijo || zona.id;
+  if (campo === 'talla') return 'Talla';
   // Con ejemplo cargado, el rótulo ES el ejemplo (sin prefijo "Nombre · ");
   // sin él, queda el nombre del campo para identificar la zona vacía.
-  if (zona.campoPedido === 'numero') return zona.valorEjemplo || 'Número';
+  if (campo === 'numero') return zona.valorEjemplo || 'Número';
   return zona.valorEjemplo || 'Nombre';
 }
 
@@ -127,9 +129,10 @@ function anclajeSinContenido(anclajeOriginal) {
 // y ya se ve en el propio selector de logo cuando la zona está abierta).
 function tipoCortoDeZona(z) {
   if (z.tipo === 'logo') return 'Logo';
-  if (z.campoPedido === 'fijo') return 'Texto fijo';
-  if (z.campoPedido === 'talla') return 'Talla';
-  if (z.campoPedido === 'numero') return 'Número';
+  const campo = campoDeZona(z);
+  if (campo === 'fijo') return 'Texto fijo';
+  if (campo === 'talla') return 'Talla';
+  if (campo === 'numero') return 'Número';
   return 'Nombre';
 }
 
@@ -1159,15 +1162,15 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   const zonasDeEstaPiezaConDatos = zonasDeEstaPieza.map((z) => {
     const cruda = anclaje.zonas.find((zz) => zz.id === z.id);
     return {
-      ...z, etiqueta: cruda ? etiquetaZona(cruda) : z.id, campoPedido: cruda?.campoPedido, rotacion: cruda?.rotacion || 0,
+      ...z, etiqueta: cruda ? etiquetaZona(cruda) : z.id, campoPedido: cruda && z.tipo !== 'logo' ? campoDeZona(cruda) : cruda?.campoPedido, rotacion: cruda?.rotacion || 0,
       // El lienzo los necesita para poder mostrar el contenido real (no un
       // marcador genérico) cuando el toggle "zona" oculta el cuadrito.
       valorFijo: cruda?.valorFijo, valorEjemplo: cruda?.valorEjemplo,
       // Lo que se escribe en la zona (el lienzo lo ajusta a su espacio) y la
       // tipografía elegida -- sin ninguna, el lienzo usa la de base.
       // La talla se ve con la talla que se está mirando en el lienzo.
-      contenidoTexto: z.tipo === 'logo' ? null : cruda?.campoPedido === 'talla' ? (tallaTrabajo || 'M')
-        : ((cruda?.campoPedido === 'fijo' ? cruda?.valorFijo : cruda?.valorEjemplo) || null),
+      contenidoTexto: z.tipo === 'logo' ? null : campoDeZona(cruda) === 'talla' ? (tallaTrabajo || 'M')
+        : ((campoDeZona(cruda) === 'fijo' ? cruda?.valorFijo : cruda?.valorEjemplo) || null),
       fuenteUrl: cruda?.fuenteId ? (fuentes.find((f) => f.id === cruda.fuenteId)?.archivoUrl || null) : null,
       // Estilo del texto, para verlo en el lienzo igual que en el PDF.
       colorHex: cruda?.colorHex || '#ffffff',
@@ -1963,7 +1966,7 @@ function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasR
 
       <div className="flex flex-col gap-2 border-t border-border pt-3">
         <span className="text-xs font-semibold text-faint-foreground">Qué va aquí</span>
-        <Select value={zona.tipo === 'logo' ? 'logo' : zona.campoPedido} onChange={(e) => {
+        <Select value={zona.tipo === 'logo' ? 'logo' : campoDeZona(zona)} onChange={(e) => {
           const valor = e.target.value;
           if (valor === 'logo') onActualizar({ tipo: 'logo', campoPedido: null });
           // La talla: en negro y centrada, sobre su cápsula blanca.
@@ -1978,15 +1981,15 @@ function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasR
         </Select>
         {zona.tipo === 'logo' ? (
           <SelectorLogo url={zona.logoRuta} vista={zona.logoVista} onElegir={(logo) => onActualizar(logo)} />
-        ) : zona.campoPedido === 'talla' ? (
+        ) : campoDeZona(zona) === 'talla' ? (
           <p className="text-xs text-faint-foreground">
             Se pone sola: la talla de cada prenda, en negro dentro de un círculo blanco (en las tallas largas, una
             cápsula) que se lee sobre cualquier color. La zona es su tamaño máximo.
           </p>
-        ) : zona.campoPedido === 'fijo' ? (
+        ) : campoDeZona(zona) === 'fijo' ? (
           <Input placeholder="Texto fijo" value={zona.valorFijo || ''} onChange={(e) => onActualizar({ valorFijo: e.target.value })} />
         ) : (
-          <Input placeholder={zona.campoPedido === 'nombre' ? 'Ejemplo: PEÑA' : 'Ejemplo: 7'} value={zona.valorEjemplo || ''} onChange={(e) => onActualizar({ valorEjemplo: e.target.value })} />
+          <Input placeholder={campoDeZona(zona) === 'nombre' ? 'Ejemplo: PEÑA' : 'Ejemplo: 7'} value={zona.valorEjemplo || ''} onChange={(e) => onActualizar({ valorEjemplo: e.target.value })} />
         )}
       </div>
 
