@@ -8,7 +8,7 @@
 
 import {
   PDFDocument, PDFName, PDFOperator, rgb, degrees, StandardFonts,
-  pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath, fill,
+  pushGraphicsState, popGraphicsState, moveTo, lineTo, appendBezierCurve, closePath, clip, endPath, fill,
   beginText, endText, setFontAndSize, setFillingColor, showText,
   setCharacterSpacing, setCharacterSqueeze, rotateAndSkewTextRadiansAndTranslate,
   setStrokingColor, setLineWidth, setLineJoin, LineJoinStyle, setTextRenderingMode, TextRenderingMode, stroke,
@@ -19,6 +19,7 @@ import { bytesDeFuente, obtenerMedidor, urlDeStoragePermitida, leerConTope } fro
 import { ajustarTexto } from './ajusteTexto.js';
 import { colocarArte } from './colocarArte.js';
 import { fondoActivo, ejeDegradado, colorEn } from './fondoPieza.js';
+import { medidasDeCapsula, caminoDeCapsula, COLOR_CAPSULA } from './capsulaTalla.js';
 
 const CM_A_PUNTOS = 28.3465;
 
@@ -344,6 +345,30 @@ export async function generarPdfPaginas(paginas) {
             showText(textoCodificado),
             endText(),
           ];
+
+          // La talla: primero su cápsula blanca, centrada en la zona y girada
+          // con ella (capsulaTalla.js).
+          if (texto.capsula) {
+            const fondoTalla = hexARgb(texto.capsula.colorHex || COLOR_CAPSULA);
+            const aPagina = (u, v) => [
+              cxPt + (u * Math.cos(rad) + v * Math.sin(rad)) * CM_A_PUNTOS,
+              cyPt + (u * Math.sin(rad) - v * Math.cos(rad)) * CM_A_PUNTOS,
+            ];
+            const ops = [];
+            for (const [op, ...c] of caminoDeCapsula(medidasDeCapsula(a, texto.capsula.margenCm))) {
+              if (op === 'M') ops.push(moveTo(...aPagina(c[0], c[1])));
+              else if (op === 'L') ops.push(lineTo(...aPagina(c[0], c[1])));
+              else if (op === 'C') ops.push(appendBezierCurve(...aPagina(c[0], c[1]), ...aPagina(c[2], c[3]), ...aPagina(c[4], c[5])));
+              else ops.push(closePath());
+            }
+            pagina.pushOperators(
+              pushGraphicsState(),
+              setFillingColor(rgb(fondoTalla.r, fondoTalla.g, fondoTalla.b)),
+              ...ops,
+              fill(),
+              popGraphicsState()
+            );
+          }
 
           // Contorno de color (estilo de la zona): primero el trazo, con el
           // DOBLE del grosor elegido y esquinas redondeadas -- la mitad de

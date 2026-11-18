@@ -12,6 +12,7 @@
 // duplicar el diseño para todo el equipo — se salta esa pieza solo para
 // esta línea, ninguna otra se entera.
 
+import { MARGEN_CAPSULA_CM, COLOR_CAPSULA } from './capsulaTalla.js';
 import { resolver as resolverAnclaje } from './anclaje/resolver.js';
 import { geometriaDelGrupo } from './geometriaAnclaje.js';
 import { resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
@@ -131,6 +132,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
           const valor =
             campo === 'nombre' ? linea.nombre :
             campo === 'numero' ? linea.numero :
+            campo === 'talla' ? linea.talla :
             cruda?.valorFijo;
           if (!valor) return null;
 
@@ -141,20 +143,25 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
           // estándar de siempre (nunca falla por esto).
           const fuente = cruda?.fuenteId ? fuentes?.find((f) => f.id === cruda.fuenteId) : null;
 
+          // La talla va en su cápsula blanca (capsulaTalla.js): la letra se
+          // ajusta a la zona MENOS el margen de la cápsula, siempre centrada.
+          const esTalla = campo === 'talla';
+          const margen = esTalla ? MARGEN_CAPSULA_CM : 0;
           return {
             texto: String(valor),
             xCm: zona.x,
             yCm: zona.y,
             cxCm: zona.cx,
             cyCm: zona.cy,
-            anchoCm: zona.ancho,
-            altoCm: zona.alto,
+            anchoCm: Math.max(zona.ancho - 2 * margen, 0.1),
+            altoCm: Math.max(zona.alto - 2 * margen, 0.1),
+            ...(esTalla ? { capsula: { colorHex: COLOR_CAPSULA, margenCm: margen } } : {}),
             // Cómo se ajusta al espacio de la zona (motor/ajusteTexto.js,
             // puerto del panel de Illustrator): el número se CALIBRA (todos
             // al mismo cuerpo), nombre y texto fijo LLENAN el alto. La clave
             // agrupa los textos que comparten cuerpo: mismo producto, zona y
             // talla (la caja de la zona puede cambiar de talla a talla).
-            modo: campo === 'numero' ? 'calibrado' : 'llenar',
+            modo: campo === 'numero' || esTalla ? 'calibrado' : 'llenar',
             zonaClave: (linea.productoId || '') + '|' + zona.id + '|' + linea.talla,
             colorHex: cruda?.colorHex || '#000000',
             rotacionGrados: cruda?.rotacion || 0,
@@ -162,7 +169,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             // Estilo de la zona (panel de Diseño): espaciado entre letras en
             // milésimas de em, y un contorno de color por fuera de la letra.
             espaciadoMil: Number(cruda?.espaciadoMil) || 0,
-            alineacion: ['izquierda', 'derecha'].includes(cruda?.alineacion) ? cruda.alineacion : 'centro',
+            alineacion: !esTalla && ['izquierda', 'derecha'].includes(cruda?.alineacion) ? cruda.alineacion : 'centro',
             contorno: cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0
               ? { colorHex: cruda.contorno.colorHex || '#000000', grosorCm: Number(cruda.contorno.grosorCm) }
               : null,

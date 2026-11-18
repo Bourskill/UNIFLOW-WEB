@@ -101,6 +101,7 @@ function tallaDeTrabajoPorDefecto(pieza) {
 function etiquetaZona(zona) {
   if (zona.tipo === 'logo') return zona.logoRuta ? 'Logo · ' + nombreDeArchivo(zona.logoRuta) : 'Logo (sin elegir)';
   if (zona.campoPedido === 'fijo') return zona.valorFijo || zona.id;
+  if (zona.campoPedido === 'talla') return 'Talla';
   // Con ejemplo cargado, el rótulo ES el ejemplo (sin prefijo "Nombre · ");
   // sin él, queda el nombre del campo para identificar la zona vacía.
   if (zona.campoPedido === 'numero') return zona.valorEjemplo || 'Número';
@@ -127,6 +128,7 @@ function anclajeSinContenido(anclajeOriginal) {
 function tipoCortoDeZona(z) {
   if (z.tipo === 'logo') return 'Logo';
   if (z.campoPedido === 'fijo') return 'Texto fijo';
+  if (z.campoPedido === 'talla') return 'Talla';
   if (z.campoPedido === 'numero') return 'Número';
   return 'Nombre';
 }
@@ -1163,7 +1165,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       valorFijo: cruda?.valorFijo, valorEjemplo: cruda?.valorEjemplo,
       // Lo que se escribe en la zona (el lienzo lo ajusta a su espacio) y la
       // tipografía elegida -- sin ninguna, el lienzo usa la de base.
-      contenidoTexto: z.tipo === 'logo' ? null : ((cruda?.campoPedido === 'fijo' ? cruda?.valorFijo : cruda?.valorEjemplo) || null),
+      // La talla se ve con la talla que se está mirando en el lienzo.
+      contenidoTexto: z.tipo === 'logo' ? null : cruda?.campoPedido === 'talla' ? (tallaTrabajo || 'M')
+        : ((cruda?.campoPedido === 'fijo' ? cruda?.valorFijo : cruda?.valorEjemplo) || null),
       fuenteUrl: cruda?.fuenteId ? (fuentes.find((f) => f.id === cruda.fuenteId)?.archivoUrl || null) : null,
       // Estilo del texto, para verlo en el lienzo igual que en el PDF.
       colorHex: cruda?.colorHex || '#ffffff',
@@ -1962,15 +1966,23 @@ function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasR
         <Select value={zona.tipo === 'logo' ? 'logo' : zona.campoPedido} onChange={(e) => {
           const valor = e.target.value;
           if (valor === 'logo') onActualizar({ tipo: 'logo', campoPedido: null });
+          // La talla: en negro y centrada, sobre su cápsula blanca.
+          else if (valor === 'talla') onActualizar({ campoPedido: 'talla', tipo: 'texto', colorHex: '#000000', alineacion: 'centro' });
           else onActualizar({ campoPedido: valor, tipo: valor === 'numero' ? 'numero' : 'texto' });
         }}>
           <option value="nombre">un texto: el nombre del jugador</option>
           <option value="numero">un número (dorsal)</option>
           <option value="fijo">un texto fijo</option>
+          <option value="talla">la talla de la prenda</option>
           <option value="logo">un logo o escudo</option>
         </Select>
         {zona.tipo === 'logo' ? (
           <SelectorLogo url={zona.logoRuta} vista={zona.logoVista} onElegir={(logo) => onActualizar(logo)} />
+        ) : zona.campoPedido === 'talla' ? (
+          <p className="text-xs text-faint-foreground">
+            Se pone sola: la talla de cada prenda, en negro dentro de un círculo blanco (en las tallas largas, una
+            cápsula) que se lee sobre cualquier color. La zona es su tamaño máximo.
+          </p>
         ) : zona.campoPedido === 'fijo' ? (
           <Input placeholder="Texto fijo" value={zona.valorFijo || ''} onChange={(e) => onActualizar({ valorFijo: e.target.value })} />
         ) : (

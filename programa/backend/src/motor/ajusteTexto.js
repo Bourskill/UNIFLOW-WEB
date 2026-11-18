@@ -332,6 +332,9 @@ export function ajustarTexto({
     cabe: cabe(),
     pasos,
     tintaCm: { ancho: tinta.ancho, alto: tinta.alto },
+    // Alto de la banda (mayúsculas o cifras) al cuerpo final: la cápsula de
+    // la talla se mide con esto, así S y XL quedan del mismo alto.
+    altoBandaCm: alturaBanda * cuerpo,
     // Cuánto se sale un número por los costados de su zona (0 si no se sale).
     desbordeAnchoCm: Math.max(0, tinta.ancho - anchoCm),
   };

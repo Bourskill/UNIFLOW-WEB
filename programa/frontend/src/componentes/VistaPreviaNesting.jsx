@@ -4,6 +4,7 @@ import { useFuentesWeb, cssDeFamilia } from './useFuentesWeb.js';
 import { URL_FUENTE_BASE } from '../api.js';
 import { colocarArte } from '../utilidades/colocarArte.js';
 import { fondoActivo, ejeDegradado } from '../utilidades/fondoPieza.js';
+import { medidasDeCapsula, caminoDeCapsula } from '../utilidades/capsulaTalla.js';
 
 // Un pixel por cm es suficiente para la vista previa; no es la resolución del
 // PDF final (eso lo decide exportarPdf.js en el backend con puntos reales).
@@ -24,6 +25,19 @@ function TextoAjustado({ texto, familia }) {
         c.save();
         c.translate(texto.cxCm * PX_POR_CM, texto.cyCm * PX_POR_CM);
         c.rotate(-((texto.rotacionGrados || 0) * Math.PI) / 180);
+        // La talla: su cápsula blanca debajo, centrada en la zona.
+        if (texto.capsula) {
+          c.beginPath();
+          for (const [op, ...p] of caminoDeCapsula(medidasDeCapsula(a, texto.capsula.margenCm))) {
+            const q = p.map((v) => v * PX_POR_CM);
+            if (op === 'M') c.moveTo(q[0], q[1]);
+            else if (op === 'L') c.lineTo(q[0], q[1]);
+            else if (op === 'C') c.bezierCurveTo(q[0], q[1], q[2], q[3], q[4], q[5]);
+            else c.closePath();
+          }
+          c.fillStyle = texto.capsula.colorHex || '#ffffff';
+          c.fill();
+        }
         c.translate(a.dxCm * PX_POR_CM, a.dyCm * PX_POR_CM);
         c.scale(a.escalaH / 100, 1);
         c.font = a.cuerpoCm * PX_POR_CM + 'px ' + cssDeFamilia(familia);

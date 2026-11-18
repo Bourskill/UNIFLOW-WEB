@@ -4,6 +4,7 @@ import { ajustarTextos, URL_FUENTE_BASE } from '../api.js';
 import { useFuentesWeb } from './useFuentesWeb.js';
 import { colocarArte } from '../utilidades/colocarArte.js';
 import { fondoActivo, ejeDegradado } from '../utilidades/fondoPieza.js';
+import { medidasDeCapsula, caminoDeCapsula, MARGEN_CAPSULA_CM } from '../utilidades/capsulaTalla.js';
 
 // Puerto FIEL del lienzo de Anclajes del panel de Illustrator
 // (programa/panel/js/main.js: dibujarLienzo/candidatosDe/sinMontonera) --
@@ -257,7 +258,14 @@ function TextoAjustado({ z, ajuste, familia }) {
   // Sin borde activado, la letra va limpia (pedido explícito: antes llevaba
   // un halo oscuro siempre y parecía un borde negro que no se había pedido).
   const contorno = z.contorno && Number(z.contorno.grosorCm) > 0 ? z.contorno : null;
+  // La talla: su cápsula blanca debajo, centrada en la zona (capsulaTalla.js).
+  const capsula = z.campoPedido === 'talla'
+    ? caminoDeCapsula(medidasDeCapsula(ajuste, MARGEN_CAPSULA_CM))
+      .map(([op, ...p]) => op + (op === 'Z' ? '' : ' ' + p.map((v, i) => (i % 2 ? z.cy + v : z.cx + v)).join(' '))).join(' ')
+    : null;
   return (
+    <>
+    {capsula && <path d={capsula} fill="#ffffff" />}
     <text
       x={x} y={y}
       fontSize={ajuste.cuerpoCm} fontFamily={familia}
@@ -270,6 +278,7 @@ function TextoAjustado({ z, ajuste, familia }) {
     >
       {ajuste.texto ?? z.contenidoTexto}
     </text>
+    </>
   );
 }
 
@@ -277,14 +286,19 @@ function TextoAjustado({ z, ajuste, familia }) {
 // lo que NO cambia al arrastrar (el tamaño de la caja, no su posición).
 function pedidoDeAjuste(z) {
   if (z.tipo === 'logo' || !z.contenidoTexto) return null;
+  // La talla, como en el PDF (resolverPedido.js): calibrada, centrada y
+  // ajustada a la zona menos el margen de su cápsula.
+  const esTalla = z.campoPedido === 'talla';
+  const margen = esTalla ? MARGEN_CAPSULA_CM : 0;
   return {
-    id: z.id, texto: z.contenidoTexto, anchoCm: z.ancho, altoCm: z.alto,
-    modo: z.campoPedido === 'numero' ? 'calibrado' : 'llenar', fuenteUrl: z.fuenteUrl || null,
+    id: z.id, texto: z.contenidoTexto,
+    anchoCm: Math.max(z.ancho - 2 * margen, 0.1), altoCm: Math.max(z.alto - 2 * margen, 0.1),
+    modo: z.campoPedido === 'numero' || esTalla ? 'calibrado' : 'llenar', fuenteUrl: z.fuenteUrl || null,
     // El estilo cambia el ajuste (letras más abiertas, o el margen que deja
     // el contorno): va en el pedido para que el backend lo tenga en cuenta.
     espaciadoMil: z.espaciadoMil || 0,
     contornoCm: z.contorno ? Number(z.contorno.grosorCm) || 0 : 0,
-    alineacion: z.alineacion || 'centro',
+    alineacion: esTalla ? 'centro' : z.alineacion || 'centro',
   };
 }
 
