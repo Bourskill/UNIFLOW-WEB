@@ -7,7 +7,7 @@
 // personalización, ej. corte láser).
 
 import {
-  PDFDocument, rgb, degrees, StandardFonts,
+  PDFDocument, PDFName, PDFOperator, rgb, degrees, StandardFonts,
   pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath, fill,
   beginText, endText, setFontAndSize, setFillingColor, showText,
   setCharacterSpacing, setCharacterSqueeze, rotateAndSkewTextRadiansAndTranslate,
@@ -172,6 +172,10 @@ export async function generarPdfPaginas(paginas) {
     const anchoPt = resultadoNesting.anchoLienzoCm * CM_A_PUNTOS;
     const altoPt = resultadoNesting.altoLienzoCm * CM_A_PUNTOS;
     const pagina = pdf.addPage([anchoPt, altoPt]);
+    // La página se declara RGB (grupo de transparencia en DeviceRGB, igual
+    // que los PDF de Illustrator): sin esto Illustrator abre el archivo como
+    // documento CMYK y convierte los colores -- y es para sublimación, RGB.
+    pagina.node.set(PDFName.of('Group'), pdf.context.obj({ Type: 'Group', S: 'Transparency', CS: 'DeviceRGB', I: false, K: false }));
 
     for (const pieza of resultadoNesting.piezas) {
       const xPt = pieza.posicion.x * CM_A_PUNTOS;
@@ -188,16 +192,18 @@ export async function generarPdfPaginas(paginas) {
         const forma = pieza.contornoCm?.length >= 3
           ? pieza.contornoCm.map((v) => aPt(v.x, v.y))
           : [aPt(0, 0), aPt(pieza.anchoCm, 0), aPt(pieza.anchoCm, pieza.altoCm), aPt(0, pieza.altoCm)];
+        // La propia forma de la pieza rellena con el fondo -- sin máscara de
+        // recorte: en Illustrator queda UN trazado con su color o su
+        // degradado (editable), no un montón de franjas enmascaradas.
         pagina.pushOperators(
           pushGraphicsState(),
+          ...operadoresDeRelleno(pdf, pagina, fondo, pieza.anchoCm, pieza.altoCm, aPt),
           moveTo(forma[0].x, forma[0].y),
           ...forma.slice(1).map((p) => lineTo(p.x, p.y)),
           closePath(),
-          clip(),
-          endPath()
+          fill(),
+          popGraphicsState()
         );
-        pagina.pushOperators(...operadoresDeFondo(fondo, pieza.anchoCm, pieza.altoCm, aPt));
-        pagina.pushOperators(popGraphicsState());
       }
 
       if (pieza.imagenDataUrl) {
@@ -273,16 +279,6 @@ export async function generarPdfPaginas(paginas) {
           stroke(),
           popGraphicsState()
         );
-        // Piquetes sueltos (los pegados ya van en el contorno): una marca
-        // del tamaño del piquete en su lugar, del mismo color del corte --
-        // como los recrea el script PROCESAR MOLDES. Solo en las mesas.
-        if (pieza.marcarPiquetes) {
-          for (const q of pieza.piquetesCm || []) {
-            const w = Math.max(q.ancho_cm || 0, 0.2) * CM_A_PUNTOS, h = Math.max(q.alto_cm || 0, 0.2) * CM_A_PUNTOS;
-            const c = aPt(q);
-            pagina.drawRectangle({ x: c.x - w / 2, y: c.y - h / 2, width: w, height: h, borderColor: rgb(color.r, color.g, color.b), borderWidth: Math.min(grosorPt, 0.5) });
-          }
-        }
       } else {
         pagina.drawRectangle({
           x: xPt,
@@ -448,6 +444,29 @@ export async function generarPdfPaginas(paginas) {
         });
       }
 
+      // En las mesas: ENCIMA de todo, el molde mismo en contorno fino (con
+      // sus piquetes pegados, que son parte del contorno) y los piquetes
+      // sueltos como rayitas, en blanco o negro según lo que contraste con
+      // el fondo -- como se arma a mano para ver dónde coser.
+      if (pieza.marcarPiquetes && pieza.contornoCm?.length >= 3) {
+        const aPt = (v) => ({ x: xPt + v.x * CM_A_PUNTOS, y: yPt + altoRectPt - v.y * CM_A_PUNTOS });
+        const trazo = (puntos, cerrado, color) => [
+          setStrokingColor(color),
+          moveTo(puntos[0].x, puntos[0].y),
+          ...puntos.slice(1).map((q) => lineTo(q.x, q.y)),
+          ...(cerrado ? [closePath()] : []),
+          stroke(),
+        ];
+        const ops = [pushGraphicsState(), setLineWidth(GROSOR_MARCAS_PT), setLineJoin(LineJoinStyle.Round)];
+        ops.push(...trazo(pieza.contornoCm.map(aPt), true, colorDeContraste(fondo, pieza)));
+        for (const q of pieza.piquetesCm || []) {
+          const raya = rayaDePiquete(q, pieza.contornoCm);
+          if (raya) ops.push(...trazo(raya.map(aPt), false, colorDeContraste(fondo, pieza, q)));
+        }
+        ops.push(popGraphicsState());
+        pagina.pushOperators(...ops);
+      }
+
       // En las mesas (marcarPiquetes) no: es la pieza que se corta, sin rótulos encima.
     if (!pieza.marcarPiquetes && !fondo && !pieza.imagenDataUrl && (!pieza.textos || pieza.textos.length === 0) && (!pieza.imagenes || pieza.imagenes.length === 0)) {
         const etiqueta = pieza.piezaId + ' · ' + pieza.talla +
@@ -470,37 +489,34 @@ export async function generarPdfPaginas(paginas) {
 // Acepta tanto un data: URL (compatibilidad con lo que se haya guardado
 // antes de mover las imágenes a Storage) como una URL http(s) real -- en
 // ese caso hace falta bajarla, ya no viene embebida en el propio campo.
-// Pinta el fondo sobre todo el rectángulo de la pieza (el recorte a su forma
-// ya está puesto). El degradado va en franjas finas de color perpendiculares
-// a su eje: una por cada escalón de color (hasta 256), así no se nota el
-// paso de una a otra -- vectorial puro, sin depender de imágenes.
-export function operadoresDeFondo(fondo, anchoCm, altoCm, aPt) {
-  const cuadro = (pts, [r, g, b]) => [
-    setFillingColor(rgb(r / 255, g / 255, b / 255)),
-    moveTo(pts[0].x, pts[0].y),
-    ...pts.slice(1).map((p) => lineTo(p.x, p.y)),
-    closePath(),
-    fill(),
-  ];
+// El "color de relleno" del fondo, para rellenar después la forma de la
+// pieza: sólido, o un degradado lineal REAL (sombreado axial RGB, como el
+// que guarda Illustrator) -- un solo objeto editable, no franjas.
+export function operadoresDeRelleno(pdf, pagina, fondo, anchoCm, altoCm, aPt) {
   if (fondo.tipo === 'solido') {
-    return cuadro([aPt(0, 0), aPt(anchoCm, 0), aPt(anchoCm, altoCm), aPt(0, altoCm)], colorEn(fondo, 0));
+    const [r, g, b] = colorEn(fondo, 0);
+    return [setFillingColor(rgb(r / 255, g / 255, b / 255))];
   }
   const eje = ejeDegradado({ anchoCm, altoCm, anguloGrados: fondo.anguloGrados });
-  const largo = Math.hypot(eje.x2 - eje.x1, eje.y2 - eje.y1) || 1;
-  const d = { x: (eje.x2 - eje.x1) / largo, y: (eje.y2 - eje.y1) / largo };
-  const n = { x: -d.y, y: d.x };
-  const ancho = Math.hypot(anchoCm, altoCm); // de sobra para cubrir la pieza de costado a costado
-  const a = colorEn(fondo, 0), b = colorEn(fondo, 1);
-  const franjas = Math.min(256, Math.max(1, ...a.map((v, i) => Math.abs(b[i] - v))));
-  const ops = [];
-  for (let i = 0; i < franjas; i++) {
-    // Cada franja se estira un poco sobre la siguiente: sin hilos sin pintar entre ellas.
-    const t0 = i === 0 ? -0.01 : i / franjas;
-    const t1 = i === franjas - 1 ? 1.01 : (i + 1.5) / franjas;
-    const p = (t, s) => aPt(eje.x1 + d.x * t * largo + n.x * s, eje.y1 + d.y * t * largo + n.y * s);
-    ops.push(...cuadro([p(t0, -ancho), p(t1, -ancho), p(t1, ancho), p(t0, ancho)], colorEn(fondo, franjas === 1 ? 0 : i / (franjas - 1))));
+  const p1 = aPt(eje.x1, eje.y1), p2 = aPt(eje.x2, eje.y2);
+  const canal = (c) => colorEn(fondo, c).map((v) => v / 255);
+  const ctx = pdf.context;
+  const patron = ctx.register(ctx.obj({
+    Type: 'Pattern', PatternType: 2,
+    Shading: {
+      ShadingType: 2, ColorSpace: 'DeviceRGB', Coords: [p1.x, p1.y, p2.x, p2.y], Extend: [true, true],
+      Function: { FunctionType: 2, Domain: [0, 1], C0: canal(0), C1: canal(1), N: 1 },
+    },
+  }));
+  const recursos = pagina.node.normalizedEntries().Resources;
+  let patrones = recursos.lookup(PDFName.of('Pattern'));
+  if (!patrones) {
+    patrones = ctx.obj({});
+    recursos.set(PDFName.of('Pattern'), patrones);
   }
-  return ops;
+  const nombre = 'Dg' + patrones.keys().length;
+  patrones.set(PDFName.of(nombre), patron);
+  return [PDFOperator.of('cs', [PDFName.of('Pattern')]), PDFOperator.of('scn', [PDFName.of(nombre)])];
 }
 
 function dibujarArte(pagina, arte, rect) {
@@ -542,6 +558,63 @@ async function bajarArchivo(urlODataUrl) {
     bytes = await leerConTope(respuesta, 60 * 1024 * 1024); // arte de sublimación en alta: más margen que una fuente
   }
   return { contentType, bytes };
+}
+
+// Grosor del molde en contorno y de los piquetes que van encima en las
+// mesas: 0,3 mm, el mismo del archivo armado a mano.
+const GROSOR_MARCAS_PT = 0.85;
+
+/**
+ * Blanco o negro, lo que más se vea sobre el fondo de la pieza en ese punto
+ * (cm de la pieza; sin punto, el medio): fondo oscuro → blanco, claro →
+ * negro. Sin fondo, la tela es blanca → negro.
+ */
+export function colorDeContraste(fondoCrudo, pieza, punto = null) {
+  const fondo = fondoActivo(fondoCrudo);
+  if (!fondo) return rgb(0, 0, 0);
+  let t = 0.5;
+  if (fondo.tipo === 'degradado' && punto) {
+    const e = ejeDegradado({ anchoCm: pieza.anchoCm, altoCm: pieza.altoCm, anguloGrados: fondo.anguloGrados });
+    const dx = e.x2 - e.x1, dy = e.y2 - e.y1;
+    t = ((punto.x - e.x1) * dx + (punto.y - e.y1) * dy) / (dx * dx + dy * dy || 1);
+  }
+  const [r, g, b] = colorEn(fondo, fondo.tipo === 'solido' ? 0 : t).map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const luminancia = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  // Mismo umbral que el contraste WCAG entre blanco y negro.
+  return luminancia > 0.179 ? rgb(0, 0, 0) : rgb(1, 1, 1);
+}
+
+/**
+ * La rayita de un piquete: de él se guarda solo su caja (centro, ancho,
+ * alto), y una raya recta que la cruza es una de sus dos diagonales -- la
+ * que va más de frente al borde del molde (un piquete corta el borde, no
+ * lo acompaña). Devuelve los dos extremos, en cm de la pieza.
+ */
+export function rayaDePiquete(q, contorno) {
+  const w = q.ancho_cm || 0, h = q.alto_cm || 0;
+  const largo = Math.hypot(w, h);
+  if (!(largo > 0)) return null;
+  // Normal del borde más cercano al piquete.
+  let mejor = Infinity, normal = { x: 0, y: 1 };
+  for (let i = 0; i < contorno.length; i++) {
+    const a = contorno[i], b = contorno[(i + 1) % contorno.length];
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+    if (!l2) continue;
+    const u = Math.min(Math.max(((q.x - a.x) * dx + (q.y - a.y) * dy) / l2, 0), 1);
+    const d = Math.hypot(a.x + dx * u - q.x, a.y + dy * u - q.y);
+    if (d < mejor) {
+      mejor = d;
+      const l = Math.sqrt(l2);
+      normal = { x: -dy / l, y: dx / l };
+    }
+  }
+  const diagonales = [{ x: w, y: h }, { x: w, y: -h }];
+  const frente = (v) => Math.abs(v.x * normal.x + v.y * normal.y);
+  const v = frente(diagonales[0]) >= frente(diagonales[1]) ? diagonales[0] : diagonales[1];
+  return [{ x: q.x - v.x / 2, y: q.y - v.y / 2 }, { x: q.x + v.x / 2, y: q.y + v.y / 2 }];
 }
 
 function hexARgb(hex) {

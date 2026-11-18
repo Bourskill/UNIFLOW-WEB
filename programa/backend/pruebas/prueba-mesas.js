@@ -9,7 +9,7 @@
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { armarMesas, MARGEN_MESA_CM, CONTORNO_LASER_POR_DEFECTO } from '../src/motor/mesas.js';
-import { generarPdfPaginas } from '../src/motor/exportarPdf.js';
+import { generarPdfPaginas, colorDeContraste, rayaDePiquete } from '../src/motor/exportarPdf.js';
 import { resolverPiezasDePedido } from '../src/motor/resolverPedido.js';
 
 let fallos = 0, pasadas = 0;
@@ -72,12 +72,35 @@ console.log('\n--- El PDF: una página por mesa, contorno cerrado y piquetes ---
   const ops = await (await lector.getPage(1)).getOperatorList();
   const trazos = ops.fnArray.filter((f) => f === pdfjs.OPS.stroke || f === pdfjs.OPS.closeStroke).length;
   const caminos = ops.fnArray.filter((f) => f === pdfjs.OPS.constructPath).length;
-  comprobar('el contorno es UN trazado (no segmentos sueltos) + el piquete', caminos === 2, 'paths ' + caminos + ', strokes ' + trazos);
+  comprobar('el corte es UN trazado + el molde en contorno encima + la rayita del piquete', caminos === 3, 'paths ' + caminos + ', strokes ' + trazos);
   // Sin piquetes, la espalda solo tiene el contorno.
   const opsEsp = await (await lector.getPage(2)).getOperatorList();
   const caminosEsp = opsEsp.fnArray.filter((f) => f === pdfjs.OPS.constructPath).length;
   comprobar('la pieza sin piquetes lleva un trazado menos', caminosEsp === caminos - 1, caminosEsp + ' vs ' + caminos);
-  comprobar('no se dibuja el rectángulo de la caja', caminosEsp === 1, caminosEsp);
+  comprobar('no se dibuja el rectángulo de la caja', caminosEsp === 2, caminosEsp);
+  const rect = ops.fnArray.filter((f) => f === pdfjs.OPS.rectangle).length;
+  comprobar('el piquete ya no es un rectángulo', rect === 0, rect);
+}
+
+console.log('\n--- Piquetes encima: rayita y color de contraste ---');
+{
+  const blanco = colorDeContraste({ tipo: 'solido', color1: '#6d1d1d' }, {});
+  const negro = colorDeContraste({ tipo: 'solido', color1: '#f2e600' }, {});
+  comprobar('fondo oscuro (vino): blanco', blanco.red === 1 && blanco.green === 1 && blanco.blue === 1);
+  comprobar('fondo claro (amarillo): negro', negro.red === 0 && negro.green === 0);
+  comprobar('sin fondo (tela blanca): negro', colorDeContraste(null, {}).red === 0);
+  const deg = { tipo: 'degradado', color1: '#000000', color2: '#ffffff', anguloGrados: 0 };
+  const p = { anchoCm: 40, altoCm: 20 };
+  comprobar('degradado: según dónde cae el piquete', colorDeContraste(deg, p, { x: 2, y: 10 }).red === 1 && colorDeContraste(deg, p, { x: 38, y: 10 }).red === 0);
+  // Borde superior horizontal: la rayita es la diagonal más vertical de su caja.
+  const cuadro = [{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 40, y: 20 }, { x: 0, y: 20 }];
+  const r = rayaDePiquete({ x: 10, y: 0, ancho_cm: 0.1, alto_cm: 1 }, cuadro);
+  comprobar('la rayita cruza el borde, del largo del piquete',
+    cerca(r[0].y, -0.5) && cerca(r[1].y, 0.5) && cerca(Math.hypot(r[1].x - r[0].x, r[1].y - r[0].y), Math.hypot(0.1, 1)), JSON.stringify(r));
+  // Piquete en diagonal: elige la diagonal de su caja que va de frente al borde.
+  const triangulo = [{ x: 0, y: 0 }, { x: 20, y: 20 }, { x: 0, y: 20 }];
+  const d = rayaDePiquete({ x: 10, y: 10, ancho_cm: 1, alto_cm: 1 }, triangulo);
+  comprobar('piquete en diagonal: la diagonal perpendicular al borde', cerca((d[1].x - d[0].x) * (d[1].y - d[0].y), -1), JSON.stringify(d));
 }
 
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');

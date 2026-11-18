@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { normalizarFondo, fondoActivo, fondoDePieza, ejeDegradado, colorEn } from '../src/motor/fondoPieza.js';
 import { generarPdfNesting } from '../src/motor/exportarPdf.js';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { PDFDocument, PDFName } from 'pdf-lib';
 
 let fallos = 0, pasadas = 0;
 function comprobar(desc, cond, detalle) {
@@ -57,11 +58,12 @@ console.log('\n--- La copia del frontend es la misma ---');
 
 console.log('\n--- PDF: el fondo se pinta en la pieza ---');
 {
+  const pdfDe = (fondo) => generarPdfNesting({
+    anchoLienzoCm: 60, altoLienzoCm: 80,
+    piezas: [{ piezaId: 'X', talla: 'm', posicion: { x: 0, y: 0 }, anchoCm: 20, altoCm: 10, imagenDataUrl: null, fondo, textos: [], imagenes: [] }],
+  });
   async function coloresDeRelleno(fondo) {
-    const bytes = await generarPdfNesting({
-      anchoLienzoCm: 60, altoLienzoCm: 80,
-      piezas: [{ piezaId: 'X', talla: 'm', posicion: { x: 0, y: 0 }, anchoCm: 20, altoCm: 10, imagenDataUrl: null, fondo, textos: [], imagenes: [] }],
-    });
+    const bytes = await pdfDe(fondo);
     const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: false }).promise;
     const ops = await (await doc.getPage(1)).getOperatorList();
     const colores = [];
@@ -76,11 +78,26 @@ console.log('\n--- PDF: el fondo se pinta en la pieza ---');
   comprobar('sólido: se pinta con ese color', solido.includes('#12ab34'), JSON.stringify(solido));
   const sinEtiqueta = solido.length === 1;
   comprobar('con fondo, ya no lleva la etiqueta de pieza vacía', sinEtiqueta, JSON.stringify(solido));
-  const degradado = await coloresDeRelleno({ tipo: 'degradado', color1: '#000000', color2: '#ff0000', anguloGrados: 0 });
-  comprobar('degradado: una franja por escalón de color (255), de negro a rojo',
-    degradado.length === 255 && degradado[0] === '#000000' && degradado[254] === '#ff0000', degradado.length + ' ' + degradado[0] + ' … ' + degradado[degradado.length - 1]);
-  const parecidos = await coloresDeRelleno({ tipo: 'degradado', color1: '#808080', color2: '#848080', anguloGrados: 90 });
-  comprobar('colores parecidos: pocas franjas (no hacen falta más)', parecidos.length === 4, String(parecidos.length));
+  const fondoDegradado = { tipo: 'degradado', color1: '#000000', color2: '#ff0000', anguloGrados: 0 };
+  const degradado = await coloresDeRelleno(fondoDegradado);
+  comprobar('degradado: sin franjas de color sueltas', degradado.length === 0, JSON.stringify(degradado));
+  const doc = await PDFDocument.load(await pdfDe(fondoDegradado));
+  const pagina = doc.getPages()[0].node;
+  const patrones = pagina.Resources().lookup(PDFName.of('Pattern'));
+  const sombreado = patrones && doc.context.lookup(doc.context.lookup(patrones.get(patrones.keys()[0])).get(PDFName.of('Shading')));
+  const funcion = sombreado && doc.context.lookup(sombreado.get(PDFName.of('Function')));
+  comprobar('degradado: UN degradado lineal real (axial, RGB), de negro a rojo',
+    patrones?.keys().length === 1 && String(sombreado.get(PDFName.of('ShadingType'))) === '2' &&
+      String(sombreado.get(PDFName.of('ColorSpace'))) === '/DeviceRGB' &&
+      String(funcion.get(PDFName.of('C0'))) === '[ 0 0 0 ]' && String(funcion.get(PDFName.of('C1'))) === '[ 1 0 0 ]',
+    patrones && String(funcion?.get(PDFName.of('C0'))) + ' ' + String(funcion?.get(PDFName.of('C1'))));
+  // De borde a borde de la pieza (20 cm a 0°, por el medio).
+  const coords = sombreado.get(PDFName.of('Coords')).asArray().map((n) => n.asNumber() / 28.3465);
+  comprobar('el degradado va de borde a borde de la pieza', cerca(coords[0], 0, 1e-3) && cerca(coords[2], 20, 1e-3), JSON.stringify(coords));
+  comprobar('la página se declara RGB (Illustrator la abre en RGB, no CMYK)',
+    String(doc.context.lookup(pagina.get(PDFName.of('Group'))).get(PDFName.of('CS'))) === '/DeviceRGB');
+  const ops = await (await (await pdfjs.getDocument({ data: new Uint8Array(await pdfDe(fondoDegradado)), useSystemFonts: false }).promise).getPage(1)).getOperatorList();
+  comprobar('el fondo no usa máscara de recorte', !ops.fnArray.includes(pdfjs.OPS.clip));
 }
 
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');
