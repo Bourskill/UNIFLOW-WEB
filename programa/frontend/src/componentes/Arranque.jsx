@@ -22,7 +22,7 @@ const INTERVALO_SALUD_MS = 2000;
 const TOPE_DESPERTAR_MS = 150000; // 2,5 min sin respuesta: algo más que "dormido"
 const NOMBRE_COLECCION = {
   piezas: ['pieza', 'piezas'], grupos: ['prenda', 'prendas'], disenos: ['diseño', 'diseños'],
-  productos: ['producto', 'productos'], plantillas: ['plantilla', 'plantillas'], fuentes: ['fuente', 'fuentes'],
+  productos: ['producción', 'producciones'], plantillas: ['plantilla', 'plantillas'], fuentes: ['fuente', 'fuentes'],
   pedidos: ['pedido', 'pedidos'], generaciones: ['corrida', 'corridas'],
 };
 

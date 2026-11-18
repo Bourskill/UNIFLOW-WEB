@@ -220,7 +220,7 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
       )}
       {editando && rolesQueDesaparecen.length > 0 && (
         <Aviso tono="error">
-          Cambiaste o quitaste roles ({rolesQueDesaparecen.join(', ')}). Si algún Producto ya ancló su diseño
+          Cambiaste o quitaste roles ({rolesQueDesaparecen.join(', ')}). Si alguna producción ya ancló su diseño
           contra ellos, va a dejar de encontrar esa pieza.
         </Aviso>
       )}

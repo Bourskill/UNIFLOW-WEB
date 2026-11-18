@@ -16,7 +16,7 @@ export const PESO_COLECCION = {
 // Los pasos que se le muestran al usuario, con las colecciones de cada uno.
 export const GRUPOS_DE_DATOS = [
   { id: 'moldes', titulo: 'Moldes y prendas', colecciones: ['piezas', 'grupos'] },
-  { id: 'disenos', titulo: 'Diseños, productos y fuentes', colecciones: ['disenos', 'productos', 'plantillas', 'fuentes'] },
+  { id: 'disenos', titulo: 'Diseños, producciones y fuentes', colecciones: ['disenos', 'productos', 'plantillas', 'fuentes'] },
   { id: 'produccion', titulo: 'Pedidos e historial', colecciones: ['pedidos', 'generaciones'] },
 ];
 

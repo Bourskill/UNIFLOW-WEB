@@ -22,6 +22,7 @@ import { PanelTexto } from '../componentes/PanelTexto.jsx';
 import { PanelAjusteArte } from '../componentes/PanelAjusteArte.jsx';
 import { PanelFondo } from '../componentes/PanelFondo.jsx';
 import { PanelEspejoPrenda } from '../componentes/PanelEspejoPrenda.jsx';
+import { TarjetaProduccion } from '../componentes/TarjetaProduccion.jsx';
 import { normalizarAjusteArte } from '../utilidades/colocarArte.js';
 import {
   firmaEditor, haySinGuardar, puedeGuardarseSolo, guardarBorrador, leerBorrador, borrarBorrador, borradorParaOfrecer, haceCuanto,
@@ -314,7 +315,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // no es lo mismo. Mismo criterio que ya tenía el selector simple de antes.
   function alternarGrupo(id) {
     if ((anclaje.zonas.length > 0 || anclaje.anclas.length > 0) &&
-        !window.confirm('Cambiar las prendas del producto borra las ' + anclaje.zonas.length + ' zona(s) que armaste (quedan apuntando a otras piezas). ¿Seguir?')) {
+        !window.confirm('Cambiar las prendas de la producción borra las ' + anclaje.zonas.length + ' zona(s) que armaste (quedan apuntando a otras piezas). ¿Seguir?')) {
       return;
     }
     setGrupoIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -967,13 +968,13 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   async function dejarProductoActual() {
     if (!sinGuardar) return true;
     if (autoguardable) return guardarEnServidor();
-    return window.confirm('Este producto tiene cambios que todavía no se guardaron (le falta nombre, prenda o una zona). ¿Descartarlos?');
+    return window.confirm('Esta producción tiene cambios que todavía no se guardaron (le falta nombre, prenda o una zona). ¿Descartarlos?');
   }
 
   async function guardar(evento) {
     evento.preventDefault();
     setError(null);
-    if (!nombre.trim() || grupoIds.length === 0) { setError('Falta el nombre del producto o la prenda.'); return; }
+    if (!nombre.trim() || grupoIds.length === 0) { setError('Falta el nombre de la producción o la prenda.'); return; }
     if (await guardarEnServidor()) onCambio?.();
   }
 
@@ -1016,7 +1017,19 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setError(null);
   }
 
+  const editorRef = useRef(null);
+  async function editarDesdeTarjeta(producto) {
+    await cargarParaEditar(producto);
+    editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  async function nuevaDesdeTarjetas() {
+    await nuevoProducto();
+    editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   async function borrar(id) {
+    const p = productos.find((x) => x.id === id);
+    if (!window.confirm('¿Eliminar la producción «' + (p?.nombre || '') + '»? Se borran sus zonas; el diseño y las prendas no se tocan.')) return;
     await eliminarProducto(id);
     if (editandoId === id) cancelarEdicionProducto();
     await recargar();
@@ -1046,7 +1059,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   }
 
   async function borrarConjunto(conjunto) {
-    if (!window.confirm('¿Eliminar el conjunto «' + conjunto.nombre + '»? Las zonas ya pegadas en productos no se tocan.')) return;
+    if (!window.confirm('¿Eliminar el conjunto «' + conjunto.nombre + '»? Las zonas ya pegadas en producciones no se tocan.')) return;
     setConjuntos((prev) => prev.filter((c) => c.id !== conjunto.id));
     if (conjuntoAImportar?.id === conjunto.id) { setConjuntoAImportar(null); setModo(null); }
     await borrarRegistro('plantillas', conjunto.id, () => eliminarPlantilla(conjunto.id), 'el conjunto "' + conjunto.nombre + '"');
@@ -1113,12 +1126,38 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
           poco que el lienzo se mueva en base al panel de zona"). */}
       <div className="pagina flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto p-8">
       <div>
-        <h2 className="text-lg font-semibold">Producto</h2>
+        <h2 className="text-lg font-semibold">Producciones</h2>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Una prenda real, el diseño que lleva encima y dónde va cada nombre/número — todo en una
-          sola pantalla, sobre el molde real de cada pieza, no a ciegas con números sueltos.
+          Cada producción es una prenda real, el diseño que lleva encima y dónde va cada nombre/número —
+          sobre el molde real de cada pieza. Se guarda sola mientras la armás, y la podés volver a abrir
+          y seguir editando cuando quieras.
         </p>
       </div>
+
+      {!cargando && !errorCarga && productos.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">
+              Producciones guardadas · {productos.length}
+            </h3>
+            <Boton type="button" variante="acento" tamano="sm" className="ml-auto" onClick={nuevaDesdeTarjetas}>+ Nueva producción</Boton>
+          </div>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-4">
+            {productos.map((p) => (
+              <TarjetaProduccion
+                key={p.id}
+                produccion={p}
+                grupos={grupos}
+                piezas={piezas}
+                disenos={disenos}
+                editando={p.id === editandoId}
+                onEditar={() => editarDesdeTarjeta(p)}
+                onEliminar={() => borrar(p.id)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {cargando ? (
         <p className="text-sm text-muted-foreground">Cargando…</p>
@@ -1127,20 +1166,25 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       ) : grupos.length === 0 ? (
         <p className="text-sm text-muted-foreground">Creá primero una prenda (Moldería → Biblioteca → + Nueva prenda).</p>
       ) : (
-        <Tarjeta as="form" onSubmit={guardar} className="flex flex-col gap-4">
+        <Tarjeta as="form" onSubmit={guardar} className="flex scroll-mt-4 flex-col gap-4">
+          <div ref={editorRef} className="-mb-1 flex items-center gap-2">
+            <h3 className="text-sm font-semibold">
+              {editandoId ? 'Editando «' + (nombre.trim() || 'sin nombre') + '»' : 'Nueva producción'}
+            </h3>
+          </div>
           {borradorOfrecido && (
             <Aviso tono="info">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="flex-1">
-                  Quedaron cambios sin guardar de «{borradorOfrecido.nombre || 'producto sin nombre'}» ({borradorOfrecido.anclaje.zonas.length} zona(s),
-                  {' '}{haceCuanto(borradorOfrecido.en)}){borradorOfrecido.productoExiste ? '' : ', de un producto que todavía no estaba guardado'}.
+                  Quedaron cambios sin guardar de «{borradorOfrecido.nombre || 'producción sin nombre'}» ({borradorOfrecido.anclaje.zonas.length} zona(s),
+                  {' '}{haceCuanto(borradorOfrecido.en)}){borradorOfrecido.productoExiste ? '' : ', de una producción que todavía no estaba guardada'}.
                 </span>
                 <Boton tamano="sm" variante="primario" type="button" onClick={recuperarBorrador}>Recuperar</Boton>
                 <Boton tamano="sm" variante="fantasma" type="button" onClick={descartarBorrador}>Descartar</Boton>
               </div>
             </Aviso>
           )}
-          <Campo etiqueta="Nombre del producto" className="max-w-3xl">
+          <Campo etiqueta="Nombre de la producción" className="max-w-3xl">
             <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Camiseta titular" />
           </Campo>
 
@@ -1428,12 +1472,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
             </div>
           </div>
 
-          {editandoId && (
-            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Editando producto existente</p>
-          )}
           <div className="flex flex-wrap items-center gap-2">
             <Boton variante="primario" type="submit" disabled={estadoGuardado === 'guardando'}>
-              {estadoGuardado === 'guardando' ? 'Guardando…' : editandoId ? 'Guardar cambios' : 'Guardar producto'}
+              {estadoGuardado === 'guardando' ? 'Guardando…' : editandoId ? 'Guardar cambios' : 'Guardar producción'}
             </Boton>
             <EstadoDeGuardado estado={estadoGuardado} sinGuardar={sinGuardar} autoguardable={autoguardable} guardadoEn={guardadoEn} esNuevo={!editandoId} />
             <Boton
@@ -1445,38 +1486,13 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
               Guardar como plantilla
             </Boton>
             {editandoId && (
-              <Boton variante="fantasma" type="button" onClick={nuevoProducto}>+ Producto nuevo</Boton>
+              <Boton variante="fantasma" type="button" onClick={nuevaDesdeTarjetas}>+ Nueva producción</Boton>
             )}
           </div>
           {error && <Aviso tono="error">{error}</Aviso>}
         </Tarjeta>
       )}
 
-      <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground">Productos cargados</h3>
-        {productos.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Todavía no hay ninguno.</p>
-        ) : (
-          <div className="flex max-w-2xl flex-col gap-2">
-            {productos.map((p) => {
-              const idsPrendas = p.grupoIds || (p.grupoId ? [p.grupoId] : []);
-              const nombresPrendas = idsPrendas.map((id) => grupos.find((g) => g.id === id)?.nombre).filter(Boolean).join(' + ');
-              return (
-                <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
-                  <div className="flex-1">
-                    <span className="font-medium">{p.nombre}</span>{' '}
-                    <span className="text-muted-foreground">
-                      — {nombresPrendas || 'prenda eliminada'} · {disenos.find((d) => d.id === p.disenoId)?.nombre || 'sin diseño'} · {p.anclaje?.zonas?.length || 0} zona(s)
-                    </span>
-                  </div>
-                  <Boton tamano="sm" onClick={() => cargarParaEditar(p)}>Editar</Boton>
-                  <Boton variante="fantasma" tamano="sm" onClick={() => borrar(p.id)}>Eliminar</Boton>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
       </div>
 
       {/* Panel derecho: anclado, redimensionable y colapsable a íconos

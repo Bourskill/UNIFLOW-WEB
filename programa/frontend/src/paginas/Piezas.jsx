@@ -48,7 +48,7 @@ function PanelVersiones({ pieza, productosQueLaUsan, onCambio }) {
     const afectados = productosQueLaUsan.filter((p) => (p.versionesPiezas || {})[pieza.id] === numero);
     if (afectados.length > 0) {
       const seguro = window.confirm(
-        '¿Seguro? Estos productos están fijados a esta versión y se quedarían sin geometría válida -- ' +
+        '¿Seguro? Estas producciones están fijadas a esta versión y se quedarían sin geometría válida -- ' +
         'vas a tener que volver a personalizar la pieza para: ' + afectados.map((p) => p.nombre).join(', ') + '.'
       );
       if (!seguro) return;
@@ -185,11 +185,11 @@ function PanelConfirmarActualizacion({ pieza, versionAnterior, productosAfectado
     <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary-soft p-3">
       <div>
         <span className="text-sm font-medium text-primary">
-          Esta pieza se actualizó a la versión {pieza.version}. Hay {productosAfectados.length} producto
-          {productosAfectados.length === 1 ? '' : 's'} usándola -- ¿cuáles pasan a la nueva versión?
+          Esta pieza se actualizó a la versión {pieza.version}. Hay {productosAfectados.length}{' '}
+          {productosAfectados.length === 1 ? 'producción' : 'producciones'} usándola -- ¿cuáles pasan a la nueva versión?
         </span>
         <p className="mt-1 text-xs text-primary/80">
-          Sin tildar, un producto se queda fijado a la versión {versionAnterior} (la que tenía antes de este
+          Sin tildar, una producción se queda fijada a la versión {versionAnterior} (la que tenía antes de este
           cambio) -- ningún cliente ya entregado se ve afectado sin que lo elijas acá.
         </p>
       </div>
@@ -684,7 +684,7 @@ export function Piezas({ recargarSenal, onCambio }) {
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
           Las prendas con sus piezas, y abajo todas las piezas (también las que ya están en una
           prenda, para reutilizarlas en otra). Reprocesar o reemplazar la moldería
-          de una pieza crea una versión nueva -- si algún producto ya guardado la usa, se pregunta cuál
+          de una pieza crea una versión nueva -- si alguna producción ya guardada la usa, se pregunta cuál
           pasa a la versión nueva y cuál se queda en la que tenía.
         </p>
       </div>
@@ -860,7 +860,7 @@ function PrendaAbierta({ grupo, piezas, productos, onEditar, onCerrar, onBorrar,
           <div className="text-xs text-muted-foreground">
             {grupo.piezas.length} {grupo.piezas.length === 1 ? 'pieza' : 'piezas'}
             {tallas.length > 0 && ' · tallas ' + tallas.map((t) => t.toUpperCase()).join(' ')}
-            {productos.length > 0 && ' · usada en ' + productos.length + (productos.length === 1 ? ' producto' : ' productos')}
+            {productos.length > 0 && ' · usada en ' + productos.length + (productos.length === 1 ? ' producción' : ' producciones')}
           </div>
         </div>
         <div className="flex gap-1">
@@ -877,7 +877,7 @@ function PrendaAbierta({ grupo, piezas, productos, onEditar, onCerrar, onBorrar,
           <span>
             ¿Eliminar «{grupo.nombre}»?
             {productos.length > 0 &&
-              ' La usan ' + productos.length + (productos.length === 1 ? ' producto' : ' productos') +
+              ' La usan ' + productos.length + (productos.length === 1 ? ' producción' : ' producciones') +
                 ' (' + productos.map((p) => p.nombre).join(', ') + '), que van a dejar de funcionar.'}{' '}
             Esto no se puede deshacer.
           </span>

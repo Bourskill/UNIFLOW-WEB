@@ -259,7 +259,7 @@ export function Pedidos({ recargarSenal }) {
       ) : errorCarga ? (
         <ErrorCarga mensaje={errorCarga} onReintentar={recargar} />
       ) : productos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Creá primero un producto (Diseño → Productos).</p>
+        <p className="text-sm text-muted-foreground">Creá primero una producción (en Diseño).</p>
       ) : (
         <Tarjeta as="form" onSubmit={guardar} className="flex max-w-2xl flex-col gap-4">
           {editandoId && (
