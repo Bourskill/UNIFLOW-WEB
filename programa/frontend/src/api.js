@@ -370,7 +370,7 @@ export function anidarDesdePedido(pedidoId, anchoLienzoCm) {
 }
 
 // Pide un archivo al servidor (POST) y lo descarga en el navegador.
-async function descargar(ruta, cuerpo, nombreArchivo, mensajeError) {
+async function bajar(ruta, cuerpo, mensajeError) {
   const respuesta = await pedir(ruta, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -380,7 +380,15 @@ async function descargar(ruta, cuerpo, nombreArchivo, mensajeError) {
     const datos = await respuesta.json().catch(() => ({}));
     throw new Error(datos.error || mensajeError);
   }
-  const blob = await respuesta.blob();
+  return respuesta.blob();
+}
+
+async function descargar(ruta, cuerpo, nombreArchivo, mensajeError) {
+  guardarArchivo(await bajar(ruta, cuerpo, mensajeError), nombreArchivo);
+}
+
+/** Guarda un archivo (Blob) en las descargas del navegador. */
+export function guardarArchivo(blob, nombreArchivo) {
   const url = URL.createObjectURL(blob);
   const enlace = document.createElement('a');
   enlace.href = url;
@@ -408,6 +416,11 @@ export function generarDxf(grupoId, lineas, anchoLienzoCm) {
 export function exportarMesas(produccionId, { tallas, conEjemplo }, nombreArchivo) {
   return descargar('/exportar-mesas/' + encodeURIComponent(produccionId), { tallas, conEjemplo: !!conEjemplo },
     nombreArchivo || 'produccion.pdf', 'No se pudo exportar la producción');
+}
+
+/** Lo mismo, pero devuelve el PDF (Blob) en vez de descargarlo: para juntar varias tallas en un .zip. */
+export function exportarMesasArchivo(produccionId, { tallas, conEjemplo }) {
+  return bajar('/exportar-mesas/' + encodeURIComponent(produccionId), { tallas, conEjemplo: !!conEjemplo }, 'No se pudo exportar la producción');
 }
 
 // --- Historial de producción -------------------------------------------------

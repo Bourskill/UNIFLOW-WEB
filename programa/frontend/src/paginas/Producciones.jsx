@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { exportarMesas } from '../api.js';
+import { exportarMesas, exportarMesasArchivo, guardarArchivo } from '../api.js';
+import { armarZip } from '../utilidades/zip.js';
 import { obtener } from '../datos/index.js';
 import { TarjetaProduccion } from '../componentes/TarjetaProduccion.jsx';
 import { Boton, Input, Tarjeta, Aviso, ErrorCarga } from '../componentes/ui.jsx';
@@ -124,14 +125,23 @@ function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
     setError(null);
     setListo(null);
     try {
-      // Un archivo por talla, o todas en un PDF (una mesa = una página).
-      const tandas = porSeparado ? tallas.map((t) => [t]) : [tallas];
-      for (let i = 0; i < tandas.length; i++) {
-        setTrabajando(porSeparado ? 'Talla ' + tandas[i][0] + ' (' + (i + 1) + ' de ' + tandas.length + ')…' : 'Armando las mesas…');
-        await exportarMesas(produccion.id, { tallas: tandas[i], conEjemplo }, nombreDeExportacion(produccion, tandas[i]));
+      if (porSeparado && tallas.length > 1) {
+        // Varias tallas, un PDF por talla: todos juntos en UN .zip.
+        const archivos = [];
+        for (let i = 0; i < tallas.length; i++) {
+          setTrabajando('Talla ' + tallas[i] + ' (' + (i + 1) + ' de ' + tallas.length + ')…');
+          const pdf = await exportarMesasArchivo(produccion.id, { tallas: [tallas[i]], conEjemplo });
+          archivos.push({ nombre: nombreDeExportacion(produccion, [tallas[i]]), bytes: new Uint8Array(await pdf.arrayBuffer()) });
+        }
+        setTrabajando('Armando el .zip…');
+        guardarArchivo(new Blob([armarZip(archivos)], { type: 'application/zip' }), nombreDeExportacion(produccion, tallas).replace(/\.pdf$/, '.zip'));
+        setListo('ZIP descargado con ' + tallas.length + ' archivos, uno por talla.');
+      } else {
+        // Una talla, o todas en un PDF (una mesa = una página).
+        setTrabajando(porSeparado ? 'Talla ' + tallas[0] + '…' : 'Armando las mesas…');
+        await exportarMesas(produccion.id, { tallas, conEjemplo }, nombreDeExportacion(produccion, tallas));
+        setListo(porSeparado ? '1 archivo descargado.' : 'PDF descargado con ' + tallas.length + (tallas.length === 1 ? ' talla.' : ' tallas.'));
       }
-      setListo(porSeparado ? tandas.length + (tandas.length === 1 ? ' archivo descargado.' : ' archivos descargados, uno por talla.')
-        : 'PDF descargado con ' + tallas.length + (tallas.length === 1 ? ' talla.' : ' tallas.'));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -179,7 +189,7 @@ function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={porSeparado} onChange={(e) => setPorSeparado(e.target.checked)} />
               Un archivo por talla
-              <span className="text-xs text-faint-foreground">(si no, todas las tallas en un solo PDF, una detrás de otra)</span>
+              <span className="text-xs text-faint-foreground">(varias tallas bajan juntas en un .zip; si no, todas en un solo PDF, una detrás de otra)</span>
             </label>
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={conEjemplo} onChange={(e) => setConEjemplo(e.target.checked)} />
@@ -193,7 +203,7 @@ function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
           <div className="flex items-center gap-3">
             <Boton type="button" variante="acento" disabled={tallas.length === 0 || !!trabajando} onClick={exportar}>
               {trabajando || (tallas.length === 0 ? 'Elegí al menos una talla'
-                : porSeparado ? 'Exportar ' + tallas.length + (tallas.length === 1 ? ' archivo' : ' archivos')
+                : porSeparado ? (tallas.length === 1 ? 'Exportar 1 archivo' : 'Exportar ZIP · ' + tallas.length + ' archivos')
                   : 'Exportar PDF · ' + tallas.length + (tallas.length === 1 ? ' talla' : ' tallas'))}
             </Boton>
           </div>

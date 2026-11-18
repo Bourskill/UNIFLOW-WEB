@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "prueba": "node pruebas/prueba-almacen.mjs && node pruebas/prueba-conjuntos-zonas.mjs && node pruebas/prueba-progreso-arranque.mjs && node pruebas/prueba-borrador-diseno.mjs && node pruebas/prueba-producciones.mjs",
+    "prueba": "node pruebas/prueba-almacen.mjs && node pruebas/prueba-conjuntos-zonas.mjs && node pruebas/prueba-progreso-arranque.mjs && node pruebas/prueba-borrador-diseno.mjs && node pruebas/prueba-producciones.mjs && node pruebas/prueba-zip.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
