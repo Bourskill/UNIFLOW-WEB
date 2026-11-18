@@ -6,9 +6,10 @@ import { Boton, Input, Tarjeta, Aviso, ErrorCarga } from '../componentes/ui.jsx'
 import { ordenarPorReciente, tallasDeProduccion, nombreDeExportacion } from '../utilidades/producciones.js';
 
 // Producción → Producciones: TODAS las producciones (Diseño muestra solo las
-// más recientes). Desde acá se exporta cada una por tallas: una mesa por
-// talla con la prenda completa, como el script PROCESAR MOLDES de
-// Illustrator pero ya con su diseño. "Editar" la abre en Diseño.
+// más recientes). Desde acá se exporta cada una por tallas: cada talla es
+// la prenda completa, con una mesa por pieza y su contorno láser, como el
+// script PROCESAR MOLDES de Illustrator pero ya con su diseño. "Editar" la
+// abre en Diseño.
 export function Producciones({ recargarSenal, onEditar }) {
   const [datos, setDatos] = useState({ productos: [], grupos: [], piezas: [], disenos: [] });
   const [cargando, setCargando] = useState(true);
@@ -58,8 +59,8 @@ export function Producciones({ recargarSenal, onEditar }) {
       <div>
         <h2 className="text-lg font-semibold">Producciones</h2>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Todas las producciones. «Exportar» saca un PDF con una mesa por talla — la prenda completa, con su
-          diseño, a la medida justa más 1 cm de margen — listo para abrir en Illustrator.
+          Todas las producciones. «Exportar» saca cada talla como la prenda completa: una mesa por pieza, con
+          su diseño y su contorno láser, a la medida justa más 1 cm de margen — listo para abrir en Illustrator.
         </p>
       </div>
 
@@ -105,7 +106,7 @@ function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
   const disponibles = useMemo(() => tallasDeProduccion(produccion, grupos, piezas), [produccion, grupos, piezas]);
   const [elegidas, setElegidas] = useState(() => new Set(disponibles));
   const [conEjemplo, setConEjemplo] = useState(false);
-  const [porSeparado, setPorSeparado] = useState(false);
+  const [porSeparado, setPorSeparado] = useState(true);
   const [trabajando, setTrabajando] = useState(null);
   const [error, setError] = useState(null);
   const [listo, setListo] = useState(null);
@@ -127,7 +128,8 @@ function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
         setTrabajando(porSeparado ? 'Talla ' + tandas[i][0] + ' (' + (i + 1) + ' de ' + tandas.length + ')…' : 'Armando las mesas…');
         await exportarMesas(produccion.id, { tallas: tandas[i], conEjemplo }, nombreDeExportacion(produccion, tandas[i]));
       }
-      setListo(porSeparado ? tandas.length + ' archivos descargados.' : 'PDF descargado: ' + tallas.length + (tallas.length === 1 ? ' mesa.' : ' mesas, una por talla.'));
+      setListo(porSeparado ? tandas.length + (tandas.length === 1 ? ' archivo descargado.' : ' archivos descargados, uno por talla.')
+        : 'PDF descargado con ' + tallas.length + (tallas.length === 1 ? ' talla.' : ' tallas.'));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -144,7 +146,8 @@ function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
         <div>
           <h3 className="text-sm font-semibold">Exportar «{produccion.nombre}»</h3>
           <p className="mt-0.5 text-xs text-faint-foreground">
-            Cada talla elegida sale en su propia mesa, con todas las piezas de la prenda (las que van en par, ×2).
+            Cada talla es una prenda completa: una mesa por pieza (las que van en par, las dos), con su contorno
+            láser y sus piquetes. Si la producción no tiene contorno propio, va el de siempre: 1 mm afuera, 0,1 cm.
           </p>
         </div>
         <Boton type="button" variante="fantasma" tamano="sm" className="ml-auto" onClick={onCerrar}>Cerrar</Boton>
@@ -174,7 +177,7 @@ function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={porSeparado} onChange={(e) => setPorSeparado(e.target.checked)} />
               Un archivo por talla
-              <span className="text-xs text-faint-foreground">(si no, todas las mesas en un solo PDF)</span>
+              <span className="text-xs text-faint-foreground">(si no, todas las tallas en un solo PDF, una detrás de otra)</span>
             </label>
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={conEjemplo} onChange={(e) => setConEjemplo(e.target.checked)} />
@@ -189,7 +192,7 @@ function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
             <Boton type="button" variante="acento" disabled={tallas.length === 0 || !!trabajando} onClick={exportar}>
               {trabajando || (tallas.length === 0 ? 'Elegí al menos una talla'
                 : porSeparado ? 'Exportar ' + tallas.length + (tallas.length === 1 ? ' archivo' : ' archivos')
-                  : 'Exportar PDF · ' + tallas.length + (tallas.length === 1 ? ' mesa' : ' mesas'))}
+                  : 'Exportar PDF · ' + tallas.length + (tallas.length === 1 ? ' talla' : ' tallas'))}
             </Boton>
           </div>
         </>

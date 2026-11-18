@@ -1118,9 +1118,9 @@ router.post('/nesting/generar', async (req, res) => {
   res.send(Buffer.from(pdfBytes));
 });
 
-// Exporta una producción por tallas: UNA mesa (página del PDF) por talla, con
-// la prenda completa -- todas sus piezas, con su diseño, fondo, logos y
-// textos fijos, y el contorno de corte si la producción lo tiene. Mismo
+// Exporta una producción por tallas: la prenda completa de cada talla, con
+// UNA mesa (página del PDF) por pieza -- con su diseño, fondo, logos y textos
+// fijos, su contorno láser y sus piquetes (ver motor/mesas.js). Mismo
 // resultado que el script PROCESAR MOLDES de Illustrator, pero ya diseñado.
 // Sin jugadores: el nombre y el número van vacíos, o con el ejemplo de cada
 // zona si se pide (conEjemplo). No guarda registro en `generaciones`.

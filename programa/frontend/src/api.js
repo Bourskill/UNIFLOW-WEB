@@ -403,8 +403,8 @@ export function generarDxf(grupoId, lineas, anchoLienzoCm) {
   return descargar('/nesting/generar-dxf', { grupoId, lineas, anchoLienzoCm }, 'corte-laser.dxf', 'Falló la generación del DXF');
 }
 
-// Una producción por tallas: UNA mesa (página del PDF) por talla, con la
-// prenda completa -- ver rutas/api.js·POST /exportar-mesas/:id.
+// Una producción por tallas: la prenda completa de cada talla, una mesa
+// (página del PDF) por pieza -- ver rutas/api.js·POST /exportar-mesas/:id.
 export function exportarMesas(produccionId, { tallas, conEjemplo }, nombreArchivo) {
   return descargar('/exportar-mesas/' + encodeURIComponent(produccionId), { tallas, conEjemplo: !!conEjemplo },
     nombreArchivo || 'produccion.pdf', 'No se pudo exportar la producción');

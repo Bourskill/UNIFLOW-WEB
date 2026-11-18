@@ -222,6 +222,8 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         // como el contorno de corte para láser, desplazado hacia afuera lo
         // que pida el producto (compensación real de grosor de corte).
         contornoCm: geometria[pieza.nombre]?.vertices || null,
+        // Piquetes sueltos, en las mismas coordenadas (las mesas los marcan).
+        piquetesCm: geometria[pieza.nombre]?.piquetes || [],
         bordeContraste: producto.bordeContraste || null,
       });
     }

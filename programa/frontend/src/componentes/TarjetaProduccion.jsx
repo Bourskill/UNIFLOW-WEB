@@ -141,7 +141,7 @@ export function TarjetaProduccion({ produccion, grupos, piezas, disenos, editand
         </Boton>
         {onExportar && (
           <Boton type="button" variante={exportando ? 'acento' : 'fantasma'} tamano="sm" onClick={onExportar}
-            title="Una mesa por talla, con la prenda completa, en un PDF">
+            title="Cada talla como la prenda completa: una mesa por pieza, con su contorno láser">
             {exportando ? 'Cerrar' : 'Exportar'}
           </Boton>
         )}

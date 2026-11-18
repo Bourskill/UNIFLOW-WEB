@@ -1,12 +1,14 @@
 "use strict";
 
 // ============================================================
-// Exportar una producción por tallas (motor/mesas.js): UNA mesa por talla
-// con la prenda completa, del tamaño justo + 1 cm de margen, como el script
-// PROCESAR MOLDES. Cada mesa es una página del PDF.
+// Exportar una producción (motor/mesas.js) como el script PROCESAR MOLDES:
+// UNA mesa por pieza (Molde_1, Molde_2...), del tamaño justo + 1 cm de
+// margen, con su contorno láser (1 mm afuera) y sus piquetes sueltos.
+// Cada mesa es una página del PDF.
 
 import { PDFDocument } from 'pdf-lib';
-import { armarMesas, MARGEN_MESA_CM } from '../src/motor/mesas.js';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { armarMesas, MARGEN_MESA_CM, CONTORNO_LASER_POR_DEFECTO } from '../src/motor/mesas.js';
 import { generarPdfPaginas } from '../src/motor/exportarPdf.js';
 import { resolverPiezasDePedido } from '../src/motor/resolverPedido.js';
 
@@ -18,50 +20,64 @@ function comprobar(desc, cond, detalle) {
 const CM = 28.3465;
 const cerca = (a, b, tol = 0.05) => Math.abs(a - b) <= tol;
 
-// Prenda: delantero, espalda y manga en par, en S y M (la M un poco más grande).
-const pieza = (id, nombre, w, h) => ({
+// Prenda: delantero (con un piquete suelto), espalda y manga en par, en S y M.
+const pieza = (id, nombre, w, h, piquetes = []) => ({
   id, nombre, angulosPermitidos: [0, 180], tela: null,
   dimensionesPorTalla: { S: { anchoCm: w, altoCm: h }, M: { anchoCm: w + 2, altoCm: h + 2 } },
   geometriaPorTalla: Object.fromEntries([['S', 0], ['M', 2]].map(([t, d]) => [t, {
     poligonoMm: [[0, 0], [(w + d) * 10, 0], [(w + d) * 10, (h + d) * 10], [0, (h + d) * 10]],
     boundingBoxMm: { anchoMm: (w + d) * 10, altoMm: (h + d) * 10 },
+    piquetesMm: piquetes,
   }])),
 });
-const piezas = [pieza('p1', 'DEL', 50, 70), pieza('p2', 'ESP', 50, 72), pieza('p3', 'MANGA', 30, 50)];
+const piezas = [
+  pieza('p1', 'DEL', 50, 70, [{ xMm: 250, yMm: 5, anchoMm: 4, altoMm: 10 }]),
+  pieza('p2', 'ESP', 50, 72), pieza('p3', 'MANGA', 30, 50),
+];
 const grupo = { id: 'g1', nombre: 'CAMISETA', piezas: [
   { piezaId: 'p1', rol: 'Delantero' }, { piezaId: 'p2', rol: 'Espalda' }, { piezaId: 'p3', rol: 'Mangas', par: true },
 ] };
 const producto = { id: 'pr1', nombre: 'Titular', grupoIds: ['g1'], disenoId: null, anclaje: { anclas: [], zonas: [] }, bordeContraste: null };
-const pedido = { lineas: ['S', 'M'].map((talla, i) => ({ id: 'l' + i, productoId: 'pr1', talla })) };
-const resueltas = resolverPiezasDePedido({ pedido, productos: [producto], grupos: [grupo], piezas, disenos: [], fuentes: [] });
+const resolver = (tallas, prod = producto) => resolverPiezasDePedido({
+  pedido: { lineas: tallas.map((talla, i) => ({ id: 'l' + i, productoId: prod.id, talla })) },
+  productos: [prod], grupos: [grupo], piezas, disenos: [], fuentes: [],
+});
 
-console.log('\n--- Una mesa por talla, con la prenda completa ---');
-const mesas = armarMesas(resueltas);
+console.log('\n--- Una mesa por pieza, talla por talla ---');
+const mesas = armarMesas(resolver(['S', 'M']));
 {
-  comprobar('dos tallas → dos mesas', mesas.length === 2 && mesas[0].talla === 'S' && mesas[1].talla === 'M', mesas.map((m) => m.talla).join());
-  comprobar('cada mesa lleva sus 4 piezas (la manga ×2)', mesas.every((m) => m.piezas.length === 4));
-  comprobar('y solo de su talla', mesas[0].piezas.every((p) => p.talla === 'S') && mesas[1].piezas.every((p) => p.talla === 'M'));
-  const s = mesas[0];
-  // Fila 1: DEL 50 + ESP 50 + MANGA 30, separadas 1 cm, con 1 cm de margen: 1+50+1+50+1+30+1 = 134.
-  // Fila 2: el otro lado de la manga. Alto: 1 + 72 + 1 + 50 + 1 = 125.
-  comprobar('ancho justo + margen (134 cm)', cerca(s.anchoLienzoCm, 134), s.anchoLienzoCm);
-  comprobar('alto justo + margen (125 cm)', cerca(s.altoLienzoCm, 125), s.altoLienzoCm);
-  comprobar('la primera pieza a 1 cm del borde', s.piezas[0].posicion.x === MARGEN_MESA_CM && s.piezas[0].posicion.y === MARGEN_MESA_CM);
-  comprobar('el otro lado de la manga empieza la segunda fila', cerca(s.piezas[3].posicion.y, 74) && s.piezas[3].posicion.x === 1);
-  const seSolapan = s.piezas.some((a, i) => s.piezas.some((b, j) => i < j &&
-    a.posicion.x < b.posicion.x + b.anchoCm && b.posicion.x < a.posicion.x + a.anchoCm &&
-    a.posicion.y < b.posicion.y + b.altoCm && b.posicion.y < a.posicion.y + a.altoCm));
-  comprobar('ninguna pieza pisa a otra', !seSolapan);
-  comprobar('todas adentro de la mesa', s.piezas.every((p) => p.posicion.x + p.anchoCm <= s.anchoLienzoCm && p.posicion.y + p.altoCm <= s.altoLienzoCm));
+  comprobar('2 tallas × 4 piezas (la manga ×2) = 8 mesas', mesas.length === 8, mesas.length);
+  comprobar('primero todas las de S, después las de M', mesas.map((m) => m.talla).join() === 'S,S,S,S,M,M,M,M');
+  comprobar('numeradas por talla, como Molde_1, Molde_2...', mesas[0].nombre === '01 - Delantero' && mesas[3].nombre === '04 - Mangas (otro lado)' && mesas[4].nombre === '01 - Delantero',
+    mesas.map((m) => m.nombre).join(' | '));
+  comprobar('cada mesa lleva una sola pieza', mesas.every((m) => m.piezas.length === 1));
+  comprobar('mide la pieza + 1 cm por lado (delantero S: 52 × 72)', cerca(mesas[0].anchoLienzoCm, 52) && cerca(mesas[0].altoLienzoCm, 72),
+    mesas[0].anchoLienzoCm + 'x' + mesas[0].altoLienzoCm);
+  comprobar('la pieza a 1 cm del borde', mesas[0].piezas[0].posicion.x === MARGEN_MESA_CM && mesas[0].piezas[0].posicion.y === MARGEN_MESA_CM);
+  comprobar('sin contorno propio: el del script (1 mm afuera, 0,1 cm)', mesas[0].piezas[0].bordeContraste === CONTORNO_LASER_POR_DEFECTO);
+  const propio = { activo: true, colorHex: '#ff0000', grosorCm: 0.05, desplazamientoCm: 0.2 };
+  const conPropio = armarMesas(resolver(['S'], { ...producto, bordeContraste: propio }));
+  comprobar('con contorno propio activado: se respeta', conPropio[0].piezas[0].bordeContraste === propio);
 }
 
-console.log('\n--- El PDF: una página por mesa, de su tamaño ---');
+console.log('\n--- El PDF: una página por mesa, contorno cerrado y piquetes ---');
 {
-  const doc = await PDFDocument.load(await generarPdfPaginas(mesas));
-  comprobar('dos páginas', doc.getPageCount() === 2);
-  const [a, b] = doc.getPages().map((p) => p.getSize());
-  comprobar('cada página mide lo que su mesa', cerca(a.width / CM, mesas[0].anchoLienzoCm) && cerca(b.height / CM, mesas[1].altoLienzoCm),
-    JSON.stringify([a.width / CM, b.height / CM]));
+  const bytes = await generarPdfPaginas(mesas);
+  const doc = await PDFDocument.load(bytes);
+  comprobar('8 páginas', doc.getPageCount() === 8);
+  const t = doc.getPages()[0].getSize();
+  comprobar('cada página mide lo que su mesa', cerca(t.width / CM, 52) && cerca(t.height / CM, 72), JSON.stringify([t.width / CM, t.height / CM]));
+
+  const lector = await pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: false }).promise;
+  const ops = await (await lector.getPage(1)).getOperatorList();
+  const trazos = ops.fnArray.filter((f) => f === pdfjs.OPS.stroke || f === pdfjs.OPS.closeStroke).length;
+  const caminos = ops.fnArray.filter((f) => f === pdfjs.OPS.constructPath).length;
+  comprobar('el contorno es UN trazado (no segmentos sueltos) + el piquete', caminos === 2, 'paths ' + caminos + ', strokes ' + trazos);
+  // Sin piquetes, la espalda solo tiene el contorno.
+  const opsEsp = await (await lector.getPage(2)).getOperatorList();
+  const caminosEsp = opsEsp.fnArray.filter((f) => f === pdfjs.OPS.constructPath).length;
+  comprobar('la pieza sin piquetes lleva un trazado menos', caminosEsp === caminos - 1, caminosEsp + ' vs ' + caminos);
+  comprobar('no se dibuja el rectángulo de la caja', caminosEsp === 1, caminosEsp);
 }
 
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');

@@ -11,7 +11,7 @@ import {
   pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath, fill,
   beginText, endText, setFontAndSize, setFillingColor, showText,
   setCharacterSpacing, setCharacterSqueeze, rotateAndSkewTextRadiansAndTranslate,
-  setStrokingColor, setLineWidth, setLineJoin, LineJoinStyle, setTextRenderingMode, TextRenderingMode,
+  setStrokingColor, setLineWidth, setLineJoin, LineJoinStyle, setTextRenderingMode, TextRenderingMode, stroke,
 } from 'pdf-lib';
 import ClipperLib from 'clipper-lib';
 import fontkit from '@pdf-lib/fontkit';
@@ -258,15 +258,30 @@ export async function generarPdfPaginas(paginas) {
         const desplazado = offsetPoligono(pieza.contornoCm, pieza.bordeContraste.desplazamientoCm || 0);
         const color = hexARgb(pieza.bordeContraste.colorHex);
         const grosorPt = Math.max(pieza.bordeContraste.grosorCm || 0.03, 0.01) * CM_A_PUNTOS;
-        const n = desplazado.length;
-        for (let i = 0; i < n; i++) {
-          const a = desplazado[i], b = desplazado[(i + 1) % n];
-          pagina.drawLine({
-            start: { x: xPt + a.x * CM_A_PUNTOS, y: yPt + altoRectPt - a.y * CM_A_PUNTOS },
-            end: { x: xPt + b.x * CM_A_PUNTOS, y: yPt + altoRectPt - b.y * CM_A_PUNTOS },
-            thickness: grosorPt,
-            color: rgb(color.r, color.g, color.b),
-          });
+        // UN trazado cerrado (no segmentos sueltos): en Illustrator queda
+        // como un solo path de corte, listo para el láser.
+        const aPt = (v) => ({ x: xPt + v.x * CM_A_PUNTOS, y: yPt + altoRectPt - v.y * CM_A_PUNTOS });
+        const puntos = desplazado.map(aPt);
+        pagina.pushOperators(
+          pushGraphicsState(),
+          setStrokingColor(rgb(color.r, color.g, color.b)),
+          setLineWidth(grosorPt),
+          setLineJoin(LineJoinStyle.Round),
+          moveTo(puntos[0].x, puntos[0].y),
+          ...puntos.slice(1).map((q) => lineTo(q.x, q.y)),
+          closePath(),
+          stroke(),
+          popGraphicsState()
+        );
+        // Piquetes sueltos (los pegados ya van en el contorno): una marca
+        // del tamaño del piquete en su lugar, del mismo color del corte --
+        // como los recrea el script PROCESAR MOLDES. Solo en las mesas.
+        if (pieza.marcarPiquetes) {
+          for (const q of pieza.piquetesCm || []) {
+            const w = Math.max(q.ancho_cm || 0, 0.2) * CM_A_PUNTOS, h = Math.max(q.alto_cm || 0, 0.2) * CM_A_PUNTOS;
+            const c = aPt(q);
+            pagina.drawRectangle({ x: c.x - w / 2, y: c.y - h / 2, width: w, height: h, borderColor: rgb(color.r, color.g, color.b), borderWidth: Math.min(grosorPt, 0.5) });
+          }
         }
       } else {
         pagina.drawRectangle({
@@ -433,7 +448,8 @@ export async function generarPdfPaginas(paginas) {
         });
       }
 
-      if (!fondo && !pieza.imagenDataUrl && (!pieza.textos || pieza.textos.length === 0) && (!pieza.imagenes || pieza.imagenes.length === 0)) {
+      // En las mesas (marcarPiquetes) no: es la pieza que se corta, sin rótulos encima.
+    if (!pieza.marcarPiquetes && !fondo && !pieza.imagenDataUrl && (!pieza.textos || pieza.textos.length === 0) && (!pieza.imagenes || pieza.imagenes.length === 0)) {
         const etiqueta = pieza.piezaId + ' · ' + pieza.talla +
           (pieza.rotacionGrados === 180 ? ' · 180°' : '');
         pagina.drawText(etiqueta, {
