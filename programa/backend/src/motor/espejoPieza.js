@@ -8,6 +8,14 @@
 // mismo sentido que tenía, que es el que esperan el offset del borde y los
 // salientes.
 
+// Pieza "en par" (GrupoPieza.par): la prenda lleva esta pieza y su espejo
+// (manga izquierda y derecha) sin que exista una segunda pieza en la
+// Biblioteca. El otro lado es VIRTUAL: misma pieza, geometría reflejada al
+// vuelo, con esta clave (la del rol + el sufijo). Ver dominio/resolverGrupo.js.
+export const SUFIJO_LADO = '@espejo';
+export const claveDelOtroLado = (clave) => clave + SUFIJO_LADO;
+export const esOtroLado = (clave) => typeof clave === 'string' && clave.endsWith(SUFIJO_LADO);
+
 function espejarX(x, minX, maxX) {
   return minX + maxX - x;
 }

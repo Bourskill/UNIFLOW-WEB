@@ -102,7 +102,13 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
     for (const z of producto.anclaje?.zonas || []) zonaCruda[z.id] = z;
 
     for (const pieza of piezasDelGrupo) {
-      if (excluidas.has(pieza.nombre)) continue;
+      if (excluidas.has(pieza.nombre) || (pieza.ladoDe && excluidas.has(pieza.ladoDe))) continue;
+      // El otro lado de una pieza en par (dominio/resolverGrupo.js): si la
+      // producción le dio diseño PROPIO (producto.ladosPropios), usa sus
+      // propias imágenes/fondo/zonas; si no, lleva lo MISMO que su par, sin
+      // reflejar (misma imagen y mismas zonas en el mismo lugar), sobre su
+      // contorno espejado.
+      const clave = pieza.ladoDe && !producto.ladosPropios?.[pieza.ladoDe] ? pieza.ladoDe : pieza.nombre;
 
       // tallaPorRol[pieza.nombre] ya resolvió el caso "talla única" arriba
       // -- para esa pieza puntual puede ser distinta de linea.talla a
@@ -116,7 +122,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         );
       }
 
-      const zonasDeEstaPieza = resuelto.lista.zonas.filter((z) => z.pieza === pieza.nombre);
+      const zonasDeEstaPieza = resuelto.lista.zonas.filter((z) => z.pieza === clave);
       const textos = zonasDeEstaPieza
         .filter((zona) => zona.tipo !== 'logo')
         .map((zona) => {
@@ -197,17 +203,17 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         anchoCm: dimension.anchoCm,
         altoCm: dimension.altoCm,
         rotable: !!pieza.rotable,
-        imagenDataUrl: diseno?.imagenesPorPieza?.[pieza.nombre] || null,
+        imagenDataUrl: diseno?.imagenesPorPieza?.[clave] || null,
         // Si el arte es un PDF (vectorial), su vista en PNG para la vista
         // previa del navegador; el PDF de producción usa el PDF original.
-        imagenVistaUrl: diseno?.vistasPorPieza?.[pieza.nombre] || null,
+        imagenVistaUrl: diseno?.vistasPorPieza?.[clave] || null,
         // Escala/alineación/corrimiento del arte elegidos en Diseño (ver
         // colocarArte.js). Sin ajuste guardado, el arte se estira a la pieza
         // como siempre.
-        ajusteArte: diseno?.ajusteArtePorPieza?.[pieza.nombre] || null,
+        ajusteArte: diseno?.ajusteArtePorPieza?.[clave] || null,
         // Fondo de color del diseño (sólido o degradado), igual para todas
         // las piezas salvo las que tengan uno propio, debajo del arte. Ver fondoPieza.js.
-        fondo: fondoDePieza(diseno, pieza.nombre),
+        fondo: fondoDePieza(diseno, clave),
         textos,
         imagenes,
         // El contorno REAL de la pieza (no el rectángulo del bounding box)

@@ -34,7 +34,7 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
   const editando = !!grupo;
   const [nombre, setNombre] = useState(grupo?.nombre || '');
   const [filas, setFilas] = useState(() =>
-    (grupo?.piezas || []).map((gp) => ({ id: crypto.randomUUID(), piezaId: gp.piezaId, rol: gp.rol }))
+    (grupo?.piezas || []).map((gp) => ({ id: crypto.randomUUID(), piezaId: gp.piezaId, rol: gp.rol, par: !!gp.par }))
   );
   const [busqueda, setBusqueda] = useState('');
   const [guardando, setGuardando] = useState(false);
@@ -88,7 +88,7 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
     if (pendientes.length > 0) return;
     setGuardando(true);
     setError(null);
-    const datos = { nombre: nombre.trim(), piezas: filas.map((f) => ({ piezaId: f.piezaId, rol: f.rol.trim() })) };
+    const datos = { nombre: nombre.trim(), piezas: filas.map((f) => ({ piezaId: f.piezaId, rol: f.rol.trim(), ...(f.par ? { par: true } : {}) })) };
     try {
       const guardado = editando ? await editarGrupo(grupo.id, datos) : await crearGrupo(datos);
       confirmarGuardado('grupos', guardado);
@@ -151,6 +151,13 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
                       {rolRepetido(f) && <span className="text-danger"> · rol repetido</span>}
                     </span>
                   </div>
+                  {/* En par: se corta x2 (esta y su espejo), sin otra pieza en la Biblioteca. */}
+                  <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
+                    title="Se corta x2: esta pieza y su espejo (ej. manga izquierda y derecha). En Diseño elegís si el otro lado lleva el mismo diseño o uno propio.">
+                    <input type="checkbox" className="h-4 w-4 accent-primary" checked={!!f.par}
+                      onChange={(e) => setFilas((prev) => prev.map((x) => (x.id === f.id ? { ...x, par: e.target.checked } : x)))} />
+                    En par ×2
+                  </label>
                   <Boton variante="fantasma" tamano="sm" type="button" onClick={() => quitar(f.id)} aria-label="Quitar">✕</Boton>
                 </div>
               );

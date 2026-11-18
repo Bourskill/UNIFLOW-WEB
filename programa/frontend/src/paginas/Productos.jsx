@@ -11,6 +11,7 @@ import {
   eliminarPlantilla,
   resolverAnclaje,
   subirArchivo,
+  editarGrupo,
 } from '../api.js';
 import { obtener, confirmarGuardado, borrarRegistro } from '../datos/index.js';
 import { conjuntoDeZona, importarConjunto } from '../utilidades/conjuntosZonas.js';
@@ -21,7 +22,8 @@ import { PanelDock } from '../componentes/PanelDock.jsx';
 import { PanelTexto } from '../componentes/PanelTexto.jsx';
 import { PanelAjusteArte } from '../componentes/PanelAjusteArte.jsx';
 import { PanelFondo } from '../componentes/PanelFondo.jsx';
-import { PanelEspejoPrenda } from '../componentes/PanelEspejoPrenda.jsx';
+import { PanelLadoPar } from '../componentes/PanelLadoPar.jsx';
+import { espejarGeometriaPorTalla, claveDelOtroLado } from '../utilidades/espejoPieza.js';
 import { TarjetaProduccion } from '../componentes/TarjetaProduccion.jsx';
 import { normalizarAjusteArte } from '../utilidades/colocarArte.js';
 import {
@@ -40,6 +42,7 @@ function estadoDeProducto(p) {
     disenoId: p.disenoId || '',
     anclaje: p.anclaje || { anclas: [], zonas: [] },
     bordeContraste: p.bordeContraste || BORDE_POR_DEFECTO,
+    ladosPropios: p.ladosPropios || {},
   };
 }
 const LEYENDA_POR_DEFECTO = { piquetes: true, extremos: true, bordes: true, vertices: false, zonas: true };
@@ -161,6 +164,10 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   const [grupoIds, setGrupoIds] = useState([]);
   const [disenoId, setDisenoId] = useState('');
   const [anclaje, setAnclaje] = useState({ anclas: [], zonas: [] });
+  // Piezas "en par" (marcadas en la prenda) cuyo OTRO LADO lleva diseño
+  // propio en esta producción: clave del rol -> true. Sin marca, el otro
+  // lado lleva lo mismo que su par. Ver PanelLadoPar.
+  const [ladosPropios, setLadosPropios] = useState({});
   const [piezaActiva, setPiezaActiva] = useState(null);
   const [tallaTrabajoPorRol, setTallaTrabajoPorRol] = useState({});
   const [bordeContraste, setBordeContraste] = useState(BORDE_POR_DEFECTO);
@@ -243,6 +250,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setNombre('');
     setGrupoIds(plantillaParaUsar.grupoIds || (plantillaParaUsar.grupoId ? [plantillaParaUsar.grupoId] : []));
     setAnclaje(plantillaParaUsar.anclaje || { anclas: [], zonas: [] });
+    setLadosPropios(plantillaParaUsar.ladosPropios || {});
     if (plantillaParaUsar.bordeContraste) setBordeContraste(plantillaParaUsar.bordeContraste);
     setDisenoId('');
     setSeleccion(null);
@@ -260,20 +268,27 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // exacto con cómo lo va a leer producción).
   const namespacear = gruposSeleccionados.length > 1;
   const piezasDisponibles = gruposSeleccionados.flatMap((g) =>
-    g.piezas.map((gp) => ({
-      clave: namespacear ? g.id + '::' + gp.rol : gp.rol,
-      rol: gp.rol,
-      grupoId: g.id,
-      grupoNombre: g.nombre,
-      piezaId: gp.piezaId,
-    }))
+    g.piezas.flatMap((gp) => {
+      const clave = namespacear ? g.id + '::' + gp.rol : gp.rol;
+      const base = { clave, rol: gp.rol, grupoId: g.id, grupoNombre: g.nombre, piezaId: gp.piezaId, par: !!gp.par };
+      if (!gp.par || !ladosPropios[clave]) return [base];
+      // El otro lado de una pieza en par, con diseño propio: no existe en la
+      // Biblioteca -- es la misma pieza reflejada (mismo cálculo que el servidor).
+      return [base, { ...base, clave: claveDelOtroLado(clave), rol: gp.rol + ' (otro lado)', ladoDe: clave, rolOriginal: gp.rol }];
+    })
   );
   const disenosDeEstaCombinacion = disenos.filter((d) => mismoConjunto(d.grupoIds || (d.grupoId ? [d.grupoId] : []), grupoIds));
   const disenoSeleccionado = disenos.find((d) => d.id === disenoId);
 
+  const espejadasRef = useRef(new WeakMap());
   function piezaDeClave(clave) {
     const pd = piezasDisponibles.find((x) => x.clave === clave);
-    return pd && piezas.find((p) => p.id === pd.piezaId);
+    const pieza = pd && piezas.find((p) => p.id === pd.piezaId);
+    if (!pieza || !pd.ladoDe) return pieza;
+    if (!espejadasRef.current.has(pieza)) {
+      espejadasRef.current.set(pieza, { ...pieza, geometriaPorTalla: espejarGeometriaPorTalla(pieza.geometriaPorTalla) });
+    }
+    return espejadasRef.current.get(pieza);
   }
   function tallaTrabajoDe(clave) {
     return tallaTrabajoPorRol[clave] ?? tallaDeTrabajoPorDefecto(piezaDeClave(clave));
@@ -289,7 +304,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   }, [JSON.stringify(grupoIds), piezasDisponibles.length]);
 
   // Qué pieza usa cada rol (ej. un rol que pasó a usar su espejo): si cambia, se resuelve de nuevo.
-  const firmaPiezasDeGrupos = JSON.stringify(gruposSeleccionados.map((g) => g.piezas));
+  const firmaPiezasDeGrupos = JSON.stringify(gruposSeleccionados.map((g) => g.piezas)) + JSON.stringify(ladosPropios);
   // Resuelve el grafo entero contra la geometría real -- aritmética pura,
   // se pide de nuevo cada vez que algo cambia, nada se guarda para verlo.
   useEffect(() => {
@@ -320,6 +335,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     }
     setGrupoIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
     setAnclaje({ anclas: [], zonas: [] });
+    setLadosPropios({});
     setSeleccion(null);
     setModo(null);
     setDisenoId('');
@@ -393,16 +409,36 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     }
   }
 
-  // Espejo de la pieza activa (izquierda ↔ derecha), que queda en la prenda
-  // como otra pieza para darle su propio diseño -- ver PanelEspejoPrenda.
+  // "⇋ Espejo": la pieza activa va en par (x2, ella y su espejo) y su otro
+  // lado lleva el mismo diseño o uno propio -- sin crear piezas. Ver PanelLadoPar.
   const [espejando, setEspejando] = useState(false);
   useEffect(() => { setEspejando(false); }, [piezaActiva]);
-  function alCrearEspejo({ grupo, pieza, rol }) {
-    setGrupos((prev) => prev.map((g) => (g.id === grupo.id ? grupo : g)));
-    setPiezas((prev) => (prev.some((p) => p.id === pieza.id) ? prev : [...prev, pieza]));
-    setEspejando(false);
-    setPiezaActiva(namespacear ? grupo.id + '::' + rol : rol);
+
+  async function marcarParEnPrenda(grupoId, rol, par) {
+    const grupo = grupos.find((g) => g.id === grupoId);
+    if (!grupo) return;
+    const piezasNuevas = grupo.piezas.map((gp) => (gp.rol === rol ? { ...gp, par } : gp));
+    const actualizado = confirmarGuardado('grupos', await editarGrupo(grupo.id, { piezas: piezasNuevas }));
+    setGrupos((prev) => prev.map((g) => (g.id === actualizado.id ? actualizado : g)));
     onCambio?.();
+  }
+  // `pd` = la pieza original (no el otro lado). propio: el otro lado lleva diseño propio.
+  async function elegirOtroLado(pd, propio) {
+    if (!pd.par) await marcarParEnPrenda(pd.grupoId, pd.rol, true);
+    setLadosPropios((prev) => {
+      const r = { ...prev };
+      if (propio) r[pd.clave] = true; else delete r[pd.clave];
+      return r;
+    });
+    if (propio) setPiezaActiva(claveDelOtroLado(pd.clave));
+    else if (piezaActiva === claveDelOtroLado(pd.clave)) setPiezaActiva(pd.clave);
+    setEspejando(false);
+  }
+  async function quitarPar(pd) {
+    await marcarParEnPrenda(pd.grupoId, pd.rol, false);
+    setLadosPropios((prev) => { const r = { ...prev }; delete r[pd.clave]; return r; });
+    setPiezaActiva(pd.clave);
+    setEspejando(false);
   }
 
   async function quitarImagenDePieza(clave) {
@@ -867,7 +903,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   //  - todo lo que no está en el servidor queda además como borrador en
   //    este navegador, y al volver se ofrece recuperarlo;
   //  - guardar NO vacía el editor: se sigue con el mismo producto.
-  const estadoEditor = { nombre, grupoIds, disenoId, anclaje, bordeContraste };
+  const estadoEditor = { nombre, grupoIds, disenoId, anclaje, bordeContraste, ladosPropios };
   const firmaActual = firmaEditor(estadoEditor);
   const sinGuardar = haySinGuardar(estadoEditor, firmaGuardada);
   const autoguardable = puedeGuardarseSolo(estadoEditor, !editandoId);
@@ -883,7 +919,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     try {
       const datos = {
         nombre: datosAhora.nombre, grupoIds: datosAhora.grupoIds, disenoId: datosAhora.disenoId || null,
-        anclaje: datosAhora.anclaje, bordeContraste: datosAhora.bordeContraste,
+        anclaje: datosAhora.anclaje, bordeContraste: datosAhora.bordeContraste, ladosPropios: datosAhora.ladosPropios,
       };
       const r = idAhora ? await editarProducto(idAhora, datos) : await crearProducto(datos);
       confirmarGuardado('productos', r);
@@ -945,6 +981,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setGrupoIds(b.grupoIds);
     setDisenoId(b.disenoId || '');
     setAnclaje(b.anclaje);
+    setLadosPropios(b.ladosPropios || {});
     setBordeContraste(b.bordeContraste || BORDE_POR_DEFECTO);
     setSeleccion(null);
     setModo(null);
@@ -992,6 +1029,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setGrupoIds(producto.grupoIds || (producto.grupoId ? [producto.grupoId] : []));
     setDisenoId(producto.disenoId || '');
     setAnclaje(producto.anclaje || { anclas: [], zonas: [] });
+    setLadosPropios(producto.ladosPropios || {});
     setBordeContraste(producto.bordeContraste || BORDE_POR_DEFECTO);
     setSeleccion(null);
     setModo(null);
@@ -1012,6 +1050,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     borrarBorrador();
     setNombre('');
     setAnclaje({ anclas: [], zonas: [] });
+    setLadosPropios({});
     setSeleccion(null);
     setModo(null);
     setError(null);
@@ -1275,8 +1314,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                   {namespacear && (
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-faint-foreground">{g.nombre}</span>
                   )}
-                  {g.piezas.map((gp) => {
-                    const clave = namespacear ? g.id + '::' + gp.rol : gp.rol;
+                  {piezasDisponibles.filter((pd) => pd.grupoId === g.id).map((pd) => {
+                    const clave = pd.clave;
                     const n = contarEnPieza(clave);
                     return (
                       <button key={clave} type="button" onClick={() => { setPiezaActiva(clave); setSeleccion(null); setModo(null); }}
@@ -1285,7 +1324,14 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                         {disenoSeleccionado?.imagenesPorPieza?.[clave] && (
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" title="Tiene imagen de diseño" />
                         )}
-                        {gp.rol}
+                        {pd.ladoDe && <span aria-hidden="true">⇋</span>}
+                        {pd.rol}
+                        {pd.par && !pd.ladoDe && (
+                          <span className="rounded bg-surface-muted px-1 text-[10px] text-faint-foreground"
+                            title={ladosPropios[clave] ? 'Va en par: el otro lado lleva su propio diseño' : 'Va en par: se corta x2 con el mismo diseño'}>
+                            ×2
+                          </span>
+                        )}
                         {n > 0 && <span className="rounded-full bg-primary/20 px-1.5 text-[10px]">{n}</span>}
                       </button>
                     );
@@ -1320,8 +1366,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 <div className="ml-auto flex flex-wrap items-center gap-1">
                   {piezaObj && (
                     <Boton variante={espejando ? 'acento' : 'fantasma'} tamano="sm" type="button" onClick={() => setEspejando((v) => !v)}
-                      title="Saca el lado opuesto de esta pieza (izquierda ↔ derecha) y lo suma a la prenda, para ponerle otro diseño sin importar otro archivo.">
-                      {espejando ? 'Cancelar espejo' : '⇋ Espejo'}
+                      title="El otro lado de esta pieza (izquierda ↔ derecha): se corta x2, con el mismo diseño o uno propio, sin crear piezas nuevas.">
+                      {espejando ? 'Cerrar' : '⇋ Espejo'}
                     </Boton>
                   )}
                   {disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] && (
@@ -1332,12 +1378,22 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 </div>
               </div>
               {espejando && piezaObj && (() => {
-                const pd = piezasDisponibles.find((x) => x.clave === piezaActiva);
-                const grupo = pd && grupos.find((g) => g.id === pd.grupoId);
-                return grupo ? (
-                  <PanelEspejoPrenda grupo={grupo} rol={pd.rol} pieza={piezaObj} piezas={piezas}
-                    onListo={alCrearEspejo} onCancelar={() => setEspejando(false)} />
-                ) : null;
+                const actual = piezasDisponibles.find((x) => x.clave === piezaActiva);
+                // Desde el otro lado, el panel habla de la pieza original.
+                const pd = actual?.ladoDe ? piezasDisponibles.find((x) => x.clave === actual.ladoDe) : actual;
+                const original = pd && piezas.find((p) => p.id === pd.piezaId);
+                if (!pd || !original) return null;
+                const claveOtro = claveDelOtroLado(pd.clave);
+                return (
+                  <PanelLadoPar
+                    rol={pd.rol} nombrePrenda={pd.grupoNombre} pieza={original}
+                    enPar={pd.par} propio={!!ladosPropios[pd.clave]}
+                    zonasDelOtroLado={anclaje.zonas.filter((z) => z.pieza === claveOtro).length}
+                    onElegir={(propio) => elegirOtroLado(pd, propio)}
+                    onQuitarPar={() => quitarPar(pd)}
+                    onCancelar={() => setEspejando(false)}
+                  />
+                );
               })()}
 
               <div className="mb-2 flex flex-wrap items-center gap-3 text-xs">

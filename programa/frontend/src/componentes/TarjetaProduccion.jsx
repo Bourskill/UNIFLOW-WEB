@@ -3,6 +3,7 @@ import { Boton, Chip } from './ui.jsx';
 import { geometriaParaAnclaje } from '../utilidades/geometriaAnclaje.js';
 import { fondoDePieza, ejeDegradado } from '../utilidades/fondoPieza.js';
 import { ordenarTallasNatural } from '../constantes.js';
+import { espejarGeometriaPorTalla, claveDelOtroLado } from '../utilidades/espejoPieza.js';
 
 // Una producción (antes "producto") como tarjeta, igual que las de la
 // Biblioteca: miniatura con sus piezas -- la forma real, el fondo de color y
@@ -31,12 +32,20 @@ export function piezasDeProduccion(produccion, grupos, piezas, disenos) {
       const geo = pieza && talla ? geometriaParaAnclaje(pieza, talla) : null;
       if (!geo) continue;
       const clave = namespacear ? g.id + '::' + gp.rol : gp.rol;
-      const vista = diseno?.vistasPorPieza?.[clave] || diseno?.imagenesPorPieza?.[clave] || null;
-      salida.push({
-        clave, rol: gp.rol, geo,
-        imagen: vista && !/\.pdf(\?|$)/i.test(vista) ? vista : null,
-        fondo: diseno ? fondoDePieza(diseno, clave) : null,
-      });
+      const dibujo = (claveDiseno) => {
+        const vista = diseno?.vistasPorPieza?.[claveDiseno] || diseno?.imagenesPorPieza?.[claveDiseno] || null;
+        return {
+          imagen: vista && !/\.pdf(\?|$)/i.test(vista) ? vista : null,
+          fondo: diseno ? fondoDePieza(diseno, claveDiseno) : null,
+        };
+      };
+      salida.push({ clave, rol: gp.rol, geo, ...dibujo(clave) });
+      // Pieza en par: también su otro lado, reflejado, con su diseño propio o el mismo.
+      if (gp.par) {
+        const geoOtro = geometriaParaAnclaje({ ...pieza, geometriaPorTalla: espejarGeometriaPorTalla(pieza.geometriaPorTalla) }, talla);
+        const claveOtro = claveDelOtroLado(clave);
+        if (geoOtro) salida.push({ clave: claveOtro, rol: gp.rol + ' (otro lado)', geo: geoOtro, ...dibujo(produccion.ladosPropios?.[clave] ? claveOtro : clave) });
+      }
     }
   }
   return salida;

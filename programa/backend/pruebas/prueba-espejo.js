@@ -65,6 +65,10 @@ console.log('\n--- Nombre propuesto ---');
     const sale = nombreDeEspejo(entrada);
     comprobar('"' + entrada + '" → "' + esperado + '"', sale === esperado, sale);
   }
+  // Diseño dibuja el otro lado de una pieza en par con su propia copia del espejo.
+  const front = await import('../../frontend/src/utilidades/espejoPieza.js');
+  comprobar('la copia del frontend espeja igual', JSON.stringify(front.espejarGeometria(geo)) === JSON.stringify(espejarGeometria(geo)));
+  comprobar('y usa la misma clave para el otro lado', front.claveDelOtroLado('Mangas') === 'Mangas@espejo' && front.esOtroLado('g1::Mangas@espejo'));
   // La Biblioteca lo propone con su propia copia: tiene que dar lo mismo.
   const { nombreDeEspejo: delFrontend } = await import('../../frontend/src/utilidades/nombreEspejo.js');
   comprobar('la copia del frontend propone los mismos nombres', casos.every(([entrada]) => delFrontend(entrada) === nombreDeEspejo(entrada)));

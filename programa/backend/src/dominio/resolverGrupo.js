@@ -9,8 +9,29 @@
 // rutas/api.js, flujo de confirmación al reprocesar/reemplazar molderia).
 // Sin este parámetro (Grupos, Plantillas, nesting sin producto real de por
 // medio) se usa la geometría ACTUAL de la pieza, igual que siempre.
+import { espejarGeometriaPorTalla, claveDelOtroLado } from '../motor/espejoPieza.js';
+
+// Una pieza marcada "en par" en la prenda (gp.par) suma, después de ella, su
+// OTRO LADO: una pieza virtual con la misma pieza de Biblioteca reflejada
+// (sin crear nada guardado). Así se corta x2 -- izquierda y derecha -- en
+// pedidos y corte láser, y se puede ubicar cosas sobre el otro lado en
+// Diseño. `ladoDe` dice de qué rol es el espejo.
 export function resolverPiezasDeGrupo(grupo, piezas, versionesPiezas) {
-  return grupo.piezas.map((gp) => {
+  return grupo.piezas.flatMap((gp) => {
+    const base = resolverUnaPieza(grupo, gp, piezas, versionesPiezas);
+    if (!gp.par) return [base];
+    return [base, {
+      ...base,
+      nombre: claveDelOtroLado(gp.rol),
+      etiquetaRol: gp.rol + ' (otro lado)',
+      ladoDe: gp.rol,
+      geometriaPorTalla: espejarGeometriaPorTalla(base.geometriaPorTalla),
+    }];
+  });
+}
+
+function resolverUnaPieza(grupo, gp, piezas, versionesPiezas) {
+  {
     const pieza = piezas.find((p) => p.id === gp.piezaId);
     if (!pieza) {
       throw new Error(
@@ -47,7 +68,7 @@ export function resolverPiezasDeGrupo(grupo, piezas, versionesPiezas) {
       // motor/resolverPedido.js·tallaRealDePieza).
       tallaUnica: !!pieza.tallaUnica,
     };
-  });
+  }
 }
 
 // Productos multi-prenda ("kit": camiseta + short + medias en un solo
@@ -76,11 +97,12 @@ export function resolverPiezasDeGrupos(grupos, piezas, versionesPiezas) {
       resultado.push({
         ...pieza,
         nombre: namespacear ? grupo.id + '::' + pieza.nombre : pieza.nombre,
+        ...(pieza.ladoDe ? { ladoDe: namespacear ? grupo.id + '::' + pieza.ladoDe : pieza.ladoDe } : {}),
         // Rol crudo (sin namespace) + nombre de la prenda dueña -- para
         // mensajes legibles (nunca mostrarle al usuario un id de grupo en
         // crudo). `nombre` de arriba sigue siendo la CLAVE real que usa el
         // resto del motor.
-        rol: pieza.nombre,
+        rol: pieza.etiquetaRol || pieza.nombre,
         grupoId: grupo.id,
         grupoNombre: grupo.nombre,
       });
