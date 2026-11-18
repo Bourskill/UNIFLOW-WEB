@@ -260,6 +260,7 @@ function resolverZona(z, ctx, salida, porId) {
     // Solo se usan cuando tipo==="logo"; en los demás casos van como null,
     // sin problema (grafo.normalizarZona() ya los deja así por defecto).
     logoRuta: (z.tipo === "logo") ? (z.logoRuta || null) : null,
+    logoVista: (z.tipo === "logo") ? (z.logoVista || null) : null,
     cruz: (z.tipo === "logo") ? !!z.cruz : null,
     referencia: { x: r2(px), y: r2(py) }
   };

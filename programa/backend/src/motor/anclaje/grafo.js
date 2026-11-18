@@ -154,6 +154,8 @@ function normalizarZona(z) {
     // materializarAnclaje), igual que el texto de muestra — no es algo
     // que produción vuelva a tocar por jugador.
     logoRuta: z.logoRuta || null,
+    // Si el logo es un PDF: su vista en PNG, solo para verlo en Diseño.
+    logoVista: z.logoVista || null,
     nota    : z.nota || ""
   };
 }

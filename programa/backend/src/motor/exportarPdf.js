@@ -380,7 +380,8 @@ export async function generarPdfNesting(resultadoNesting) {
     for (const imagen of pieza.imagenes || []) {
       let embebida;
       try {
-        embebida = await incrustarImagen(pdf, imagen.url);
+        // PNG/JPG o PDF (vectorial, como el arte del diseño), una vez por URL.
+        embebida = await arteDe(imagen.url);
       } catch {
         continue; // un logo que no se pudo bajar no debe tumbar todo el PDF
       }
@@ -396,14 +397,14 @@ export async function generarPdfNesting(resultadoNesting) {
       let escala;
       if (imagen.cruz) {
         const brazoPt = ladoPt * RATIO_BRAZO;
-        const escalaVertical = Math.min(ladoPt / embebida.width, brazoPt / embebida.height);
-        const escalaHorizontal = Math.min(brazoPt / embebida.width, ladoPt / embebida.height);
+        const escalaVertical = Math.min(ladoPt / embebida.objeto.width, brazoPt / embebida.objeto.height);
+        const escalaHorizontal = Math.min(brazoPt / embebida.objeto.width, ladoPt / embebida.objeto.height);
         escala = Math.max(escalaVertical, escalaHorizontal);
       } else {
-        escala = Math.min(anchoPt2 / embebida.width, altoPt2 / embebida.height);
+        escala = Math.min(anchoPt2 / embebida.objeto.width, altoPt2 / embebida.objeto.height);
       }
-      const wPt = embebida.width * escala;
-      const hPt = embebida.height * escala;
+      const wPt = embebida.objeto.width * escala;
+      const hPt = embebida.objeto.height * escala;
 
       const cxPt = xPt + imagen.cxCm * CM_A_PUNTOS;
       const cyPt = yPt + altoRectPt - imagen.cyCm * CM_A_PUNTOS;
@@ -412,7 +413,7 @@ export async function generarPdfNesting(resultadoNesting) {
         ? anclaParaRotarDesdeCentro(cxPt, cyPt, wPt, hPt, grados)
         : { x: cxPt - wPt / 2, y: cyPt - hPt / 2 };
 
-      pagina.drawImage(embebida, {
+      dibujarArte(pagina, embebida, {
         x: ancla.x,
         y: ancla.y,
         width: wPt,
@@ -489,11 +490,6 @@ async function incrustarArte(pdf, urlODataUrl) {
   const caja = pagina.getCropBox();
   const objeto = await pdf.embedPage(pagina, { left: caja.x, bottom: caja.y, right: caja.x + caja.width, top: caja.y + caja.height });
   return { tipo: 'pdf', objeto };
-}
-
-async function incrustarImagen(pdf, urlODataUrl) {
-  const { contentType, bytes } = await bajarArchivo(urlODataUrl);
-  return embeberImagen(pdf, contentType, bytes);
 }
 
 function embeberImagen(pdf, contentType, bytes) {

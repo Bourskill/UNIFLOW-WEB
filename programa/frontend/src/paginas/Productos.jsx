@@ -112,7 +112,7 @@ function nombreDeArchivo(url) {
 function anclajeSinContenido(anclajeOriginal) {
   return {
     ...anclajeOriginal,
-    zonas: (anclajeOriginal.zonas || []).map((z) => ({ ...z, valorFijo: '', logoRuta: null, valorEjemplo: '' })),
+    zonas: (anclajeOriginal.zonas || []).map((z) => ({ ...z, valorFijo: '', logoRuta: null, logoVista: null, valorEjemplo: '' })),
   };
 }
 
@@ -836,7 +836,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
           zonas: prev.zonas.map((z) => (hermanas.some((h) => h.id === z.id)
             ? { ...z, tipo: cambios.tipo ?? zona.tipo, campoPedido: cambios.campoPedido ?? zona.campoPedido,
                 valorFijo: cambios.valorFijo ?? zona.valorFijo, valorEjemplo: cambios.valorEjemplo ?? zona.valorEjemplo,
-                logoRuta: cambios.logoRuta ?? zona.logoRuta }
+                logoRuta: cambios.logoRuta ?? zona.logoRuta,
+                logoVista: 'logoRuta' in cambios ? (cambios.logoVista || null) : (zona.logoVista || null) }
             : z)),
         }));
       }
@@ -846,7 +847,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     const hermanas = grupo ? anclaje.zonas.filter((z) => z.id !== zona.id && z.grupo === grupo) : [];
     if (hermanas.length) {
       const modelo = hermanas[0];
-      actualizarZona(zona.id, { grupo, tipo: modelo.tipo, campoPedido: modelo.campoPedido, valorFijo: modelo.valorFijo, valorEjemplo: modelo.valorEjemplo, logoRuta: modelo.logoRuta });
+      actualizarZona(zona.id, { grupo, tipo: modelo.tipo, campoPedido: modelo.campoPedido, valorFijo: modelo.valorFijo, valorEjemplo: modelo.valorEjemplo, logoRuta: modelo.logoRuta, logoVista: modelo.logoVista || null });
     } else {
       actualizarZona(zona.id, { grupo });
     }
@@ -1768,7 +1769,10 @@ function LineaMedida({ etiqueta, valor, onCambiar }) {
 // Sube el archivo del logo a Storage apenas se suelta (mismo mecanismo que
 // soltar una imagen en el lienzo) y guarda solo su URL en la zona -- el archivo real
 // nunca viaja dentro del anclaje.
-function SelectorLogo({ url, onElegir }) {
+// Logo de una zona: PNG/JPG, o PDF (vectorial). Del PDF se guarda el archivo
+// tal cual (lo que va al PDF de producción) y una vista en PNG para verlo acá,
+// igual que el arte del diseño (ver vistaPdf.js).
+function SelectorLogo({ url, vista, onElegir }) {
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState(null);
   const onDrop = useCallback(async (archivos) => {
@@ -1777,19 +1781,28 @@ function SelectorLogo({ url, onElegir }) {
     setSubiendo(true);
     setError(null);
     try {
-      const dataUrl = await new Promise((resolve, reject) => {
+      const base64 = (blob) => new Promise((resolve, reject) => {
         const lector = new FileReader();
-        lector.onload = () => resolve(lector.result);
+        lector.onload = () => resolve(lector.result.slice(lector.result.indexOf(',') + 1));
         lector.onerror = reject;
-        lector.readAsDataURL(archivo);
+        lector.readAsDataURL(blob);
       });
-      const urlSubida = await subirArchivo(dataUrl.slice(dataUrl.indexOf(',') + 1), archivo.type, 'logo');
-      onElegir(urlSubida);
+      let urlVista = null;
+      if (archivo.type === 'application/pdf') {
+        const { vistaDePdf } = await import('../utilidades/vistaPdf.js');
+        let v;
+        try { v = await vistaDePdf(archivo, { ladoMaxPx: 1200 }); }
+        catch (e) { throw new Error('No se pudo leer el PDF (' + e.message + '). ¿Está protegido o dañado?'); }
+        urlVista = await subirArchivo(await base64(v.blob), 'image/png', 'logo-vista');
+        if (v.paginas > 1) setError('El PDF tiene ' + v.paginas + ' páginas: se usa solo la primera.');
+      }
+      const urlSubida = await subirArchivo(await base64(archivo), archivo.type, 'logo');
+      onElegir({ logoRuta: urlSubida, logoVista: urlVista });
     } catch (e) { setError(e.message); }
     finally { setSubiendo(false); }
   }, [onElegir]);
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop, accept: { 'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg'] }, multiple: false,
+    onDrop, accept: { 'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg'], 'application/pdf': ['.pdf'] }, multiple: false,
   });
 
   return (
@@ -1798,10 +1811,11 @@ function SelectorLogo({ url, onElegir }) {
         className={'cursor-pointer rounded-lg border-2 border-dashed px-3 py-2 text-center text-xs ' +
           (isDragActive ? 'border-primary bg-primary-soft text-primary' : 'border-border text-faint-foreground')}>
         <input {...getInputProps()} />
-        {subiendo ? 'Subiendo…' : url ? 'Reemplazar archivo' : 'Arrastrar o elegir el logo (PNG/JPG)'}
+        {subiendo ? 'Subiendo…' : url ? 'Reemplazar archivo' : 'Arrastrar o elegir el logo (PNG, JPG o PDF)'}
       </div>
       {error && <Aviso tono="error">{error}</Aviso>}
-      {url && <img className="mt-2 max-h-16 rounded-md border border-border" src={url} alt="Logo" />}
+      {url && (vista || !/\.pdf(\?|$)/i.test(url)) && <img className="mt-2 max-h-16 rounded-md border border-border" src={vista || url} alt="Logo" />}
+      {url && vista && <p className="mt-1 text-[11px] text-faint-foreground">PDF vectorial: se imprime en vectores.</p>}
     </div>
   );
 }
@@ -1929,7 +1943,7 @@ function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasR
           <option value="logo">un logo o escudo</option>
         </Select>
         {zona.tipo === 'logo' ? (
-          <SelectorLogo url={zona.logoRuta} onElegir={(url) => onActualizar({ logoRuta: url })} />
+          <SelectorLogo url={zona.logoRuta} vista={zona.logoVista} onElegir={(logo) => onActualizar(logo)} />
         ) : zona.campoPedido === 'fijo' ? (
           <Input placeholder="Texto fijo" value={zona.valorFijo || ''} onChange={(e) => onActualizar({ valorFijo: e.target.value })} />
         ) : (

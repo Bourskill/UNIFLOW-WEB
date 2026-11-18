@@ -347,7 +347,9 @@ const ZonaEnLienzo = memo(function ZonaEnLienzo({
   // previa de nesting; el `rotate` de SVG gira al revés (su Y va hacia
   // abajo), de ahí el signo.
   const transformZona = z.rotacion ? 'rotate(' + -z.rotacion + ' ' + z.cx + ' ' + z.cy + ')' : undefined;
-  const natural = useTamanoNaturalDeImagen(esLogo ? z.logoRuta : null);
+  // Un logo en PDF se ve por su vista en PNG (el SVG no dibuja PDF).
+  const logoVer = esLogo ? (z.logoVista || z.logoRuta) : null;
+  const natural = useTamanoNaturalDeImagen(logoVer);
   const medida = esLogo && z.logoRuta
     ? medidaLogoAjustada({ cruz: enCruz, lado: z.ancho, ancho: z.ancho, alto: z.alto, natural })
     : null;
@@ -368,7 +370,7 @@ const ZonaEnLienzo = memo(function ZonaEnLienzo({
       if (z.logoRuta && medida) {
         return (
           <g transform={transformZona} onClick={(e) => { e.stopPropagation(); onSeleccionarZona(z.id); }}>
-            <image href={z.logoRuta} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
+            <image href={logoVer} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
           </g>
         );
       }
@@ -408,7 +410,7 @@ const ZonaEnLienzo = memo(function ZonaEnLienzo({
                   cuando termina de cargar la imagen -- hasta entonces se ve
                   el marco de la cruz solo, nunca un cuadrado de más. */}
               {medida && (
-                <image href={z.logoRuta} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
+                <image href={logoVer} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
               )}
             </>
           );
@@ -423,7 +425,7 @@ const ZonaEnLienzo = memo(function ZonaEnLienzo({
         />
       )}
       {esLogo && z.logoRuta && !enCruz && medida && (
-        <image href={z.logoRuta} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
+        <image href={logoVer} x={z.cx - medida.w / 2} y={z.cy - medida.h / 2} width={medida.w} height={medida.h} preserveAspectRatio="none" />
       )}
       {/* Con contenido real, el texto ocupa SU ZONA (siempre visible, como en
           el PDF); el rótulo chico solo aparece para identificar una zona

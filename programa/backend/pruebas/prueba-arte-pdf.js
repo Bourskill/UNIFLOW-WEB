@@ -67,5 +67,35 @@ console.log('\n--- El mismo diseño en varias piezas se incrusta una sola vez --
   comprobar('cinco piezas pesan casi lo mismo que una (no cinco copias)', cinco < una * 2, una + ' → ' + cinco + ' bytes');
 }
 
+console.log('\n--- Logo de una zona en PDF: también vectorial, sin deformar ---');
+{
+  const logo = (extra) => ({ url: disenoPdf, cxCm: 10, cyCm: 5, ladoCm: 6, anchoCm: 6, altoCm: 6, cruz: false, rotacionGrados: 0, ...extra });
+  const { ops } = await generar([pieza({ imagenDataUrl: null, imagenes: [logo()] })]);
+  const f = ops.fnArray;
+  comprobar('no se rasteriza', !f.includes(pdfjs.OPS.paintImageXObject));
+  comprobar('va como página incrustada', f.includes(pdfjs.OPS.paintFormXObjectBegin));
+  const por = (m, n) => [
+    n[0] * m[0] + n[1] * m[2], n[0] * m[1] + n[1] * m[3],
+    n[2] * m[0] + n[3] * m[2], n[2] * m[1] + n[3] * m[3],
+    n[4] * m[0] + n[5] * m[2] + m[4], n[4] * m[1] + n[5] * m[3] + m[5],
+  ];
+  let actual = [1, 0, 0, 1, 0, 0], matriz = null;
+  const pila = [];
+  for (let i = 0; i < f.length && !matriz; i++) {
+    if (f[i] === pdfjs.OPS.save) pila.push(actual);
+    else if (f[i] === pdfjs.OPS.restore) actual = pila.pop();
+    else if (f[i] === pdfjs.OPS.transform) actual = por(actual, ops.argsArray[i]);
+    else if (f[i] === pdfjs.OPS.paintFormXObjectBegin) matriz = por(actual, ops.argsArray[i][0] || [1, 0, 0, 1, 0, 0]);
+  }
+  // Página 2:1 en una zona de 6×6 cm: entra de 6×3 cm, centrada en (10, 5).
+  comprobar('6 cm de ancho y 3 de alto (proporción del PDF)',
+    matriz && cerca(matriz[0] * 200, 6 * CM) && cerca(matriz[3] * 100, 3 * CM), JSON.stringify(matriz));
+  comprobar('centrado en la zona (x 7 cm; y 80 - 5 - 1,5 = 73,5 cm)',
+    matriz && cerca(matriz[4], 7 * CM) && cerca(matriz[5], 73.5 * CM), JSON.stringify(matriz));
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+  const conPng = await generar([pieza({ imagenDataUrl: null, imagenes: [logo({ url: png })] })]);
+  comprobar('un logo PNG sigue entrando como imagen', conPng.ops.fnArray.includes(pdfjs.OPS.paintImageXObject));
+}
+
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');
 process.exit(fallos ? 1 : 0);
