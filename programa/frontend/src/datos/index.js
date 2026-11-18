@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import {
   listarPiezas, listarGrupos, listarDisenos, listarProductos, listarPlantillas,
-  listarPedidos, listarFuentes, listarGeneraciones, verificarSalud, EVENTO_ESCRITURA,
+  listarPedidos, listarFuentes, listarGeneraciones, EVENTO_ESCRITURA,
 } from '../api.js';
 import { crearAlmacen } from './almacen.js';
 import { avisar } from './avisos.js';
@@ -82,23 +82,6 @@ export async function obtener(nombre) {
   const final = almacen.leer(nombre);
   if (final.datos === null) throw new Error(final.error || 'No se pudieron cargar los datos (' + nombre + ').');
   return final.datos;
-}
-
-/**
- * Al abrir la app: despierta el servidor (Render gratis se duerme y tarda
- * hasta un minuto) y, apenas responde, pide todas las colecciones en
- * paralelo -- así cada pantalla ya tiene sus datos al entrar, en vez de
- * cargarlos recién ahí.
- */
-export async function precargar({ intentos = 30, esperaMs = 3000 } = {}) {
-  for (let i = 0; i < intentos; i++) {
-    if (await verificarSalud()) {
-      await Promise.all(almacen.nombres.map((n) => almacen.asegurar(n)));
-      return true;
-    }
-    await new Promise((r) => setTimeout(r, esperaMs));
-  }
-  return false;
 }
 
 // Al volver a la pestaña del navegador (o desde otro dispositivo) lo que se

@@ -10,9 +10,9 @@ const BASE_URL = ORIGEN + '/api';
 
 // --- Clave de acceso -----------------------------------------------------------
 // El backend exige una clave compartida del taller (ver backend/src/acceso.js).
-// Se pide una vez en la pantalla de entrada (componentes/Acceso.jsx) y queda
+// Se pide una vez en la pantalla de inicio (componentes/Arranque.jsx) y queda
 // guardada en este navegador. Si el servidor la rechaza (401), se borra y se
-// avisa con un evento para que Acceso.jsx vuelva a pedirla.
+// avisa con un evento para que Arranque.jsx vuelva a pedirla.
 const CLAVE_STORAGE = 'uniflow.claveAcceso';
 export const EVENTO_SIN_CLAVE = 'uniflow:sin-clave';
 

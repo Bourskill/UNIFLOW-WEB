@@ -1,5 +1,4 @@
-import { memo, useCallback, useEffect, useState } from 'react';
-import { precargar } from './datos/index.js';
+import { memo, useCallback, useState } from 'react';
 import { Formulario } from './paginas/Formulario.jsx';
 import { Piezas } from './paginas/Piezas.jsx';
 import { Plantillas } from './paginas/Plantillas.jsx';
@@ -59,12 +58,9 @@ function App() {
   const marcarCambio = useCallback(() => setRecargarSenal((n) => n + 1), []);
   const pestanaActual = PESTANAS.find((p) => p.id === pestana);
 
-  // Apenas se abre la app: despertar el servidor y traer todos los datos a
-  // la caché compartida (datos/index.js), así entrar a cualquier pantalla
-  // ya no espera su propia carga.
-  useEffect(() => {
-    precargar();
-  }, []);
+  // Despertar el servidor y traer los datos a la caché lo hace la pantalla
+  // de inicio (componentes/Arranque.jsx), con su barra de progreso, antes
+  // de mostrar esto.
 
   // "Usar esta plantilla" (Plantillas.jsx) tiene que llevar al usuario al
   // apartado Diseño con esa configuración de zonas ya cargada -- mismo
