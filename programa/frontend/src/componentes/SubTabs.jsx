@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 // Tabs internas de una sección (estilo Google Drive: un apartado del nav
 // lateral, con sub-pestañas adentro), no apartados nuevos del nav -- varias
 // pantallas relacionadas (ej. subir/catálogo/biblioteca) son UNA sección,
 // no tres.
-export function SubTabs({ tabs, inicial }) {
-  const primera = inicial || tabs[0].id;
-  const [activa, setActiva] = useState(primera);
+// `activa` + `onCambiar` (opcionales): para que otra pantalla pueda abrir
+// una pestaña puntual (ej. Diseño → "Ver todas en Producción").
+export function SubTabs({ tabs, inicial, activa: activaExterna, onCambiar }) {
+  const primera = activaExterna || inicial || tabs[0].id;
+  const [activaInterna, setActiva] = useState(primera);
+  const activa = activaExterna || activaInterna;
   // Una vez visitada, una pestaña queda montada para siempre (oculta con
   // `hidden`, no sacada del árbol con `&&`) -- volver a entrar no debe
   // repetir su carga inicial. Pero NO se montan las 3 de una: eso dispararía
@@ -16,8 +19,13 @@ export function SubTabs({ tabs, inicial }) {
   // primera vez que se visita.
   const [visitadas, setVisitadas] = useState(() => new Set([primera]));
 
+  useEffect(() => {
+    if (activaExterna) setVisitadas((prev) => (prev.has(activaExterna) ? prev : new Set(prev).add(activaExterna)));
+  }, [activaExterna]);
+
   function ir(id) {
     setActiva(id);
+    onCambiar?.(id);
     setVisitadas((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   }
 

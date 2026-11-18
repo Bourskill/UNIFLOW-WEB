@@ -25,6 +25,11 @@ import { PanelFondo } from '../componentes/PanelFondo.jsx';
 import { PanelLadoPar } from '../componentes/PanelLadoPar.jsx';
 import { espejarGeometriaPorTalla, claveDelOtroLado } from '../utilidades/espejoPieza.js';
 import { TarjetaProduccion } from '../componentes/TarjetaProduccion.jsx';
+import { ordenarPorReciente } from '../utilidades/producciones.js';
+
+// Diseño muestra solo las producciones más recientes; todas están en
+// Producción → Producciones (Producciones.jsx).
+const RECIENTES = 6;
 import { normalizarAjusteArte } from '../utilidades/colocarArte.js';
 import {
   firmaEditor, haySinGuardar, puedeGuardarseSolo, guardarBorrador, leerBorrador, borrarBorrador, borradorParaOfrecer, haceCuanto,
@@ -152,7 +157,7 @@ function colorDeReferencia(ref) {
   }
 }
 
-export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsumirPlantilla }) {
+export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsumirPlantilla, produccionParaEditar, onConsumirProduccion, onVerTodas }) {
   const [grupos, setGrupos] = useState([]);
   const [disenos, setDisenos] = useState([]);
   const [productos, setProductos] = useState([]);
@@ -1058,10 +1063,27 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   }
 
   const editorRef = useRef(null);
+  const produccionesRecientes = (() => {
+    const orden = ordenarPorReciente(productos);
+    const top = orden.slice(0, RECIENTES);
+    const abierta = editandoId && !top.some((p) => p.id === editandoId) ? orden.find((p) => p.id === editandoId) : null;
+    return abierta ? [abierta, ...top.slice(0, RECIENTES - 1)] : top;
+  })();
+
   async function editarDesdeTarjeta(producto) {
     await cargarParaEditar(producto);
     editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+  // "Editar" desde Producción → Producciones (vía App.jsx): se abre acá en
+  // el editor, una sola vez (App limpia el dato apenas se consume).
+  useEffect(() => {
+    if (!produccionParaEditar || cargando) return;
+    const p = productos.find((x) => x.id === produccionParaEditar.id) || produccionParaEditar;
+    onConsumirProduccion?.();
+    editarDesdeTarjeta(p);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [produccionParaEditar, cargando]);
+
   async function nuevaDesdeTarjetas() {
     await nuevoProducto();
     editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1178,12 +1200,17 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
         <section className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">
-              Producciones guardadas · {productos.length}
+              {productos.length > RECIENTES ? 'Recientes · ' + RECIENTES + ' de ' + productos.length : 'Producciones · ' + productos.length}
             </h3>
+            {onVerTodas && (
+              <Boton type="button" variante="fantasma" tamano="sm" onClick={onVerTodas} title="Producción → Producciones: todas, y exportar por tallas">
+                Ver todas en Producción →
+              </Boton>
+            )}
             <Boton type="button" variante="acento" tamano="sm" className="ml-auto" onClick={nuevaDesdeTarjetas}>+ Nueva producción</Boton>
           </div>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-4">
-            {productos.map((p) => (
+            {produccionesRecientes.map((p) => (
               <TarjetaProduccion
                 key={p.id}
                 produccion={p}

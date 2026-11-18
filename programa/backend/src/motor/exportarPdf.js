@@ -117,7 +117,17 @@ export function offsetPoligono(vertices, distancia) {
   return elegido.map((p) => ({ x: p.X / ESCALA_CLIPPER, y: p.Y / ESCALA_CLIPPER }));
 }
 
+// El PDF de un nesting: una sola página (el lienzo) con todas las piezas.
 export async function generarPdfNesting(resultadoNesting) {
+  return generarPdfPaginas([resultadoNesting]);
+}
+
+// Varias páginas en un mismo PDF -- cada una { anchoLienzoCm, altoLienzoCm,
+// piezas (con posicion) } se dibuja igual que un nesting. Lo usan las mesas
+// de una producción (motor/mesas.js): una página = una mesa de trabajo, que
+// Illustrator abre como una mesa por página. Fuentes y arte se incrustan una
+// sola vez para todo el documento.
+export async function generarPdfPaginas(paginas) {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   const fuente = await pdf.embedFont(StandardFonts.Helvetica);
@@ -158,281 +168,284 @@ export async function generarPdfNesting(resultadoNesting) {
     return fuenteBaseEmbebida;
   }
 
-  const anchoPt = resultadoNesting.anchoLienzoCm * CM_A_PUNTOS;
-  const altoPt = resultadoNesting.altoLienzoCm * CM_A_PUNTOS;
-  const pagina = pdf.addPage([anchoPt, altoPt]);
+  for (const resultadoNesting of paginas) {
+    const anchoPt = resultadoNesting.anchoLienzoCm * CM_A_PUNTOS;
+    const altoPt = resultadoNesting.altoLienzoCm * CM_A_PUNTOS;
+    const pagina = pdf.addPage([anchoPt, altoPt]);
 
-  for (const pieza of resultadoNesting.piezas) {
-    const xPt = pieza.posicion.x * CM_A_PUNTOS;
-    // PDF mide Y desde abajo; el nesting mide Y desde arriba.
-    const yPt = altoPt - (pieza.posicion.y + pieza.altoCm) * CM_A_PUNTOS;
-    const anchoRectPt = pieza.anchoCm * CM_A_PUNTOS;
-    const altoRectPt = pieza.altoCm * CM_A_PUNTOS;
+    for (const pieza of resultadoNesting.piezas) {
+      const xPt = pieza.posicion.x * CM_A_PUNTOS;
+      // PDF mide Y desde abajo; el nesting mide Y desde arriba.
+      const yPt = altoPt - (pieza.posicion.y + pieza.altoCm) * CM_A_PUNTOS;
+      const anchoRectPt = pieza.anchoCm * CM_A_PUNTOS;
+      const altoRectPt = pieza.altoCm * CM_A_PUNTOS;
 
-    // Fondo de color del Diseño (sólido o degradado), DEBAJO del arte y
-    // recortado a la forma de la pieza. Ver fondoPieza.js.
-    const fondo = fondoActivo(pieza.fondo);
-    if (fondo) {
-      const aPt = (x, y) => ({ x: xPt + x * CM_A_PUNTOS, y: yPt + altoRectPt - y * CM_A_PUNTOS });
-      const forma = pieza.contornoCm?.length >= 3
-        ? pieza.contornoCm.map((v) => aPt(v.x, v.y))
-        : [aPt(0, 0), aPt(pieza.anchoCm, 0), aPt(pieza.anchoCm, pieza.altoCm), aPt(0, pieza.altoCm)];
-      pagina.pushOperators(
-        pushGraphicsState(),
-        moveTo(forma[0].x, forma[0].y),
-        ...forma.slice(1).map((p) => lineTo(p.x, p.y)),
-        closePath(),
-        clip(),
-        endPath()
-      );
-      pagina.pushOperators(...operadoresDeFondo(fondo, pieza.anchoCm, pieza.altoCm, aPt));
-      pagina.pushOperators(popGraphicsState());
-    }
-
-    if (pieza.imagenDataUrl) {
-      // Imagen (PNG/JPG) o PDF: el PDF entra VECTORIAL (página incrustada
-      // como Form XObject, sin rasterizar), así los vectores del diseño
-      // llegan intactos al archivo de producción.
-      const arte = await arteDe(pieza.imagenDataUrl);
-      const imagen = arte.objeto;
-      // Recorte real a la forma de la pieza, no al rectángulo del bounding
-      // box -- mismo contornoCm (mismas coordenadas cm que zonas/textos) que
-      // ya usa el borde de contraste/láser un poco más abajo. Sin él (pieza
-      // sin geometría real cargada todavía), se mantiene el estirado al
-      // rectángulo de siempre -- nunca deja de dibujarse el diseño por
-      // faltar el contorno.
-      // Con ajuste del arte (Diseño), la imagen va sin deformar donde la
-      // dejó el usuario -- mismo cálculo que el lienzo (colocarArte.js) -- y
-      // lo que sobresale de la pieza se recorta. Sin ajuste, se estira al
-      // rectángulo como siempre.
-      let rectImagen = { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt };
-      if (pieza.ajusteArte) {
-        const r = colocarArte({
-          anchoCm: pieza.anchoCm, altoCm: pieza.altoCm,
-          anchoImagen: imagen.width, altoImagen: imagen.height, ajuste: pieza.ajusteArte,
-        });
-        rectImagen = {
-          x: xPt + r.x * CM_A_PUNTOS,
-          y: yPt + altoRectPt - (r.y + r.alto) * CM_A_PUNTOS,
-          width: r.ancho * CM_A_PUNTOS,
-          height: r.alto * CM_A_PUNTOS,
-        };
-      }
-      const puntos = pieza.contornoCm?.length >= 3
-        ? pieza.contornoCm.map((v) => ({ x: xPt + v.x * CM_A_PUNTOS, y: yPt + altoRectPt - v.y * CM_A_PUNTOS }))
-        : pieza.ajusteArte
-          ? [{ x: xPt, y: yPt }, { x: xPt + anchoRectPt, y: yPt }, { x: xPt + anchoRectPt, y: yPt + altoRectPt }, { x: xPt, y: yPt + altoRectPt }]
-          : null;
-      if (puntos) {
+      // Fondo de color del Diseño (sólido o degradado), DEBAJO del arte y
+      // recortado a la forma de la pieza. Ver fondoPieza.js.
+      const fondo = fondoActivo(pieza.fondo);
+      if (fondo) {
+        const aPt = (x, y) => ({ x: xPt + x * CM_A_PUNTOS, y: yPt + altoRectPt - y * CM_A_PUNTOS });
+        const forma = pieza.contornoCm?.length >= 3
+          ? pieza.contornoCm.map((v) => aPt(v.x, v.y))
+          : [aPt(0, 0), aPt(pieza.anchoCm, 0), aPt(pieza.anchoCm, pieza.altoCm), aPt(0, pieza.altoCm)];
         pagina.pushOperators(
           pushGraphicsState(),
-          moveTo(puntos[0].x, puntos[0].y),
-          ...puntos.slice(1).map((p) => lineTo(p.x, p.y)),
+          moveTo(forma[0].x, forma[0].y),
+          ...forma.slice(1).map((p) => lineTo(p.x, p.y)),
           closePath(),
           clip(),
           endPath()
         );
-        dibujarArte(pagina, arte, rectImagen);
+        pagina.pushOperators(...operadoresDeFondo(fondo, pieza.anchoCm, pieza.altoCm, aPt));
         pagina.pushOperators(popGraphicsState());
-      } else {
-        dibujarArte(pagina, arte, rectImagen);
       }
-    }
 
-    // Con contorno para láser configurado, ESE es el corte real -- dibujar
-    // además el rectángulo del bounding box pondría una segunda línea de
-    // corte falsa en el archivo. Sin él, se mantiene el rectángulo de
-    // siempre (referencia visual del nesting, nunca fue un corte real).
-    if (pieza.bordeContraste?.activo && pieza.contornoCm?.length >= 3) {
-      const desplazado = offsetPoligono(pieza.contornoCm, pieza.bordeContraste.desplazamientoCm || 0);
-      const color = hexARgb(pieza.bordeContraste.colorHex);
-      const grosorPt = Math.max(pieza.bordeContraste.grosorCm || 0.03, 0.01) * CM_A_PUNTOS;
-      const n = desplazado.length;
-      for (let i = 0; i < n; i++) {
-        const a = desplazado[i], b = desplazado[(i + 1) % n];
-        pagina.drawLine({
-          start: { x: xPt + a.x * CM_A_PUNTOS, y: yPt + altoRectPt - a.y * CM_A_PUNTOS },
-          end: { x: xPt + b.x * CM_A_PUNTOS, y: yPt + altoRectPt - b.y * CM_A_PUNTOS },
-          thickness: grosorPt,
-          color: rgb(color.r, color.g, color.b),
-        });
-      }
-    } else {
-      pagina.drawRectangle({
-        x: xPt,
-        y: yPt,
-        width: anchoRectPt,
-        height: altoRectPt,
-        borderColor: rgb(0, 0, 0),
-        borderWidth: 0.75,
-      });
-    }
-
-    for (const texto of pieza.textos || []) {
-      const color = hexARgb(texto.colorHex);
-
-      // Un texto de forma nueva (lleva `modo`) cuyo ajuste quedó en null no
-      // tiene nada que dibujar (vacío, o solo espacios): se omite. NO cae al
-      // camino viejo de abajo, que con otra fuente podía tumbar todo el PDF.
-      if (texto.modo !== undefined && !texto.ajuste) continue;
-
-      // Texto ya ajustado a su zona (motor/ajusteTexto.js): cuerpo, tracking
-      // y escala horizontal calculados con las medidas reales de la fuente.
-      // Se dibuja por su línea de base, rotando alrededor del CENTRO de la
-      // zona (no de la esquina del texto).
-      if (texto.ajuste) {
-        let a = texto.ajuste;
-        let fontElegida = await fuentePersonalizada(texto.fuenteUrl);
-        if (!fontElegida) {
-          fontElegida = await fuenteBase();
-          if (texto.fuenteUrl) {
-            // La fuente con la que se midió ya no está disponible (por ejemplo
-            // una reposición con la fuente borrada de Storage): el ajuste
-            // calculado para OTRA letra no sirve, se vuelve a ajustar con la
-            // de base en vez de imprimir mal medido.
-            const { medidor } = await obtenerMedidor(null);
-            a = ajustarTexto({
-              medidor, texto: texto.texto, anchoCm: texto.anchoCm, altoCm: texto.altoCm,
-              // Con su modo real: un número sigue yendo a alto completo.
-              modo: texto.modo === 'calibrado' ? 'calibrado' : 'llenar',
-              espaciadoMil: texto.espaciadoMil || 0, contornoCm: texto.contorno?.grosorCm || 0,
-              alineacion: texto.alineacion || 'centro',
-            }) || a;
-          }
+      if (pieza.imagenDataUrl) {
+        // Imagen (PNG/JPG) o PDF: el PDF entra VECTORIAL (página incrustada
+        // como Form XObject, sin rasterizar), así los vectores del diseño
+        // llegan intactos al archivo de producción.
+        const arte = await arteDe(pieza.imagenDataUrl);
+        const imagen = arte.objeto;
+        // Recorte real a la forma de la pieza, no al rectángulo del bounding
+        // box -- mismo contornoCm (mismas coordenadas cm que zonas/textos) que
+        // ya usa el borde de contraste/láser un poco más abajo. Sin él (pieza
+        // sin geometría real cargada todavía), se mantiene el estirado al
+        // rectángulo de siempre -- nunca deja de dibujarse el diseño por
+        // faltar el contorno.
+        // Con ajuste del arte (Diseño), la imagen va sin deformar donde la
+        // dejó el usuario -- mismo cálculo que el lienzo (colocarArte.js) -- y
+        // lo que sobresale de la pieza se recorta. Sin ajuste, se estira al
+        // rectángulo como siempre.
+        let rectImagen = { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt };
+        if (pieza.ajusteArte) {
+          const r = colocarArte({
+            anchoCm: pieza.anchoCm, altoCm: pieza.altoCm,
+            anchoImagen: imagen.width, altoImagen: imagen.height, ajuste: pieza.ajusteArte,
+          });
+          rectImagen = {
+            x: xPt + r.x * CM_A_PUNTOS,
+            y: yPt + altoRectPt - (r.y + r.alto) * CM_A_PUNTOS,
+            width: r.ancho * CM_A_PUNTOS,
+            height: r.alto * CM_A_PUNTOS,
+          };
         }
-        const rad = ((texto.rotacionGrados || 0) * Math.PI) / 180;
-        const cxPt = xPt + texto.cxCm * CM_A_PUNTOS;
-        const cyPt = yPt + altoRectPt - texto.cyCm * CM_A_PUNTOS;
-        // Origen del texto respecto del centro de la zona, con Y hacia arriba
-        // (PDF) -- la Y del ajuste crece hacia abajo.
-        const dx = a.dxCm * CM_A_PUNTOS;
-        const dy = -a.dyCm * CM_A_PUNTOS;
-        const x = cxPt + dx * Math.cos(rad) - dy * Math.sin(rad);
-        const y = cyPt + dx * Math.sin(rad) + dy * Math.cos(rad);
-        const tamanoPt = a.cuerpoCm * CM_A_PUNTOS;
-
-        pagina.setFont(fontElegida);
-        const textoCodificado = fontElegida.encodeText(a.texto ?? texto.texto);
-        const operadoresDeTexto = () => [
-          beginText(),
-          setFontAndSize(pagina.fontKey, tamanoPt),
-          setCharacterSpacing((a.trackingMil / 1000) * tamanoPt),
-          setCharacterSqueeze(a.escalaH),
-          rotateAndSkewTextRadiansAndTranslate(rad, 0, 0, x, y),
-          showText(textoCodificado),
-          endText(),
-        ];
-
-        // Contorno de color (estilo de la zona): primero el trazo, con el
-        // DOBLE del grosor elegido y esquinas redondeadas -- la mitad de
-        // adentro queda tapada por el relleno de la pasada siguiente, así
-        // que lo que se ve es exactamente "grosor" por FUERA de la letra.
-        if (texto.contorno && texto.contorno.grosorCm > 0) {
-          const borde = hexARgb(texto.contorno.colorHex);
+        const puntos = pieza.contornoCm?.length >= 3
+          ? pieza.contornoCm.map((v) => ({ x: xPt + v.x * CM_A_PUNTOS, y: yPt + altoRectPt - v.y * CM_A_PUNTOS }))
+          : pieza.ajusteArte
+            ? [{ x: xPt, y: yPt }, { x: xPt + anchoRectPt, y: yPt }, { x: xPt + anchoRectPt, y: yPt + altoRectPt }, { x: xPt, y: yPt + altoRectPt }]
+            : null;
+        if (puntos) {
           pagina.pushOperators(
             pushGraphicsState(),
-            setStrokingColor(rgb(borde.r, borde.g, borde.b)),
-            setLineWidth(2 * texto.contorno.grosorCm * CM_A_PUNTOS),
-            setLineJoin(LineJoinStyle.Round),
-            setTextRenderingMode(TextRenderingMode.Outline),
-            ...operadoresDeTexto(),
+            moveTo(puntos[0].x, puntos[0].y),
+            ...puntos.slice(1).map((p) => lineTo(p.x, p.y)),
+            closePath(),
+            clip(),
+            endPath()
+          );
+          dibujarArte(pagina, arte, rectImagen);
+          pagina.pushOperators(popGraphicsState());
+        } else {
+          dibujarArte(pagina, arte, rectImagen);
+        }
+      }
+
+      // Con contorno para láser configurado, ESE es el corte real -- dibujar
+      // además el rectángulo del bounding box pondría una segunda línea de
+      // corte falsa en el archivo. Sin él, se mantiene el rectángulo de
+      // siempre (referencia visual del nesting, nunca fue un corte real).
+      if (pieza.bordeContraste?.activo && pieza.contornoCm?.length >= 3) {
+        const desplazado = offsetPoligono(pieza.contornoCm, pieza.bordeContraste.desplazamientoCm || 0);
+        const color = hexARgb(pieza.bordeContraste.colorHex);
+        const grosorPt = Math.max(pieza.bordeContraste.grosorCm || 0.03, 0.01) * CM_A_PUNTOS;
+        const n = desplazado.length;
+        for (let i = 0; i < n; i++) {
+          const a = desplazado[i], b = desplazado[(i + 1) % n];
+          pagina.drawLine({
+            start: { x: xPt + a.x * CM_A_PUNTOS, y: yPt + altoRectPt - a.y * CM_A_PUNTOS },
+            end: { x: xPt + b.x * CM_A_PUNTOS, y: yPt + altoRectPt - b.y * CM_A_PUNTOS },
+            thickness: grosorPt,
+            color: rgb(color.r, color.g, color.b),
+          });
+        }
+      } else {
+        pagina.drawRectangle({
+          x: xPt,
+          y: yPt,
+          width: anchoRectPt,
+          height: altoRectPt,
+          borderColor: rgb(0, 0, 0),
+          borderWidth: 0.75,
+        });
+      }
+
+      for (const texto of pieza.textos || []) {
+        const color = hexARgb(texto.colorHex);
+
+        // Un texto de forma nueva (lleva `modo`) cuyo ajuste quedó en null no
+        // tiene nada que dibujar (vacío, o solo espacios): se omite. NO cae al
+        // camino viejo de abajo, que con otra fuente podía tumbar todo el PDF.
+        if (texto.modo !== undefined && !texto.ajuste) continue;
+
+        // Texto ya ajustado a su zona (motor/ajusteTexto.js): cuerpo, tracking
+        // y escala horizontal calculados con las medidas reales de la fuente.
+        // Se dibuja por su línea de base, rotando alrededor del CENTRO de la
+        // zona (no de la esquina del texto).
+        if (texto.ajuste) {
+          let a = texto.ajuste;
+          let fontElegida = await fuentePersonalizada(texto.fuenteUrl);
+          if (!fontElegida) {
+            fontElegida = await fuenteBase();
+            if (texto.fuenteUrl) {
+              // La fuente con la que se midió ya no está disponible (por ejemplo
+              // una reposición con la fuente borrada de Storage): el ajuste
+              // calculado para OTRA letra no sirve, se vuelve a ajustar con la
+              // de base en vez de imprimir mal medido.
+              const { medidor } = await obtenerMedidor(null);
+              a = ajustarTexto({
+                medidor, texto: texto.texto, anchoCm: texto.anchoCm, altoCm: texto.altoCm,
+                // Con su modo real: un número sigue yendo a alto completo.
+                modo: texto.modo === 'calibrado' ? 'calibrado' : 'llenar',
+                espaciadoMil: texto.espaciadoMil || 0, contornoCm: texto.contorno?.grosorCm || 0,
+                alineacion: texto.alineacion || 'centro',
+              }) || a;
+            }
+          }
+          const rad = ((texto.rotacionGrados || 0) * Math.PI) / 180;
+          const cxPt = xPt + texto.cxCm * CM_A_PUNTOS;
+          const cyPt = yPt + altoRectPt - texto.cyCm * CM_A_PUNTOS;
+          // Origen del texto respecto del centro de la zona, con Y hacia arriba
+          // (PDF) -- la Y del ajuste crece hacia abajo.
+          const dx = a.dxCm * CM_A_PUNTOS;
+          const dy = -a.dyCm * CM_A_PUNTOS;
+          const x = cxPt + dx * Math.cos(rad) - dy * Math.sin(rad);
+          const y = cyPt + dx * Math.sin(rad) + dy * Math.cos(rad);
+          const tamanoPt = a.cuerpoCm * CM_A_PUNTOS;
+
+          pagina.setFont(fontElegida);
+          const textoCodificado = fontElegida.encodeText(a.texto ?? texto.texto);
+          const operadoresDeTexto = () => [
+            beginText(),
+            setFontAndSize(pagina.fontKey, tamanoPt),
+            setCharacterSpacing((a.trackingMil / 1000) * tamanoPt),
+            setCharacterSqueeze(a.escalaH),
+            rotateAndSkewTextRadiansAndTranslate(rad, 0, 0, x, y),
+            showText(textoCodificado),
+            endText(),
+          ];
+
+          // Contorno de color (estilo de la zona): primero el trazo, con el
+          // DOBLE del grosor elegido y esquinas redondeadas -- la mitad de
+          // adentro queda tapada por el relleno de la pasada siguiente, así
+          // que lo que se ve es exactamente "grosor" por FUERA de la letra.
+          if (texto.contorno && texto.contorno.grosorCm > 0) {
+            const borde = hexARgb(texto.contorno.colorHex);
+            pagina.pushOperators(
+              pushGraphicsState(),
+              setStrokingColor(rgb(borde.r, borde.g, borde.b)),
+              setLineWidth(2 * texto.contorno.grosorCm * CM_A_PUNTOS),
+              setLineJoin(LineJoinStyle.Round),
+              setTextRenderingMode(TextRenderingMode.Outline),
+              ...operadoresDeTexto(),
+              popGraphicsState()
+            );
+          }
+
+          pagina.pushOperators(
+            pushGraphicsState(),
+            setFillingColor(rgb(color.r, color.g, color.b)),
+            beginText(),
+            setFontAndSize(pagina.fontKey, tamanoPt),
+            setCharacterSpacing((a.trackingMil / 1000) * tamanoPt),
+            setCharacterSqueeze(a.escalaH),
+            rotateAndSkewTextRadiansAndTranslate(rad, 0, 0, x, y),
+            showText(fontElegida.encodeText(a.texto ?? texto.texto)),
+            endText(),
             popGraphicsState()
           );
+          continue;
         }
 
-        pagina.pushOperators(
-          pushGraphicsState(),
-          setFillingColor(rgb(color.r, color.g, color.b)),
-          beginText(),
-          setFontAndSize(pagina.fontKey, tamanoPt),
-          setCharacterSpacing((a.trackingMil / 1000) * tamanoPt),
-          setCharacterSqueeze(a.escalaH),
-          rotateAndSkewTextRadiansAndTranslate(rad, 0, 0, x, y),
-          showText(fontElegida.encodeText(a.texto ?? texto.texto)),
-          endText(),
-          popGraphicsState()
-        );
-        continue;
+        // Texto de una generación guardada ANTES del ajuste a la zona (sin
+        // `ajuste`): se reproduce tal cual salió entonces -- una reposición
+        // tiene que dar la misma pieza que se imprimió.
+        const tamanoPt = Math.max(texto.altoCm, 0.3) * CM_A_PUNTOS;
+        // xCm/yCm del elemento se miden desde la esquina superior izquierda de
+        // LA PIEZA (no del lienzo) — por eso se sitúan relativos a xPt/yPt.
+        const anclaX = xPt + texto.xCm * CM_A_PUNTOS;
+        const anclaY = yPt + altoRectPt - texto.yCm * CM_A_PUNTOS - tamanoPt;
+        const fontElegida = (await fuentePersonalizada(texto.fuenteUrl)) || fuenteTexto;
+        pagina.drawText(texto.texto, {
+          x: anclaX,
+          y: anclaY,
+          size: tamanoPt,
+          font: fontElegida,
+          color: rgb(color.r, color.g, color.b),
+          // Rotar en el mismo sitio donde ya se ancla el texto (su esquina):
+          // gira, pero no se corre -- coherente con que nunca estuvo
+          // centrado dentro de su zona (se ancla a la izquierda).
+          ...(texto.rotacionGrados ? { rotate: degrees(texto.rotacionGrados) } : {}),
+        });
       }
 
-      // Texto de una generación guardada ANTES del ajuste a la zona (sin
-      // `ajuste`): se reproduce tal cual salió entonces -- una reposición
-      // tiene que dar la misma pieza que se imprimió.
-      const tamanoPt = Math.max(texto.altoCm, 0.3) * CM_A_PUNTOS;
-      // xCm/yCm del elemento se miden desde la esquina superior izquierda de
-      // LA PIEZA (no del lienzo) — por eso se sitúan relativos a xPt/yPt.
-      const anclaX = xPt + texto.xCm * CM_A_PUNTOS;
-      const anclaY = yPt + altoRectPt - texto.yCm * CM_A_PUNTOS - tamanoPt;
-      const fontElegida = (await fuentePersonalizada(texto.fuenteUrl)) || fuenteTexto;
-      pagina.drawText(texto.texto, {
-        x: anclaX,
-        y: anclaY,
-        size: tamanoPt,
-        font: fontElegida,
-        color: rgb(color.r, color.g, color.b),
-        // Rotar en el mismo sitio donde ya se ancla el texto (su esquina):
-        // gira, pero no se corre -- coherente con que nunca estuvo
-        // centrado dentro de su zona (se ancla a la izquierda).
-        ...(texto.rotacionGrados ? { rotate: degrees(texto.rotacionGrados) } : {}),
-      });
-    }
+      for (const imagen of pieza.imagenes || []) {
+        let embebida;
+        try {
+          // PNG/JPG o PDF (vectorial, como el arte del diseño), una vez por URL.
+          embebida = await arteDe(imagen.url);
+        } catch {
+          continue; // un logo que no se pudo bajar no debe tumbar todo el PDF
+        }
 
-    for (const imagen of pieza.imagenes || []) {
-      let embebida;
-      try {
-        // PNG/JPG o PDF (vectorial, como el arte del diseño), una vez por URL.
-        embebida = await arteDe(imagen.url);
-      } catch {
-        continue; // un logo que no se pudo bajar no debe tumbar todo el PDF
+        // Mismo cálculo que colocarLogoEnZonaCruz()/colocarLogoEnZonaSimple()
+        // de host.jsx: "contain" (nunca recortar), sin deformar. Con cruz, el
+        // logo puede exceder el cuadrado central "lado" por UN solo eje (el
+        // brazo, RATIO_BRAZO veces más largo) -- se prueba el encaje contra
+        // los dos brazos y se usa el que da más tamaño.
+        const ladoPt = imagen.ladoCm * CM_A_PUNTOS;
+        const anchoPt2 = imagen.anchoCm * CM_A_PUNTOS;
+        const altoPt2 = imagen.altoCm * CM_A_PUNTOS;
+        let escala;
+        if (imagen.cruz) {
+          const brazoPt = ladoPt * RATIO_BRAZO;
+          const escalaVertical = Math.min(ladoPt / embebida.objeto.width, brazoPt / embebida.objeto.height);
+          const escalaHorizontal = Math.min(brazoPt / embebida.objeto.width, ladoPt / embebida.objeto.height);
+          escala = Math.max(escalaVertical, escalaHorizontal);
+        } else {
+          escala = Math.min(anchoPt2 / embebida.objeto.width, altoPt2 / embebida.objeto.height);
+        }
+        const wPt = embebida.objeto.width * escala;
+        const hPt = embebida.objeto.height * escala;
+
+        const cxPt = xPt + imagen.cxCm * CM_A_PUNTOS;
+        const cyPt = yPt + altoRectPt - imagen.cyCm * CM_A_PUNTOS;
+        const grados = imagen.rotacionGrados || 0;
+        const ancla = grados
+          ? anclaParaRotarDesdeCentro(cxPt, cyPt, wPt, hPt, grados)
+          : { x: cxPt - wPt / 2, y: cyPt - hPt / 2 };
+
+        dibujarArte(pagina, embebida, {
+          x: ancla.x,
+          y: ancla.y,
+          width: wPt,
+          height: hPt,
+          ...(grados ? { rotate: degrees(grados) } : {}),
+        });
       }
 
-      // Mismo cálculo que colocarLogoEnZonaCruz()/colocarLogoEnZonaSimple()
-      // de host.jsx: "contain" (nunca recortar), sin deformar. Con cruz, el
-      // logo puede exceder el cuadrado central "lado" por UN solo eje (el
-      // brazo, RATIO_BRAZO veces más largo) -- se prueba el encaje contra
-      // los dos brazos y se usa el que da más tamaño.
-      const ladoPt = imagen.ladoCm * CM_A_PUNTOS;
-      const anchoPt2 = imagen.anchoCm * CM_A_PUNTOS;
-      const altoPt2 = imagen.altoCm * CM_A_PUNTOS;
-      let escala;
-      if (imagen.cruz) {
-        const brazoPt = ladoPt * RATIO_BRAZO;
-        const escalaVertical = Math.min(ladoPt / embebida.objeto.width, brazoPt / embebida.objeto.height);
-        const escalaHorizontal = Math.min(brazoPt / embebida.objeto.width, ladoPt / embebida.objeto.height);
-        escala = Math.max(escalaVertical, escalaHorizontal);
-      } else {
-        escala = Math.min(anchoPt2 / embebida.objeto.width, altoPt2 / embebida.objeto.height);
+      if (!fondo && !pieza.imagenDataUrl && (!pieza.textos || pieza.textos.length === 0) && (!pieza.imagenes || pieza.imagenes.length === 0)) {
+        const etiqueta = pieza.piezaId + ' · ' + pieza.talla +
+          (pieza.rotacionGrados === 180 ? ' · 180°' : '');
+        pagina.drawText(etiqueta, {
+          x: xPt + 4,
+          y: yPt + 4,
+          size: 8,
+          font: fuente,
+          color: rgb(0, 0, 0),
+        });
       }
-      const wPt = embebida.objeto.width * escala;
-      const hPt = embebida.objeto.height * escala;
-
-      const cxPt = xPt + imagen.cxCm * CM_A_PUNTOS;
-      const cyPt = yPt + altoRectPt - imagen.cyCm * CM_A_PUNTOS;
-      const grados = imagen.rotacionGrados || 0;
-      const ancla = grados
-        ? anclaParaRotarDesdeCentro(cxPt, cyPt, wPt, hPt, grados)
-        : { x: cxPt - wPt / 2, y: cyPt - hPt / 2 };
-
-      dibujarArte(pagina, embebida, {
-        x: ancla.x,
-        y: ancla.y,
-        width: wPt,
-        height: hPt,
-        ...(grados ? { rotate: degrees(grados) } : {}),
-      });
     }
 
-    if (!fondo && !pieza.imagenDataUrl && (!pieza.textos || pieza.textos.length === 0) && (!pieza.imagenes || pieza.imagenes.length === 0)) {
-      const etiqueta = pieza.piezaId + ' · ' + pieza.talla +
-        (pieza.rotacionGrados === 180 ? ' · 180°' : '');
-      pagina.drawText(etiqueta, {
-        x: xPt + 4,
-        y: yPt + 4,
-        size: 8,
-        font: fuente,
-        color: rgb(0, 0, 0),
-      });
-    }
   }
 
   return pdf.save();

@@ -76,7 +76,8 @@ function MiniPieza({ geo, imagen, fondo }) {
   );
 }
 
-export function TarjetaProduccion({ produccion, grupos, piezas, disenos, editando, onEditar, onEliminar }) {
+// onExportar y onEliminar son opcionales: Producción exporta, Diseño elimina.
+export function TarjetaProduccion({ produccion, grupos, piezas, disenos, editando, onEditar, onEliminar, onExportar, exportando }) {
   const piezasDibujo = piezasDeProduccion(produccion, grupos, piezas, disenos);
   const ids = produccion.grupoIds || (produccion.grupoId ? [produccion.grupoId] : []);
   const nombresPrendas = ids.map((id) => grupos.find((g) => g.id === id)?.nombre).filter(Boolean);
@@ -138,7 +139,13 @@ export function TarjetaProduccion({ produccion, grupos, piezas, disenos, editand
         <Boton type="button" variante={editando ? 'acento' : 'fantasma'} tamano="sm" onClick={onEditar} disabled={editando}>
           {editando ? 'Editando' : 'Editar'}
         </Boton>
-        <Boton type="button" variante="fantasma" tamano="sm" className="ml-auto text-danger" onClick={onEliminar}>Eliminar</Boton>
+        {onExportar && (
+          <Boton type="button" variante={exportando ? 'acento' : 'fantasma'} tamano="sm" onClick={onExportar}
+            title="Una mesa por talla, con la prenda completa, en un PDF">
+            {exportando ? 'Cerrar' : 'Exportar'}
+          </Boton>
+        )}
+        {onEliminar && <Boton type="button" variante="fantasma" tamano="sm" className="ml-auto text-danger" onClick={onEliminar}>Eliminar</Boton>}
       </div>
     </article>
   );

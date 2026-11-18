@@ -3,7 +3,8 @@ import { nanoid } from 'nanoid';
 import { leerColeccion, leerRegistro, crearRegistro, actualizarRegistro, borrarRegistro, subirArchivo, registrarEvento, leerEventos } from '../dominio/almacen.js';
 import { resolverPiezasDeGrupo, resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
-import { generarPdfNesting } from '../motor/exportarPdf.js';
+import { generarPdfNesting, generarPdfPaginas } from '../motor/exportarPdf.js';
+import { armarMesas } from '../motor/mesas.js';
 import { resolverPiezasDePedido, tallaRealDePieza } from '../motor/resolverPedido.js';
 import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
 import { geometriaDelGrupo, geometriaParaAnclaje } from '../motor/geometriaAnclaje.js';
@@ -330,7 +331,10 @@ function crudSimple(nombreColeccion) {
   });
 
   router.post('/' + nombreColeccion, async (req, res) => {
-    const registro = { id: nanoid(), ...req.body };
+    // creadoEn/actualizadoEn: para ordenar por lo más reciente (ej. las
+    // producciones recientes que muestra Diseño).
+    const ahora = new Date().toISOString();
+    const registro = { id: nanoid(), creadoEn: ahora, ...req.body, actualizadoEn: ahora };
     await crearRegistro(nombreColeccion, registro);
     await registrarEvento(nombreColeccion, 'crear', registro.id, resumenDe(registro));
     res.status(201).json(registro);
@@ -339,7 +343,7 @@ function crudSimple(nombreColeccion) {
   router.put('/' + nombreColeccion + '/:id', async (req, res) => {
     const existente = await leerRegistro(nombreColeccion, req.params.id);
     if (!existente) return res.status(404).json({ error: 'No encontrado' });
-    const registro = { ...existente, ...req.body, id: req.params.id };
+    const registro = { ...existente, ...req.body, id: req.params.id, actualizadoEn: new Date().toISOString() };
     await actualizarRegistro(nombreColeccion, req.params.id, registro);
     await registrarEvento(nombreColeccion, 'actualizar', req.params.id, resumenDe(registro));
     res.json(registro);
@@ -1111,6 +1115,51 @@ router.post('/nesting/generar', async (req, res) => {
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', 'attachment; filename="generacion-' + generacion.id + '.pdf"');
+  res.send(Buffer.from(pdfBytes));
+});
+
+// Exporta una producción por tallas: UNA mesa (página del PDF) por talla, con
+// la prenda completa -- todas sus piezas, con su diseño, fondo, logos y
+// textos fijos, y el contorno de corte si la producción lo tiene. Mismo
+// resultado que el script PROCESAR MOLDES de Illustrator, pero ya diseñado.
+// Sin jugadores: el nombre y el número van vacíos, o con el ejemplo de cada
+// zona si se pide (conEjemplo). No guarda registro en `generaciones`.
+router.post('/exportar-mesas/:id', async (req, res) => {
+  const { tallas, conEjemplo } = req.body || {};
+  if (!Array.isArray(tallas) || tallas.length === 0 || tallas.some((t) => typeof t !== 'string' || !t)) {
+    return res.status(400).json({ error: 'Elegí al menos una talla' });
+  }
+  if (tallas.length > 40) return res.status(400).json({ error: 'Demasiadas tallas de una vez' });
+  const [productos, grupos, piezas, disenos] = await Promise.all([
+    leerColeccion('productos'), leerColeccion('grupos'), leerColeccion('piezas'), leerColeccion('disenos'),
+  ]);
+  const fuentes = await leerColeccion('fuentes').catch(() => []);
+  const producto = productos.find((p) => p.id === req.params.id);
+  if (!producto) return res.status(404).json({ error: 'Producción no encontrada' });
+
+  const ejemplo = (campo) => {
+    if (!conEjemplo) return '';
+    const zona = (producto.anclaje?.zonas || []).find((z) => z.campoPedido === campo && z.valorEjemplo);
+    return zona ? String(zona.valorEjemplo) : '';
+  };
+  const pedido = {
+    lineas: [...new Set(tallas)].map((talla, i) => ({
+      id: 'mesa' + i, productoId: producto.id, talla, nombre: ejemplo('nombre'), numero: ejemplo('numero'),
+    })),
+  };
+  let piezasDeMesas;
+  try {
+    piezasDeMesas = resolverPiezasDePedido({ pedido, productos, grupos, piezas, disenos, fuentes });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  piezasDeMesas = await ajustarTextosDePiezas(piezasDeMesas, obtenerMedidor);
+
+  const pdfBytes = await generarPdfPaginas(armarMesas(piezasDeMesas));
+  const nombreArchivo = ((producto.nombre || 'produccion') + ' ' + pedido.lineas.map((l) => l.talla).join('-'))
+    .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 120);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="' + nombreArchivo + '.pdf"');
   res.send(Buffer.from(pdfBytes));
 });
 

@@ -66,7 +66,7 @@ export const EVENTO_ESCRITURA = 'uniflow:escritura';
 // ellos pediría todo de nuevo una y otra vez.
 const RUTAS_SOLO_CALCULO = [
   '/piezas/analizar', '/piezas/resolver-multitalla', '/piezas/detectar-pdf',
-  '/anclaje/', '/texto/', '/nesting/desde-', '/archivos', '/acceso',
+  '/anclaje/', '/texto/', '/nesting/desde-', '/archivos', '/acceso', '/exportar-mesas/',
 ];
 
 function cambiaDatos(ruta, metodo) {
@@ -401,6 +401,13 @@ export function generarPdf(pedidoId, anchoLienzoCm) {
 // vuelve a armar el layout con los mismos datos de anidarDesdeGrupo.
 export function generarDxf(grupoId, lineas, anchoLienzoCm) {
   return descargar('/nesting/generar-dxf', { grupoId, lineas, anchoLienzoCm }, 'corte-laser.dxf', 'Falló la generación del DXF');
+}
+
+// Una producción por tallas: UNA mesa (página del PDF) por talla, con la
+// prenda completa -- ver rutas/api.js·POST /exportar-mesas/:id.
+export function exportarMesas(produccionId, { tallas, conEjemplo }, nombreArchivo) {
+  return descargar('/exportar-mesas/' + encodeURIComponent(produccionId), { tallas, conEjemplo: !!conEjemplo },
+    nombreArchivo || 'produccion.pdf', 'No se pudo exportar la producción');
 }
 
 // --- Historial de producción -------------------------------------------------

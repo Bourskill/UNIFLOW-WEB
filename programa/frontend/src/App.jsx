@@ -7,6 +7,7 @@ import { Productos } from './paginas/Productos.jsx';
 import { Pedidos } from './paginas/Pedidos.jsx';
 import { Historial } from './paginas/Historial.jsx';
 import { CorteLaser } from './paginas/CorteLaser.jsx';
+import { Producciones } from './paginas/Producciones.jsx';
 import { Icono } from './componentes/Icono.jsx';
 import { EstadoServidor } from './componentes/EstadoServidor.jsx';
 import { Avisos } from './componentes/Avisos.jsx';
@@ -27,6 +28,7 @@ const FormularioMemo = memo(Formulario);
 const PedidosMemo = memo(Pedidos);
 const HistorialMemo = memo(Historial);
 const CorteLaserMemo = memo(CorteLaser);
+const ProduccionesMemo = memo(Producciones);
 
 // Tres apartados en el nav (no seis): pantallas relacionadas viven como
 // sub-pestañas DENTRO de un mismo apartado (estilo Google Drive), no como
@@ -75,6 +77,23 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const consumirPlantilla = useCallback(() => setPlantillaParaUsar(null), []);
+
+  // Producción → Producciones tiene TODAS las producciones; "Editar" la abre
+  // en Diseño (mismo mecanismo que plantillaParaUsar). Y Diseño, que solo
+  // muestra las recientes, lleva a esa pestaña con "Ver todas".
+  const [produccionParaEditar, setProduccionParaEditar] = useState(null);
+  const editarProduccion = useCallback((p) => {
+    setProduccionParaEditar(p);
+    ir('diseno');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const consumirProduccion = useCallback(() => setProduccionParaEditar(null), []);
+  const [subProduccion, setSubProduccion] = useState('producciones');
+  const verTodasLasProducciones = useCallback(() => {
+    setSubProduccion('producciones');
+    ir('produccion');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function ir(id) {
     setPestana(id);
@@ -147,13 +166,19 @@ function App() {
                 onCambio={marcarCambio}
                 plantillaParaUsar={plantillaParaUsar}
                 onConsumirPlantilla={consumirPlantilla}
+                produccionParaEditar={produccionParaEditar}
+                onConsumirProduccion={consumirProduccion}
+                onVerTodas={verTodasLasProducciones}
               />
             </div>
           )}
           {visitadas.has('produccion') && (
             <div hidden={pestana !== 'produccion'} className="h-full">
               <SubTabs
+                activa={subProduccion}
+                onCambiar={setSubProduccion}
                 tabs={[
+                  { id: 'producciones', etiqueta: 'Producciones', contenido: <ProduccionesMemo recargarSenal={recargarSenal} onEditar={editarProduccion} /> },
                   { id: 'nuevo', etiqueta: 'Nuevo pedido', contenido: <PedidosMemo recargarSenal={recargarSenal} /> },
                   { id: 'laser', etiqueta: 'Corte láser', contenido: <CorteLaserMemo recargarSenal={recargarSenal} /> },
                   { id: 'historial', etiqueta: 'Historial', contenido: <HistorialMemo recargarSenal={recargarSenal} /> },
