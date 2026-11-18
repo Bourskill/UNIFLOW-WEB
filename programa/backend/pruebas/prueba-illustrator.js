@@ -90,7 +90,7 @@ comprobar('degradado: definido y aplicado como degradado de Illustrator', /%AI5_
 const raster = ai.match(/\[ [^\]]+ \] 2 1 0 Xh\n\[ [^\]]+ \] 0 0 2 1 2 1 8 3 1 17 1 0 4 4 0 0\n%%BeginData: 10\nXI\n([\s\S]{8})%%EndData/);
 comprobar('la imagen va incrustada con su transparencia aparte', raster && raster[1] === '\xff\x00\x00\x00\x00\xff\xff\x80', raster ? JSON.stringify(raster[1]) : 'sin imagen');
 comprobar('la imagen va recortada a la forma de la pieza (una sola máscara)', (ai.match(/\nq\n/g) || []).length === 1 && /\nh\nW\nn\nQ\n/.test(ai));
-comprobar('los trazados cerrados repiten el primer punto (así los cierra Illustrator)', /\n28\.3465 2012\.6014 m\n[\s\S]*?\n28\.3465 2012\.6014 L\nf\n/.test(ai));
+comprobar('los trazados cerrados repiten el primer punto (así los cierra Illustrator)', /\n(-?[\d.]+ -?[\d.]+) m\n(?:-?[\d.]+ -?[\d.]+ L\n)+\1 L\nf\n/.test(ai));
 comprobar('cada mesa es un grupo', (ai.match(/\nu\n/g) || []).length === 2 && (ai.match(/\nU\n/g) || []).length === 2);
 
 console.log('\n--- Máscaras: solo las que recortan ---');
@@ -141,6 +141,15 @@ console.log('\n--- Muchas mesas: en filas, sin salirse del lienzo ---');
   comprobar('todas entran en el lienzo de Illustrator (16383 pt)', Math.max(...xs) - Math.min(...xs) < 16000 && Math.max(...ys) - Math.min(...ys) < 16000,
     (Math.max(...xs) - Math.min(...xs)) + ' × ' + (Math.max(...ys) - Math.min(...ys)));
   comprobar('más de una fila', new Set(ys.filter((_, i) => i % 2 === 1)).size > 1);
+  // Posición en el lienzo (0 a 16383, Y hacia abajo): el "origen de regla"
+  // de cada mesa es su esquina superior izquierda ahí; con su tamaño, la
+  // mesa entera tiene que caer adentro.
+  const origenes = [...texto.matchAll(/%_(-?[\d.]+) (-?[\d.]+) \/RealPoint\n%_ \(RulerOrigin\)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  const dentro = origenes.every(([x, y], i) => {
+    const [x2, y2] = puntos[i * 2], [x1, y1] = puntos[i * 2 + 1];
+    return x >= 0 && y >= 0 && x + (x2 - x1) <= 16383 && y + (y1 - y2) <= 16383;
+  });
+  comprobar('ninguna mesa se sale del área de dibujo', origenes.length === 12 && dentro, JSON.stringify(origenes.slice(0, 3)));
 }
 
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');

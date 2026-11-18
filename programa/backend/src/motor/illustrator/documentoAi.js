@@ -25,7 +25,8 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 const OPS = pdfjs.OPS;
 const DATOS_DOCUMENTO = readFileSync(new URL('./datosDocumento.txt', import.meta.url), 'latin1');
 const SEPARACION_MESAS_PT = 40;
-const ANCHO_MAXIMO_FILA_PT = 14000; // el lienzo de Illustrator mide 16383 pt
+const ANCHO_MAXIMO_FILA_PT = 15000; // el lienzo de Illustrator mide 16383 pt
+const LIENZO_CENTRO = 8191.5;
 const BLOQUE = 65536;
 
 /** Devuelve el PDF con el documento de Illustrator adentro. */
@@ -121,10 +122,11 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
     paginas.push({ pagina, ancho: x1 - x0, alto: y1 - y0, origen: [x0, y0] });
   }
   const mesas = acomodarMesas(paginas);
-  // Coordenadas del lienzo de Illustrator (Y hacia abajo), con el centro
-  // de la primera mesa en el centro del lienzo: ahí vive la matriz de los degradados.
-  const m1 = mesas[0];
-  const lienzo = { kx: 8191 - (m1.izq + m1.der) / 2, ky: 8191 + (m1.abajo + m1.arriba) / 2 };
+  // Coordenadas del lienzo de Illustrator (Y hacia abajo, 0 a 16383): el
+  // CENTRO DEL CONJUNTO de mesas en el centro del lienzo, así ninguna mesa
+  // queda afuera del área donde se puede dibujar.
+  const caja = { izq: Math.min(...mesas.map((m) => m.izq)), der: Math.max(...mesas.map((m) => m.der)), abajo: Math.min(...mesas.map((m) => m.abajo)), arriba: Math.max(...mesas.map((m) => m.arriba)) };
+  const lienzo = { kx: LIENZO_CENTRO - (caja.izq + caja.der) / 2, ky: LIENZO_CENTRO + (caja.abajo + caja.arriba) / 2 };
   const degradados = new Degradados(lienzo);
   const textos = new TextosEditables(lienzo);
   const arte = [];
@@ -150,24 +152,28 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
     p.pagina.cleanup();
   }
   await lector.destroy();
-  return armarTexto({ mesas, nombres: nombresDeMesas, arte, degradados, textos, titulo });
+  return armarTexto({ mesas, nombres: nombresDeMesas, arte, degradados, textos, titulo, lienzo });
 }
 
 // Las mesas en filas, de izquierda a derecha y de arriba hacia abajo, como
 // las deja "Reorganizar mesas de trabajo"; coordenadas de Illustrator (Y
-// hacia arriba, la primera mesa con su esquina inferior izquierda en 0,0).
+// hacia arriba). Las filas se arman para que el conjunto quede más o menos
+// cuadrado: así entra en el lienzo de Illustrator (16383 pt por lado), que
+// es el límite donde se puede dibujar.
 function acomodarMesas(paginas) {
+  const ancho = (p) => p.ancho + SEPARACION_MESAS_PT;
+  const area = paginas.reduce((t, p) => t + ancho(p) * (p.alto + SEPARACION_MESAS_PT), 0);
+  const masAncha = Math.max(...paginas.map(ancho));
+  const fila = Math.max(masAncha, Math.min(ANCHO_MAXIMO_FILA_PT, Math.sqrt(area) * 1.2));
   const mesas = [];
   let x = 0, techo = 0, altoFila = 0;
   for (const p of paginas) {
-    if (x > 0 && x + p.ancho > ANCHO_MAXIMO_FILA_PT) {
+    if (x > 0 && x + p.ancho > fila) {
       techo -= altoFila + SEPARACION_MESAS_PT;
       x = 0;
       altoFila = 0;
     }
-    const arriba = techo === 0 && mesas.length === 0 ? p.alto : techo;
-    mesas.push({ izq: x, arriba, der: x + p.ancho, abajo: arriba - p.alto });
-    if (mesas.length === 1) techo = p.alto;
+    mesas.push({ izq: x, arriba: techo, der: x + p.ancho, abajo: techo - p.alto });
     altoFila = Math.max(altoFila, p.alto);
     x += p.ancho + SEPARACION_MESAS_PT;
   }
@@ -999,7 +1005,7 @@ function utf8(s) {
   return Buffer.from(String(s), 'utf8').toString('latin1');
 }
 
-function armarTexto({ mesas, nombres, arte, degradados, textos, titulo }) {
+function armarTexto({ mesas, nombres, arte, degradados, textos, titulo, lienzo }) {
   // Primero el documento de texto: ahí se juntan los colores de los estilos.
   const lineasTexto = textos.documento();
   const documentoDeTexto = { lineas: lineasTexto, estilos: textos.estilos() };
@@ -1070,7 +1076,7 @@ function armarTexto({ mesas, nombres, arte, degradados, textos, titulo }) {
       '%_0 /Int (DisplayMark) ,',
       '%_(' + randomUUID() + ') /String (ArtboardUUID) ,',
       '%_' + (i === 0 ? 1 : 0) + ' /Bool (IsArtboardSelected) ,',
-      '%_' + n(8191 - cx + m.izq) + ' ' + n(8191 + cy - m.arriba) + ' /RealPoint',
+      '%_' + n(lienzo.kx + m.izq) + ' ' + n(lienzo.ky - m.arriba) + ' /RealPoint',
       '%_ (RulerOrigin) ,',
       '%_/FillStyle : 0 1 0 0 0 Xy',
       '%_0 J 0 j 1 w 10 M []0 d\r%_0 XR',

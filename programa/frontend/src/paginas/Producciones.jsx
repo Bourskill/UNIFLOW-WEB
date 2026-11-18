@@ -105,7 +105,9 @@ export function Producciones({ recargarSenal, onEditar }) {
 function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
   const disponibles = useMemo(() => tallasDeProduccion(produccion, grupos, piezas), [produccion, grupos, piezas]);
   const [elegidas, setElegidas] = useState(() => new Set(disponibles));
-  const [conEjemplo, setConEjemplo] = useState(false);
+  // Marcado de entrada: sin él, el nombre y el número salen vacíos aunque en
+  // Diseño se vean con el ejemplo (y parece que "faltan").
+  const [conEjemplo, setConEjemplo] = useState(true);
   const [porSeparado, setPorSeparado] = useState(true);
   const [trabajando, setTrabajando] = useState(null);
   const [error, setError] = useState(null);
