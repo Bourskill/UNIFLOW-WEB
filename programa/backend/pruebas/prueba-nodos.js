@@ -9,7 +9,8 @@
 
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { PDFDocument, PDFName, PDFOperator, PDFNumber, PDFString } from 'pdf-lib';
-import { resolverGeometriasPorTalla } from '../src/motor/importarPdf.js';
+import { resolverGeometriasPorTalla, analizarPrendaPdf } from '../src/motor/importarPdf.js';
+import { geometriasDePiezaEnPrenda } from '../src/motor/reprocesarPrenda.js';
 import { resolverGeometriasPorTalla as resolverDxf } from '../src/motor/importarDxf.js';
 import { geometriaParaAnclaje } from '../src/motor/geometriaAnclaje.js';
 import { espejarGeometria } from '../src/motor/espejoPieza.js';
@@ -45,6 +46,10 @@ const DELANTERO = [
 const NODOS = 12;
 
 async function pdfConCapa(nombreCapa, segmentos, cerrar = true) {
+  return pdfConCapaYTrazos(nombreCapa, [segmentos], cerrar);
+}
+
+async function pdfConCapaYTrazos(nombreCapa, trazos, cerrar = true) {
   const pdf = await PDFDocument.create();
   const pagina = pdf.addPage([700, 900]);
   const ocg = pdf.context.register(pdf.context.obj({ Type: 'OCG', Name: PDFString.of(nombreCapa) }));
@@ -52,13 +57,16 @@ async function pdfConCapa(nombreCapa, segmentos, cerrar = true) {
   pagina.node.Resources().set(PDFName.of('Properties'), pdf.context.obj({ OC1: ocg }));
   const n = (v) => PDFNumber.of(v);
   const ops = [PDFOperator.of('BDC', [PDFName.of('OC'), PDFName.of('OC1')])];
-  for (const s of segmentos) {
-    if (s[0] === 'M') ops.push(PDFOperator.of('m', [n(s[1]), n(s[2])]));
-    else if (s[0] === 'L') ops.push(PDFOperator.of('l', [n(s[1]), n(s[2])]));
-    else ops.push(PDFOperator.of('c', s.slice(1).map(n)));
+  for (const segmentos of trazos) {
+    for (const s of segmentos) {
+      if (s[0] === 'M') ops.push(PDFOperator.of('m', [n(s[1]), n(s[2])]));
+      else if (s[0] === 'L') ops.push(PDFOperator.of('l', [n(s[1]), n(s[2])]));
+      else ops.push(PDFOperator.of('c', s.slice(1).map(n)));
+    }
+    if (cerrar) ops.push(PDFOperator.of('h'));
+    ops.push(PDFOperator.of('S'));
   }
-  if (cerrar) ops.push(PDFOperator.of('h'));
-  ops.push(PDFOperator.of('S'), PDFOperator.of('EMC'));
+  ops.push(PDFOperator.of('EMC'));
   pagina.pushOperators(...ops);
   return Buffer.from(await pdf.save());
 }
@@ -199,6 +207,23 @@ console.log('\n--- DXF: una polilínea cerrada vuelve con sus vértices ---');
   const g = (await resolverDxf(dxf, { M: 0 }, { mmPorUnidad: 1 })).geometriasPorTalla.M;
   comprobar('4 nodos, sin el vértice de cierre repetido', nodosDeTrazado(g.trazadoMm) === 4, JSON.stringify(g.trazadoMm));
   comprobar('el arco queda como una curva', g.trazadoMm.filter((x) => x[0] === 'C').length === 1);
+}
+
+console.log('\n--- Prenda completa: reprocesar recupera los nodos de cada talla ---');
+{
+  // Dos tallas anidadas en la capa DELANTERO: la chica, achicada al 90 % desde el centro.
+  const achicar = (seg) => seg.map((x) => [x[0], ...x.slice(1).map((v, i) => (i % 2 === 0 ? 300 + (v - 300) * 0.9 : 400 + (v - 400) * 0.9))]);
+  const prendaPdf = await pdfConCapaYTrazos('DELANTERO', [DELANTERO, achicar(DELANTERO)]);
+  const prenda = await analizarPrendaPdf(prendaPdf);
+  // La pieza como quedó guardada antes: sin trazado original.
+  const sinTrazado = (g) => { const { trazadoMm, ...resto } = g; return resto; };
+  const guardada = { nombre: 'Delantero', geometriaPorTalla: { S: sinTrazado(prenda.piezas[0].tallas[1]), M: sinTrazado(prenda.piezas[0].tallas[0]) } };
+  const { geometriasPorTalla: g, sinCoincidencia } = geometriasDePiezaEnPrenda(prenda, guardada);
+  comprobar('encuentra las dos tallas en su lugar', !sinCoincidencia.length && g.S && g.M);
+  comprobar('cada una con sus ' + NODOS + ' nodos', nodosDeTrazado(g.S?.trazadoMm) === NODOS && nodosDeTrazado(g.M?.trazadoMm) === NODOS);
+  comprobar('y cada talla es la suya (S más chica que M)', g.S.boundingBoxMm.anchoMm < g.M.boundingBoxMm.anchoMm);
+  const espejada = { nombre: 'Delantero', geometriaPorTalla: { M: espejarGeometria(guardada.geometriaPorTalla.M) } };
+  comprobar('también una pieza espejada (misma caja)', !!geometriasDePiezaEnPrenda(prenda, espejada).geometriasPorTalla.M);
 }
 
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');
