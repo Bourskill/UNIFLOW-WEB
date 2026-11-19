@@ -227,3 +227,96 @@ export function desplazarTrazado(t, d) {
   });
   return trazadoDeAristas(nuevas);
 }
+
+// ---- recuperar los nodos de un polígono ya tesselado ---------------------
+// Las piezas importadas antes de guardar el trazado solo tienen el polígono
+// tesselado: cada curva del archivo quedó como sus puntos en t = i/48 (o
+// i/12 en las más viejas, ver importarPdf.js·tessellarCurva) y cada recta
+// como un punto. Esa muestra es exacta, así que la curva original se puede
+// reconstruir: 48 tramos seguidos que caen sobre UNA cúbica en t = i/48
+// son esa cúbica (sus dos manejadores salen por mínimos cuadrados, y el
+// error tiene que ser ~0); lo que no encaja es una recta. Nodo por nodo, el
+// mismo molde que trae el archivo.
+
+const MUESTRAS_POR_CURVA = [48, 12];
+
+// La cúbica de P0 a Pn que pasa por los puntos Q (en t = i/n), o null si no
+// pasa por todos con error <= tol.
+function cubicaPorMuestras(Q, tol) {
+  const N = Q.length - 1, P0 = Q[0], P3 = Q[N];
+  let a11 = 0, a12 = 0, a22 = 0;
+  const r1 = [0, 0], r2 = [0, 0];
+  for (let i = 1; i < N; i++) {
+    const t = i / N, m = 1 - t;
+    const b0 = m * m * m, b1 = 3 * m * m * t, b2 = 3 * m * t * t, b3 = t * t * t;
+    a11 += b1 * b1; a12 += b1 * b2; a22 += b2 * b2;
+    for (const k of [0, 1]) {
+      const r = Q[i][k] - b0 * P0[k] - b3 * P3[k];
+      r1[k] += b1 * r; r2[k] += b2 * r;
+    }
+  }
+  const det = a11 * a22 - a12 * a12;
+  if (Math.abs(det) < 1e-12) return null;
+  const P1 = [0, 1].map((k) => (a22 * r1[k] - a12 * r2[k]) / det);
+  const P2 = [0, 1].map((k) => (a11 * r2[k] - a12 * r1[k]) / det);
+  for (let i = 1; i < N; i++) {
+    const t = i / N, m = 1 - t;
+    for (const k of [0, 1]) {
+      const v = m * m * m * P0[k] + 3 * m * m * t * P1[k] + 3 * m * t * t * P2[k] + t * t * t * P3[k];
+      if (Math.abs(v - Q[i][k]) > tol) return null;
+    }
+  }
+  return { P1, P2 };
+}
+
+function recorrer(pts, inicio, muestras, tol) {
+  const n = pts.length;
+  const p = (i) => pts[(inicio + i) % n];
+  const t = [['M', ...p(0)]];
+  let curvas = 0;
+  for (let i = 0; i < n;) {
+    if (i + muestras <= n) {
+      const Q = [];
+      for (let k = 0; k <= muestras; k++) Q.push(p(i + k));
+      const c = cubicaPorMuestras(Q, tol);
+      if (c) {
+        t.push(['C', ...c.P1, ...c.P2, ...p(i + muestras)]);
+        curvas++;
+        i += muestras;
+        continue;
+      }
+    }
+    t.push(['L', ...p(i + 1)]);
+    i++;
+  }
+  return { trazado: normalizarTrazado(t), curvas };
+}
+
+/**
+ * El trazado original (sus nodos) de un polígono tesselado por el
+ * importador: [[x, y]] o [{x, y}]. `tol`: el error aceptado, en las mismas
+ * unidades (la muestra es exacta; la tolerancia solo cubre redondeos). Si
+ * no reconoce ninguna curva, devuelve el polígono como rectas, sin el punto
+ * repetido del cierre.
+ */
+export function recuperarTrazado(poligono, tol = 1e-4) {
+  if (!Array.isArray(poligono) || poligono.length < 3) return null;
+  const pts = poligono.map((q) => (Array.isArray(q) ? [q[0], q[1]] : [q.x, q.y]));
+  const u = pts[pts.length - 1];
+  if (iguales(u, pts[0], tol)) pts.pop();
+  if (pts.length < 3) return null;
+  let mejor = null;
+  for (const muestras of MUESTRAS_POR_CURVA) {
+    if (pts.length < muestras) continue;
+    // El polígono arranca casi siempre en un nodo (el primero del archivo);
+    // si no, se prueba desde cada uno de los puntos posibles.
+    const r0 = recorrer(pts, 0, muestras, tol);
+    if (r0.curvas > 0) return r0.trazado;
+    for (let inicio = 1; inicio < muestras; inicio++) {
+      const r = recorrer(pts, inicio, muestras, tol);
+      if (r.curvas > 0 && (!mejor || r.trazado.length < mejor.length)) mejor = r.trazado;
+    }
+    if (mejor) return mejor;
+  }
+  return normalizarTrazado(pts.map((q, i) => [i === 0 ? 'M' : 'L', ...q]));
+}

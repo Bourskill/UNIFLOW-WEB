@@ -17,7 +17,7 @@ import { espejarGeometria } from '../src/motor/espejoPieza.js';
 import { armarMesas } from '../src/motor/mesas.js';
 import { generarPdfPaginas } from '../src/motor/exportarPdf.js';
 import { documentoAiDePdf, textoDePartes } from '../src/motor/illustrator/documentoAi.js';
-import { nodosDeTrazado, desplazarTrazado, aplanarTrazado, invertirTrazado, normalizarTrazado } from '../src/motor/trazado.js';
+import { nodosDeTrazado, desplazarTrazado, aplanarTrazado, invertirTrazado, normalizarTrazado, recuperarTrazado } from '../src/motor/trazado.js';
 
 let fallos = 0, pasadas = 0;
 function comprobar(desc, cond, detalle) {
@@ -224,6 +224,35 @@ console.log('\n--- Prenda completa: reprocesar recupera los nodos de cada talla 
   comprobar('y cada talla es la suya (S más chica que M)', g.S.boundingBoxMm.anchoMm < g.M.boundingBoxMm.anchoMm);
   const espejada = { nombre: 'Delantero', geometriaPorTalla: { M: espejarGeometria(guardada.geometriaPorTalla.M) } };
   comprobar('también una pieza espejada (misma caja)', !!geometriasDePiezaEnPrenda(prenda, espejada).geometriasPorTalla.M);
+}
+
+console.log('\n--- Pieza vieja, solo con el polígono tesselado: vuelve con sus nodos ---');
+{
+  const { trazadoMm, ...vieja } = geo;
+  const piezaVieja = { ...pieza, geometriaPorTalla: { M: vieja } };
+  const a = geometriaParaAnclaje(piezaVieja, 'M');
+  comprobar('el trazado se reconstruye con los ' + NODOS + ' nodos y sus 8 curvas', nodosDeTrazado(a.trazado) === NODOS && a.trazado.filter((x) => x[0] === 'C').length === 8,
+    String(nodosDeTrazado(a.trazado)));
+  const enMm = mapearTrazadoCm(a.trazado);
+  const err = Math.max(...geo.trazadoMm.flatMap((s, i) => s.slice(1).map((v, k) => Math.abs(v - enMm[i][k + 1]))));
+  comprobar('idéntico al original (nodos y manejadores, < 0,001 mm)', err < 1e-3, String(err));
+  // Y aunque solo llegue el contorno en cm (sin trazado), el exportador lo reconstruye.
+  const mesasViejas = armarMesas([{ piezaId: 'Vieja', talla: 'M', anchoCm: pieza.dimensionesPorTalla.M.anchoCm, altoCm: pieza.dimensionesPorTalla.M.altoCm,
+    contornoCm: a.vertices, piquetesCm: [], fondo: { tipo: 'solido', color1: '#3366cc' } }]);
+  const t = (await trazosDelPdf(await generarPdfPaginas(mesasViejas))).filter((x) => x.nodos > 4);
+  comprobar('fondo, contorno láser y molde exportados con ' + NODOS + ' nodos', t.length === 3 && t.every((x) => x.nodos === NODOS && x.curvas === 8), t.map((x) => x.nodos + '/' + x.curvas).join(', '));
+
+  function mapearTrazadoCm(tr) {
+    const xs = geo.poligonoMm.map((q) => q[0]), ys = geo.poligonoMm.map((q) => q[1]);
+    const minX = Math.min(...xs), maxY = Math.max(...ys);
+    return tr.map((s) => [s[0], ...s.slice(1).map((v, k) => (k % 2 === 0 ? v * 10 + minX : maxY - v * 10))]);
+  }
+}
+
+console.log('\n--- Un polígono de verdad (sin curvas) queda igual ---');
+{
+  const hexagono = Array.from({ length: 6 }, (_, i) => [Math.cos(i), Math.sin(i * 1.3) * 2]);
+  comprobar('6 nodos, 6 rectas', nodosDeTrazado(recuperarTrazado(hexagono)) === 6);
 }
 
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');

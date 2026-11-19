@@ -21,7 +21,7 @@ import { colocarArte } from './colocarArte.js';
 import { fondoActivo, ejeDegradado, colorEn } from './fondoPieza.js';
 import { medidasDeCapsula, caminoDeCapsula, COLOR_CAPSULA } from './capsulaTalla.js';
 import { leerDocumentoAi, arteNativoDe } from './illustrator/arteNativo.js';
-import { normalizarTrazado, mapearTrazado, desplazarTrazado, aplanarTrazado } from './trazado.js';
+import { normalizarTrazado, mapearTrazado, desplazarTrazado, aplanarTrazado, recuperarTrazado } from './trazado.js';
 
 const CM_A_PUNTOS = 28.3465;
 
@@ -122,23 +122,18 @@ export function offsetPoligono(vertices, distancia) {
 
 // El contorno de la pieza como TRAZADO (ver trazado.js), en cm de la pieza:
 // el original del archivo (mismos nodos y manejadores) cuando la pieza lo
-// trae; si no (pieza importada antes de guardarlo), el polígono de siempre,
-// sin el nodo repetido del cierre. null sin contorno real.
+// trae; si no (pieza importada antes de guardarlo), se reconstruye del
+// polígono tesselado (recuperarTrazado: las curvas del archivo vuelven a
+// ser curvas, nodo por nodo). null sin contorno real.
 export function trazadoDePieza(pieza) {
-  const original = normalizarTrazado(pieza.trazadoCm);
-  if (original) return original;
-  if (!(pieza.contornoCm?.length >= 3)) return null;
-  return normalizarTrazado(pieza.contornoCm.map((v, i) => [i === 0 ? 'M' : 'L', v.x, v.y]));
+  return normalizarTrazado(pieza.trazadoCm) || recuperarTrazado(pieza.contornoCm);
 }
 
-// El contorno de corte, `distancia` cm hacia afuera. Con el trazado original
-// se desplaza nodo por nodo (los mismos nodos, ver trazado.js); sin él, el
-// polígono con Clipper como siempre.
+// El contorno de corte, `distancia` cm hacia afuera, desplazado nodo por
+// nodo: los mismos nodos que el molde (ver trazado.js·desplazarTrazado).
 export function trazadoDeCorte(pieza, distancia) {
-  if (normalizarTrazado(pieza.trazadoCm)) return desplazarTrazado(trazadoDePieza(pieza), distancia);
-  if (!(pieza.contornoCm?.length >= 3)) return null;
-  const puntos = offsetPoligono(pieza.contornoCm, distancia);
-  return normalizarTrazado(puntos.map((v, i) => [i === 0 ? 'M' : 'L', v.x, v.y]));
+  const t = trazadoDePieza(pieza);
+  return t ? desplazarTrazado(t, distancia) : null;
 }
 
 // Operadores PDF de un trazado ya en puntos de la página (sin el cierre).
