@@ -106,9 +106,9 @@ export function Producciones({ recargarSenal, onEditar }) {
 function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
   const disponibles = useMemo(() => tallasDeProduccion(produccion, grupos, piezas), [produccion, grupos, piezas]);
   const [elegidas, setElegidas] = useState(() => new Set(disponibles));
-  // Marcado de entrada: sin él, el nombre y el número salen vacíos aunque en
-  // Diseño se vean con el ejemplo (y parece que "faltan").
-  const [conEjemplo, setConEjemplo] = useState(true);
+  // Lo que se cargó en cada zona en Diseño (el nombre, el número) sale tal
+  // cual: exportar una producción es exportar lo que se ve en Diseño.
+  const conEjemplo = true;
   const [porSeparado, setPorSeparado] = useState(true);
   const [trabajando, setTrabajando] = useState(null);
   const [error, setError] = useState(null);
@@ -190,11 +190,6 @@ function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
               <input type="checkbox" checked={porSeparado} onChange={(e) => setPorSeparado(e.target.checked)} />
               Un archivo por talla
               <span className="text-xs text-faint-foreground">(varias tallas bajan juntas en un .zip; si no, todas en un solo PDF, una detrás de otra)</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={conEjemplo} onChange={(e) => setConEjemplo(e.target.checked)} />
-              Con el nombre y número de ejemplo
-              <span className="text-xs text-faint-foreground">(si no, esas zonas van vacías)</span>
             </label>
           </div>
 

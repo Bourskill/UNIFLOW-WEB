@@ -1127,7 +1127,8 @@ router.post('/nesting/generar', async (req, res) => {
 // Sin jugadores: el nombre y el número van vacíos, o con el ejemplo de cada
 // zona si se pide (conEjemplo). No guarda registro en `generaciones`.
 router.post('/exportar-mesas/:id', async (req, res) => {
-  const { tallas, conEjemplo } = req.body || {};
+  // Sale lo cargado en cada zona en Diseño (salvo que se pida explícitamente sin, conEjemplo: false).
+  const { tallas, conEjemplo = true } = req.body || {};
   if (!Array.isArray(tallas) || tallas.length === 0 || tallas.some((t) => typeof t !== 'string' || !t)) {
     return res.status(400).json({ error: 'Elegí al menos una talla' });
   }
