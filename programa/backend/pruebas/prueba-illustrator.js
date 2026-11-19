@@ -154,6 +154,10 @@ console.log('\n--- Arte original de Illustrator (efectos vivos) ---');
   const escalado = escalarEstilo(nativo.estilos.get('Anon prueba='), 'Anon nuevo=', 0.5);
   comprobar('el desenfoque del estilo, a la mitad (como "Escalar trazos y efectos")', escalado[0].startsWith('(Anon nuevo=)') && escalado.includes('5 /Real (blur) ,') && escalado.some((l) => l.includes(' 1 w ')));
   comprobar('con texto vivo no se usa (se traduce el PDF como siempre)', arteNativoDe(ai.replace('%_n', '/AI11Text :')) === null);
+  // Una forma viva (rectángulo con centro y medidas): sus parámetros no se
+  // mueven con el trazado, así que se sacan y queda un trazado común.
+  const conForma = arteNativoDe(ai.replace('f\r\n%_1050', 'f\r\n%_/ArtDictionary :\r\n%_/Dictionary :\r\n%_1050 /Real (ai::Rectangle::CenterX) ,\r\n%_; (ai::LiveShape) ,\r\n%_;\r\n%_\r\n%_1050'));
+  comprobar('las formas vivas quedan como trazado común', conForma && conForma.lineas.length === 11 && !conForma.lineas.some((l) => typeof l === 'string' && l.includes('LiveShape')));
 
   // De punta a punta: un diseño que es un PDF de Illustrator (uno de los
   // nuestros, con su copia editable) puesto como arte de una pieza.

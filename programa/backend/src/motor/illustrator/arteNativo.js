@@ -134,6 +134,7 @@ export function arteNativoDe(texto) {
     const hasta = texto.indexOf('%%EndData', i);
     i = hasta < 0 ? largo : hasta;
   }
+  limpiarArte(lineas);
 
   // Los estilos gráficos (los efectos vivos) que usa el arte.
   const usados = new Set();
@@ -151,6 +152,33 @@ export function arteNativoDe(texto) {
     }
   }
   return { lineas, cajaMesa, estilos };
+}
+
+// Los parámetros de las formas vivas (rectángulos "vivos": centro, ancho...)
+// no se mueven con el trazado: si Illustrator rehiciera la forma desde ellos,
+// volvería a su lugar original. Sin ellos queda un trazado común, en su lugar.
+//
+// (La vista previa de los efectos vivos -- el efecto ya dibujado como imagen
+// que Illustrator guarda junto a cada objeto -- se deja: sin ella Illustrator
+// no dibuja el objeto. Al abrir puede verse vieja hasta que Illustrator
+// recalcula el efecto, cosa que hace al tocarlo o moverlo, y al guardar o
+// imprimir.)
+function limpiarArte(lineas) {
+  const salida = [];
+  for (let k = 0; k < lineas.length; k++) {
+    const l = lineas[k];
+    if (l === '%_/ArtDictionary :') {
+      let j = k;
+      while (j < lineas.length && lineas[j] !== '%_;') j++;
+      const bloque = lineas.slice(k, j + 1);
+      if (j < lineas.length && bloque.some((x) => typeof x === 'string' && x.includes('ai::LiveShape'))) {
+        k = lineas[j + 1] === '%_' ? j + 1 : j;
+        continue;
+      }
+    }
+    salida.push(l);
+  }
+  lineas.splice(0, lineas.length, ...salida);
 }
 
 const PARES = { m: 1, l: 1, L: 1, c: 3, C: 3, v: 2, V: 2, y: 2, Y: 2 };
