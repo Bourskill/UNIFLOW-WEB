@@ -17,6 +17,7 @@ import { obtenerMedidor, bytesFuenteBase } from '../motor/medidorFuentes.js';
 import fontkit from '@pdf-lib/fontkit';
 import { espejarGeometria, espejarGeometriaPorTalla, nombreDeEspejo } from '../motor/espejoPieza.js';
 import { analizarPiezaMultiTalla as analizarDxf, resolverGeometriasPorTalla as resolverDxf } from '../motor/importarDxf.js';
+import { geometriasDePiezaEnPrenda } from '../motor/reprocesarPrenda.js';
 import { analizarPiezaMultiTalla as analizarPdf, resolverGeometriasPorTalla as resolverPdf, analizarPrendaPdf, detectarTipoPdf } from '../motor/importarPdf.js';
 
 const router = Router();
@@ -667,68 +668,81 @@ router.post('/piezas/:id/reprocesar', async (req, res) => {
       error: 'Esta pieza no tiene el archivo original guardado (se subió antes de Storage) -- hay que resubirla entera.',
     });
   }
-  if (pieza.formatoOriginal === 'pdf-prenda') {
-    // El archivo guardado es la prenda entera (todas las piezas): no hay
-    // de dónde saber qué capa era esta pieza ni qué nombre tenía cada talla.
-    return res.status(400).json({
-      error: 'Esta pieza vino de un PDF de prenda completa -- para actualizarla, importá la prenda de nuevo o usá "Reemplazar moldería".',
-    });
-  }
-  const motor = motorPorFormato(pieza.formatoOriginal);
-  if (!motor) return res.status(400).json({ error: 'Formato original desconocido: ' + pieza.formatoOriginal });
+  const esPrenda = pieza.formatoOriginal === 'pdf-prenda';
+  const motor = esPrenda ? null : motorPorFormato(pieza.formatoOriginal);
+  if (!esPrenda && !motor) return res.status(400).json({ error: 'Formato original desconocido: ' + pieza.formatoOriginal });
 
   let contenido;
   try {
     const respuesta = await fetch(pieza.archivoOriginal);
     if (!respuesta.ok) throw new Error('HTTP ' + respuesta.status);
-    contenido = pieza.formatoOriginal === 'pdf'
-      ? Buffer.from(await respuesta.arrayBuffer()).toString('base64')
-      : await respuesta.text();
+    contenido = pieza.formatoOriginal === 'dxf'
+      ? await respuesta.text()
+      : Buffer.from(await respuesta.arrayBuffer()).toString('base64');
   } catch (error) {
     return res.status(400).json({ error: 'No se pudo bajar el archivo original: ' + error.message });
   }
 
-  let analisis;
-  try {
-    analisis = await motor.analizar(motor.decodificar(contenido));
-  } catch (error) {
-    return res.status(400).json({ error: 'No se pudo releer el archivo original: ' + error.message });
+  // Prenda completa: el archivo no nombra la pieza ni sus tallas, pero es el
+  // mismo archivo -- cada talla se reencuentra por su lugar exacto en él
+  // (ver reprocesarPrenda.js). Así recupera también los nodos originales.
+  let resuelto, sinCoincidencia = [];
+  if (esPrenda) {
+    let prenda;
+    try {
+      prenda = await analizarPrendaPdf(Buffer.from(contenido, 'base64'));
+    } catch (error) {
+      return res.status(400).json({ error: 'No se pudo releer el archivo original: ' + error.message });
+    }
+    const encontrado = geometriasDePiezaEnPrenda(prenda, pieza);
+    if (Object.keys(encontrado.geometriasPorTalla).length === 0) {
+      return res.status(400).json({ error: 'Ningún contorno del archivo original coincide con las tallas guardadas. ¿Es el mismo archivo?' });
+    }
+    resuelto = { geometriasPorTalla: encontrado.geometriasPorTalla };
+    sinCoincidencia = encontrado.sinCoincidencia;
   }
 
-  // Empareja cada talla YA guardada contra un candidato de este análisis
-  // por NOMBRE (sin importar mayúsculas) -- nunca por posición/índice, que
-  // puede correrse si el archivo cambió de capas entre medio.
-  const tallasGuardadas = Object.keys(pieza.geometriaPorTalla || {});
-  const mapaTallaAIndice = {};
-  const sinCoincidencia = [];
-  for (const talla of tallasGuardadas) {
-    const candidato = analisis.asignaciones.find(
-      (a) => (a.tallaAsignada || '').toUpperCase() === talla.toUpperCase()
-    );
-    if (candidato) mapaTallaAIndice[talla] = candidato.indice;
-    else sinCoincidencia.push(talla);
-  }
-  if (Object.keys(mapaTallaAIndice).length === 0) {
-    return res.status(400).json({
-      error: 'Ninguna capa del archivo original coincide con las tallas ya guardadas (' +
-        tallasGuardadas.join(', ') + '). ¿Es el mismo archivo?',
-    });
-  }
+  if (!esPrenda) {
+    let analisis;
+    try {
+      analisis = await motor.analizar(motor.decodificar(contenido));
+    } catch (error) {
+      return res.status(400).json({ error: 'No se pudo releer el archivo original: ' + error.message });
+    }
 
-  let opciones = { mmPorUnidad: analisis.mmPorUnidad };
-  if (!analisis.mmPorUnidad) {
-    const tallaReferencia = Object.keys(mapaTallaAIndice)[0];
-    opciones = {
-      anchoConocidoCm: pieza.dimensionesPorTalla[tallaReferencia].anchoCm,
-      indiceReferencia: mapaTallaAIndice[tallaReferencia],
-    };
-  }
+    // Empareja cada talla YA guardada contra un candidato de este análisis
+    // por NOMBRE (sin importar mayúsculas) -- nunca por posición/índice, que
+    // puede correrse si el archivo cambió de capas entre medio.
+    const tallasGuardadas = Object.keys(pieza.geometriaPorTalla || {});
+    const mapaTallaAIndice = {};
+    for (const talla of tallasGuardadas) {
+      const candidato = analisis.asignaciones.find(
+        (a) => (a.tallaAsignada || '').toUpperCase() === talla.toUpperCase()
+      );
+      if (candidato) mapaTallaAIndice[talla] = candidato.indice;
+      else sinCoincidencia.push(talla);
+    }
+    if (Object.keys(mapaTallaAIndice).length === 0) {
+      return res.status(400).json({
+        error: 'Ninguna capa del archivo original coincide con las tallas ya guardadas (' +
+          tallasGuardadas.join(', ') + '). ¿Es el mismo archivo?',
+      });
+    }
 
-  let resuelto;
-  try {
-    resuelto = await motor.resolver(motor.decodificar(contenido), mapaTallaAIndice, opciones);
-  } catch (error) {
-    return res.status(400).json({ error: 'No se pudo recalcular la geometría: ' + error.message });
+    let opciones = { mmPorUnidad: analisis.mmPorUnidad };
+    if (!analisis.mmPorUnidad) {
+      const tallaReferencia = Object.keys(mapaTallaAIndice)[0];
+      opciones = {
+        anchoConocidoCm: pieza.dimensionesPorTalla[tallaReferencia].anchoCm,
+        indiceReferencia: mapaTallaAIndice[tallaReferencia],
+      };
+    }
+
+    try {
+      resuelto = await motor.resolver(motor.decodificar(contenido), mapaTallaAIndice, opciones);
+    } catch (error) {
+      return res.status(400).json({ error: 'No se pudo recalcular la geometría: ' + error.message });
+    }
   }
 
   const diferencias = [];
@@ -752,7 +766,8 @@ router.post('/piezas/:id/reprocesar', async (req, res) => {
   for (const [talla, geo] of Object.entries(resuelto.geometriasPorTalla)) {
     // Una pieza sacada en espejo (POST /piezas/:id/espejo) comparte el
     // archivo con la original: lo que sale de releerlo hay que espejarlo.
-    geometriaPorTalla[talla] = pieza.espejada ? espejarGeometria(geo) : geo;
+    const nueva = pieza.espejada ? espejarGeometria(geo) : geo;
+    geometriaPorTalla[talla] = pieza.geometriaPorTalla?.[talla]?.validadoPorUsuario ? { ...nueva, validadoPorUsuario: true } : nueva;
     dimensionesPorTalla[talla] = {
       anchoCm: round2(geo.boundingBoxMm.anchoMm / 10),
       altoCm: round2(geo.boundingBoxMm.altoMm / 10),
@@ -1019,6 +1034,7 @@ async function anidarGrupo({ grupoId, lineas, anchoLienzoCm, separacionCm }) {
           altoCm: dimension.altoCm,
           rotable: !!pieza.rotable,
           contornoCm: geo?.vertices || null,
+          trazadoCm: geo?.trazado || null,
         });
       }
     }

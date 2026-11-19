@@ -39,6 +39,18 @@ function calcularExtremos(vertices) {
   return { arriba, abajo, izquierda, derecha };
 }
 
+import { mapearTrazado, recuperarTrazado } from './trazado.js';
+
+// El trazado original de una talla: el guardado, o reconstruido del polígono
+// tesselado en piezas importadas antes de guardarlo (ver trazado.js·
+// recuperarTrazado). Una vez por geometría.
+const trazadosRecuperados = new WeakMap();
+function trazadoMmDe(geo) {
+  if (geo.trazadoMm) return geo.trazadoMm;
+  if (!trazadosRecuperados.has(geo)) trazadosRecuperados.set(geo, recuperarTrazado(geo.poligonoMm, 1e-3));
+  return trazadosRecuperados.get(geo);
+}
+
 function round3(n) { return Math.round(n * 1000) / 1000; }
 
 export function geometriaParaAnclaje(pieza, talla) {
@@ -84,6 +96,10 @@ export function geometriaParaAnclaje(pieza, talla) {
     nombre: pieza.nombre,
     pieza: { ancho_cm: dim.anchoCm, alto_cm: dim.altoCm },
     vertices,
+    // El trazado original del contorno (mismos nodos que el archivo, ver
+    // trazado.js), con la misma transformación que los vértices: es lo que
+    // se exporta. En piezas importadas antes de guardarlo, reconstruido.
+    trazado: mapearTrazado(trazadoMmDe(geo), ([x, y]) => [(x - minX) / 10, (maxY - y) / 10]),
     extremos: calcularExtremos(vertices),
     piquetes,
     salientes,

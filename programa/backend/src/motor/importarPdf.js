@@ -31,6 +31,7 @@ const PT_A_MM = 25.4 / 72;
 const SEG_MOVE_TO = 0;
 const SEG_LINE_TO = 1;
 const SEG_CURVE_TO = 2;
+const SEG_QUAD_CURVE_TO = 3;
 const SEG_CLOSE_PATH = 4;
 
 // Solo los operadores de PINTAR (stroke/fill) cuentan como geometría real.
@@ -96,29 +97,53 @@ function tessellarCurva(p0, x1, y1, x2, y2, x3, y3, segmentos = 48) {
 
 // Decodifica el buffer plano de constructPath a puntos absolutos (ya
 // pasados por el CTM vigente). Devuelve también si el trazo quedó cerrado.
+//
+// Además de los puntos tesselados (para medir), devuelve `segmentos`: el
+// trazado ORIGINAL, con sus mismos nodos y manejadores (ver trazado.js) --
+// es lo que se exporta, para que el molde vuelva a Illustrator con
+// exactamente sus nodos. Una transformación afín (el CTM) lleva una curva
+// Bézier a otra curva Bézier exacta: transformar sus puntos de control
+// alcanza. Si el trazo trae más de un subcamino, no hay UN contorno que
+// guardar y `segmentos` queda null.
 function decodificarPath(buffer, fn, ctm) {
   const puntos = [];
+  const segmentos = [];
+  let subcaminos = 0;
   let actual = [0, 0];
   let cerrado = OPS_RELLENAN.has(fn);
+  const t = (x, y) => aplicarMatriz(ctm, x, y);
   let i = 0;
   while (i < buffer.length) {
     const codigo = buffer[i++];
     if (codigo === SEG_MOVE_TO || codigo === SEG_LINE_TO) {
       actual = [buffer[i], buffer[i + 1]];
-      puntos.push(aplicarMatriz(ctm, actual[0], actual[1]));
+      puntos.push(t(actual[0], actual[1]));
+      if (codigo === SEG_MOVE_TO) subcaminos++;
+      segmentos.push([codigo === SEG_MOVE_TO ? 'M' : 'L', ...t(actual[0], actual[1])]);
       i += 2;
-    } else if (codigo === SEG_CURVE_TO) {
-      const [x1, y1, x2, y2, x3, y3] = [buffer[i], buffer[i + 1], buffer[i + 2], buffer[i + 3], buffer[i + 4], buffer[i + 5]];
-      for (const [px, py] of tessellarCurva(actual, x1, y1, x2, y2, x3, y3)) puntos.push(aplicarMatriz(ctm, px, py));
+    } else if (codigo === SEG_CURVE_TO || codigo === SEG_QUAD_CURVE_TO) {
+      let x1, y1, x2, y2, x3, y3;
+      if (codigo === SEG_CURVE_TO) {
+        [x1, y1, x2, y2, x3, y3] = [buffer[i], buffer[i + 1], buffer[i + 2], buffer[i + 3], buffer[i + 4], buffer[i + 5]];
+        i += 6;
+      } else {
+        // Cuadrática -> la cúbica equivalente (exacta).
+        const [cx, cy] = [buffer[i], buffer[i + 1]];
+        [x3, y3] = [buffer[i + 2], buffer[i + 3]];
+        [x1, y1] = [actual[0] + (2 / 3) * (cx - actual[0]), actual[1] + (2 / 3) * (cy - actual[1])];
+        [x2, y2] = [x3 + (2 / 3) * (cx - x3), y3 + (2 / 3) * (cy - y3)];
+        i += 4;
+      }
+      for (const [px, py] of tessellarCurva(actual, x1, y1, x2, y2, x3, y3)) puntos.push(t(px, py));
+      segmentos.push(['C', ...t(x1, y1), ...t(x2, y2), ...t(x3, y3)]);
       actual = [x3, y3];
-      i += 6;
     } else if (codigo === SEG_CLOSE_PATH) {
       cerrado = true;
     } else {
       break; // código desconocido -- no debería pasar con lo que emite pdfjs-dist hoy
     }
   }
-  return { puntos, cerrado };
+  return { puntos, cerrado, segmentos: subcaminos === 1 ? segmentos : null };
 }
 
 // Recorre el PDF completo (todas las páginas) juntando, por capa/OCG, los
@@ -138,7 +163,7 @@ async function extraerCandidatosPdf(bufferPdf) {
   for (const [id, grupo] of config) nombrePorId.set(id, grupo.name);
 
   const porCapa = new Map(); // nombre -> { todos: [...], cerrados: [...], trazos: [...] }
-  function agregar(nombre, puntos, cerrado) {
+  function agregar(nombre, puntos, cerrado, segmentos) {
     if (!nombre || puntos.length === 0) return;
     if (!porCapa.has(nombre)) porCapa.set(nombre, { todos: [], cerrados: [], trazos: [] });
     const grupo = porCapa.get(nombre);
@@ -147,7 +172,7 @@ async function extraerCandidatosPdf(bufferPdf) {
     // Sin mezclar -- ver el mismo comentario en importarDxf.js: hace falta
     // cada trazo por separado para distinguir después el contorno real de
     // los piquetes sueltos (contornoYPiquetesDeTrazos).
-    grupo.trazos.push({ puntos, cerrado });
+    grupo.trazos.push({ puntos, cerrado, segmentos });
   }
 
   for (let numeroPagina = 1; numeroPagina <= doc.numPages; numeroPagina++) {
@@ -196,8 +221,8 @@ async function extraerCandidatosPdf(bufferPdf) {
           if (!OPS_PINTAN.has(args[0])) break; // clip o construcción invisible, no es geometría real
           const buffer = args[1]?.[0];
           if (!buffer) break;
-          const { puntos, cerrado } = decodificarPath(buffer, args[0], ctm);
-          agregar(capaVigente(), puntos, cerrado);
+          const { puntos, cerrado, segmentos } = decodificarPath(buffer, args[0], ctm);
+          agregar(capaVigente(), puntos, cerrado, segmentos);
           break;
         }
       }

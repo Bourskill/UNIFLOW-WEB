@@ -21,6 +21,7 @@ import { colocarArte } from './colocarArte.js';
 import { fondoActivo, ejeDegradado, colorEn } from './fondoPieza.js';
 import { medidasDeCapsula, caminoDeCapsula, COLOR_CAPSULA } from './capsulaTalla.js';
 import { leerDocumentoAi, arteNativoDe } from './illustrator/arteNativo.js';
+import { normalizarTrazado, mapearTrazado, desplazarTrazado, aplanarTrazado, recuperarTrazado } from './trazado.js';
 
 const CM_A_PUNTOS = 28.3465;
 
@@ -119,6 +120,30 @@ export function offsetPoligono(vertices, distancia) {
   return elegido.map((p) => ({ x: p.X / ESCALA_CLIPPER, y: p.Y / ESCALA_CLIPPER }));
 }
 
+// El contorno de la pieza como TRAZADO (ver trazado.js), en cm de la pieza:
+// el original del archivo (mismos nodos y manejadores) cuando la pieza lo
+// trae; si no (pieza importada antes de guardarlo), se reconstruye del
+// polígono tesselado (recuperarTrazado: las curvas del archivo vuelven a
+// ser curvas, nodo por nodo). null sin contorno real.
+export function trazadoDePieza(pieza) {
+  return normalizarTrazado(pieza.trazadoCm) || recuperarTrazado(pieza.contornoCm);
+}
+
+// El contorno de corte, `distancia` cm hacia afuera, desplazado nodo por
+// nodo: los mismos nodos que el molde (ver trazado.js·desplazarTrazado).
+export function trazadoDeCorte(pieza, distancia) {
+  const t = trazadoDePieza(pieza);
+  return t ? desplazarTrazado(t, distancia) : null;
+}
+
+// Operadores PDF de un trazado ya en puntos de la página (sin el cierre).
+function operadoresDeTrazado(t) {
+  return [
+    moveTo(t[0][1], t[0][2]),
+    ...t.slice(1).map((s) => (s[0] === 'C' ? appendBezierCurve(s[1], s[2], s[3], s[4], s[5], s[6]) : lineTo(s[1], s[2]))),
+  ];
+}
+
 // El PDF de un nesting: una sola página (el lienzo) con todas las piezas.
 export async function generarPdfNesting(resultadoNesting) {
   return generarPdfPaginas([resultadoNesting]);
@@ -188,22 +213,27 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
       const anchoRectPt = pieza.anchoCm * CM_A_PUNTOS;
       const altoRectPt = pieza.altoCm * CM_A_PUNTOS;
 
+      // El contorno real de la pieza en puntos de la página, con sus nodos
+      // originales: lo usan el fondo y el recorte del arte.
+      const aPagina = ([x, y]) => [xPt + x * CM_A_PUNTOS, yPt + altoRectPt - y * CM_A_PUNTOS];
+      const trazadoPieza = trazadoDePieza(pieza);
+      const trazadoEnPagina = trazadoPieza ? operadoresDeTrazado(mapearTrazado(trazadoPieza, aPagina)) : null;
+
       // Fondo de color del Diseño (sólido o degradado), DEBAJO del arte y
       // recortado a la forma de la pieza. Ver fondoPieza.js.
       const fondo = fondoActivo(pieza.fondo);
       if (fondo) {
         const aPt = (x, y) => ({ x: xPt + x * CM_A_PUNTOS, y: yPt + altoRectPt - y * CM_A_PUNTOS });
-        const forma = pieza.contornoCm?.length >= 3
-          ? pieza.contornoCm.map((v) => aPt(v.x, v.y))
-          : [aPt(0, 0), aPt(pieza.anchoCm, 0), aPt(pieza.anchoCm, pieza.altoCm), aPt(0, pieza.altoCm)];
+        const forma = trazadoEnPagina
+          || operadoresDeTrazado([[0, 0], [pieza.anchoCm, 0], [pieza.anchoCm, pieza.altoCm], [0, pieza.altoCm]]
+            .map(([x, y], i) => { const q = aPt(x, y); return [i === 0 ? 'M' : 'L', q.x, q.y]; }));
         // La propia forma de la pieza rellena con el fondo -- sin máscara de
         // recorte: en Illustrator queda UN trazado con su color o su
         // degradado (editable), no un montón de franjas enmascaradas.
         pagina.pushOperators(
           pushGraphicsState(),
           ...operadoresDeRelleno(pdf, pagina, fondo, pieza.anchoCm, pieza.altoCm, aPt),
-          moveTo(forma[0].x, forma[0].y),
-          ...forma.slice(1).map((p) => lineTo(p.x, p.y)),
+          ...forma,
           closePath(),
           fill(),
           popGraphicsState()
@@ -239,16 +269,14 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
             height: r.alto * CM_A_PUNTOS,
           };
         }
-        const puntos = pieza.contornoCm?.length >= 3
-          ? pieza.contornoCm.map((v) => ({ x: xPt + v.x * CM_A_PUNTOS, y: yPt + altoRectPt - v.y * CM_A_PUNTOS }))
-          : pieza.ajusteArte
-            ? [{ x: xPt, y: yPt }, { x: xPt + anchoRectPt, y: yPt }, { x: xPt + anchoRectPt, y: yPt + altoRectPt }, { x: xPt, y: yPt + altoRectPt }]
-            : null;
-        if (puntos) {
+        const recorte = trazadoEnPagina
+          || (pieza.ajusteArte
+            ? operadoresDeTrazado([['M', xPt, yPt], ['L', xPt + anchoRectPt, yPt], ['L', xPt + anchoRectPt, yPt + altoRectPt], ['L', xPt, yPt + altoRectPt]])
+            : null);
+        if (recorte) {
           pagina.pushOperators(
             pushGraphicsState(),
-            moveTo(puntos[0].x, puntos[0].y),
-            ...puntos.slice(1).map((p) => lineTo(p.x, p.y)),
+            ...recorte,
             closePath(),
             clip(),
             endPath()
@@ -264,30 +292,32 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
       // además el rectángulo del bounding box pondría una segunda línea de
       // corte falsa en el archivo. Sin él, se mantiene el rectángulo de
       // siempre (referencia visual del nesting, nunca fue un corte real).
-      if (pieza.bordeContraste?.activo && pieza.contornoCm?.length >= 3) {
+      if (pieza.bordeContraste?.activo && trazadoPieza) {
         const color = hexARgb(pieza.bordeContraste.colorHex);
         const grosorCm = Math.max(pieza.bordeContraste.grosorCm || 0.03, 0.01);
         const grosorPt = grosorCm * CM_A_PUNTOS;
         const desplazamientoCm = pieza.bordeContraste.desplazamientoCm || 0;
         // UN trazado cerrado (no segmentos sueltos): en Illustrator queda
         // como un solo path de corte, listo para el láser.
-        const aPt = (v) => ({ x: xPt + v.x * CM_A_PUNTOS, y: yPt + altoRectPt - v.y * CM_A_PUNTOS });
         // El trazo va ALINEADO POR FUERA del corte (como "Alinear trazo: por
         // fuera" de Illustrator): el trazado de corte queda en su lugar y el
         // trazo crece hacia afuera. Un PDF solo sabe trazos centrados, así que
         // acá se dibuja medio grosor más afuera (se ve igual); el documento de
         // Illustrator lleva el corte exacto con su trazo por fuera.
-        const corte = offsetPoligono(pieza.contornoCm, desplazamientoCm).map(aPt);
-        const puntos = offsetPoligono(pieza.contornoCm, desplazamientoCm + grosorCm / 2).map(aPt);
-        pagina.__cortesLaser?.push({ puntos: corte, grosorPt, color: [color.r, color.g, color.b] });
+        // Con el trazado original, el corte lleva los MISMOS nodos que el
+        // molde (ver trazado.js): ni uno más, ni uno menos.
+        const corte = mapearTrazado(trazadoDeCorte(pieza, desplazamientoCm), aPagina);
+        const vista = mapearTrazado(trazadoDeCorte(pieza, desplazamientoCm + grosorCm / 2), aPagina);
+        pagina.__cortesLaser?.push({
+          trazado: corte, puntos: aplanarTrazado(corte).map(([x, y]) => ({ x, y })), grosorPt, color: [color.r, color.g, color.b],
+        });
         pagina.pushOperators(
           PDFOperator.of('BMC', [PDFName.of('UniflowCorteLaser')]),
           pushGraphicsState(),
           setStrokingColor(rgb(color.r, color.g, color.b)),
           setLineWidth(grosorPt),
           setLineJoin(LineJoinStyle.Round),
-          moveTo(puntos[0].x, puntos[0].y),
-          ...puntos.slice(1).map((q) => lineTo(q.x, q.y)),
+          ...operadoresDeTrazado(vista),
           closePath(),
           stroke(),
           popGraphicsState(),
@@ -486,7 +516,7 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
       // sus piquetes pegados, que son parte del contorno) y los piquetes
       // sueltos como rayitas, en blanco o negro según lo que contraste con
       // el fondo -- como se arma a mano para ver dónde coser.
-      if (pieza.marcarPiquetes && pieza.contornoCm?.length >= 3) {
+      if (pieza.marcarPiquetes && trazadoEnPagina) {
         const aPt = (v) => ({ x: xPt + v.x * CM_A_PUNTOS, y: yPt + altoRectPt - v.y * CM_A_PUNTOS });
         const trazo = (puntos, cerrado, color) => [
           setStrokingColor(color),
@@ -496,7 +526,8 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
           stroke(),
         ];
         const ops = [pushGraphicsState(), setLineWidth(GROSOR_MARCAS_PT), setLineJoin(LineJoinStyle.Round)];
-        ops.push(...trazo(pieza.contornoCm.map(aPt), true, colorDeContraste(fondo, pieza)));
+        // El molde con sus nodos originales (ver trazado.js).
+        ops.push(setStrokingColor(colorDeContraste(fondo, pieza)), ...trazadoEnPagina, closePath(), stroke());
         for (const q of pieza.piquetesCm || []) {
           const raya = rayaDePiquete(q, pieza.contornoCm);
           if (raya) ops.push(...trazo(raya.map(aPt), false, colorDeContraste(fondo, pieza, q)));

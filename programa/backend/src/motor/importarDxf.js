@@ -77,6 +77,37 @@ function tessellarBulge(p1, p2, bulge, segmentosPorCuartoVuelta = SEGMENTOS_POR_
   return puntos;
 }
 
+// El arco con bulge como curvas Bézier (una por cuarto de vuelta o menos),
+// para el trazado original que se exporta (ver trazado.js): los nodos del
+// archivo, más uno por cada cuarto de vuelta de arco (un arco de más de
+// 90° no entra en una sola curva sin deformarse).
+function cubicasDeBulge(p1, p2, bulge) {
+  const theta = 4 * Math.atan(bulge);
+  const dx = p2[0] - p1[0], dy = p2[1] - p1[1];
+  const cuerda = Math.hypot(dx, dy);
+  if (cuerda === 0 || theta === 0) return [['L', p2[0], p2[1]]];
+  const nx = -dy / cuerda, ny = dx / cuerda;
+  const radioFirmado = cuerda / (2 * Math.sin(theta / 2));
+  const cx = (p1[0] + p2[0]) / 2 + nx * radioFirmado * Math.cos(theta / 2);
+  const cy = (p1[1] + p2[1]) / 2 + ny * radioFirmado * Math.cos(theta / 2);
+  const radio = Math.abs(radioFirmado);
+  const inicio = Math.atan2(p1[1] - cy, p1[0] - cx);
+  const partes = Math.max(1, Math.ceil(Math.abs(theta) / (Math.PI / 2) - 1e-9));
+  const paso = theta / partes;
+  const k = (4 / 3) * Math.tan(paso / 4);
+  const segmentos = [];
+  for (let i = 0; i < partes; i++) {
+    const a0 = inicio + paso * i, a1 = a0 + paso;
+    const q0 = [cx + radio * Math.cos(a0), cy + radio * Math.sin(a0)];
+    const q1 = i === partes - 1 ? p2 : [cx + radio * Math.cos(a1), cy + radio * Math.sin(a1)];
+    segmentos.push(['C',
+      q0[0] - k * radio * Math.sin(a0), q0[1] + k * radio * Math.cos(a0),
+      q1[0] + k * radio * Math.sin(a1), q1[1] - k * radio * Math.cos(a1),
+      q1[0], q1[1]]);
+  }
+  return segmentos;
+}
+
 function tessellarArco(centro, radio, anguloInicio, anguloFin, segmentosPorCuartoVuelta = SEGMENTOS_POR_CUARTO_VUELTA) {
   const barrido = anguloFin - anguloInicio;
   const pasos = Math.max(3, Math.round((segmentosPorCuartoVuelta * Math.abs(barrido)) / (Math.PI / 2)));
@@ -103,19 +134,20 @@ function puntosDeEntidad(entidad) {
       const vertices = entidad.vertices || [];
       if (vertices.length < 2) return null;
       const puntos = [[vertices[0].x, vertices[0].y]];
-      for (let i = 0; i < vertices.length - 1; i++) {
-        const actual = vertices[i];
-        const siguiente = vertices[i + 1];
-        if (actual.bulge) puntos.push(...tessellarBulge([actual.x, actual.y], [siguiente.x, siguiente.y], actual.bulge));
-        else puntos.push([siguiente.x, siguiente.y]);
-      }
-      if (entidad.shape) {
-        const ultimo = vertices[vertices.length - 1];
-        const primero = vertices[0];
-        if (ultimo.bulge) puntos.push(...tessellarBulge([ultimo.x, ultimo.y], [primero.x, primero.y], ultimo.bulge));
-        else puntos.push([primero.x, primero.y]);
-      }
-      return { puntos, cerrado: !!entidad.shape };
+      // El trazado original (los vértices del archivo, ver trazado.js).
+      const segmentos = [['M', vertices[0].x, vertices[0].y]];
+      const tramo = (desde, hasta) => {
+        if (desde.bulge) {
+          puntos.push(...tessellarBulge([desde.x, desde.y], [hasta.x, hasta.y], desde.bulge));
+          segmentos.push(...cubicasDeBulge([desde.x, desde.y], [hasta.x, hasta.y], desde.bulge));
+        } else {
+          puntos.push([hasta.x, hasta.y]);
+          segmentos.push(['L', hasta.x, hasta.y]);
+        }
+      };
+      for (let i = 0; i < vertices.length - 1; i++) tramo(vertices[i], vertices[i + 1]);
+      if (entidad.shape) tramo(vertices[vertices.length - 1], vertices[0]);
+      return { puntos, cerrado: !!entidad.shape, segmentos };
     }
     case 'LINE':
       return { puntos: (entidad.vertices || []).map((v) => [v.x, v.y]), cerrado: false };
@@ -159,7 +191,7 @@ function extraerCandidatosDxf(dxfTexto) {
     // piquetes sueltos (contornoYPiquetesDeTrazos) -- `todos`/`cerrados`
     // arriba siguen existiendo tal cual para el resto del archivo (el
     // ancho de referencia para confirmar escala no necesita distinguirlos).
-    grupo.trazos.push({ puntos: resultado.puntos, cerrado: resultado.cerrado });
+    grupo.trazos.push({ puntos: resultado.puntos, cerrado: resultado.cerrado, segmentos: resultado.segmentos || null });
   }
 
   const nombres = [...porCapa.keys()];

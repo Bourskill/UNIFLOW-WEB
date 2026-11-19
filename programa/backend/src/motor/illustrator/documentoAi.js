@@ -865,9 +865,20 @@ function ascii85(buf) {
 }
 
 function corteExterior(vista, corte, base, nativos) {
-  const puntos = corte.puntos.map((q) => aplicar(base, q.x, q.y));
-  const camino = ['%_' + n(puntos[0][0]) + ' ' + n(puntos[0][1]) + ' m'];
-  for (const [x, y] of [...puntos.slice(1), puntos[0]]) camino.push('%_' + n(x) + ' ' + n(y) + ' L');
+  // El trazado del corte con sus nodos y manejadores (los del molde, ver
+  // trazado.js); un corte viejo sin trazado, por sus puntos.
+  const segmentos = corte.trazado || corte.puntos.map((q, i) => [i === 0 ? 'M' : 'L', q.x, q.y]);
+  const q = (x, y) => aplicar(base, x, y).map(n).join(' ');
+  const camino = [];
+  for (const s of segmentos) {
+    if (s[0] === 'M') camino.push('%_' + q(s[1], s[2]) + ' m');
+    else if (s[0] === 'C') camino.push('%_' + q(s[1], s[2]) + ' ' + q(s[3], s[4]) + ' ' + q(s[5], s[6]) + ' C');
+    else camino.push('%_' + q(s[1], s[2]) + ' L');
+  }
+  // Cerrado: vuelve al primer nodo, salvo que la última curva ya termine ahí.
+  const u = segmentos[segmentos.length - 1];
+  const fin = u[0] === 'C' ? [u[5], u[6]] : [u[1], u[2]];
+  if (Math.abs(fin[0] - segmentos[0][1]) > 1e-6 || Math.abs(fin[1] - segmentos[0][2]) > 1e-6) camino.push('%_' + q(segmentos[0][1], segmentos[0][2]) + ' L');
   const lineas = ['0 Ae', 'u', ...vista, 'U', '0 0 Xd', '6 () XW', ...camino, '%_n', '1 (' + nativos.estiloCorte(corte.color, corte.grosorPt) + ') XW'];
   lineas.caja = vista.caja;
   return lineas;

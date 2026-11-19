@@ -324,7 +324,7 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
   // Mientras se edita, se revisan versiones o hay un panel abierto, la
   // tarjeta ocupa toda la fila: los formularios no entran en una columna.
   const expandida = editando || reemplazando || espejando || !!creadaEnEspejo || mostrandoVersiones || !!pendienteConfirmar || !!resultadoReproceso;
-  const puedeReprocesar = !!pieza.archivoOriginal && tallas.length > 0 && pieza.formatoOriginal !== 'pdf-prenda';
+  const puedeReprocesar = !!pieza.archivoOriginal && tallas.length > 0;
 
   return (
     <article
