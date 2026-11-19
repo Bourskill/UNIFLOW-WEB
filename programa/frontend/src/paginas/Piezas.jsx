@@ -325,9 +325,6 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
   // tarjeta ocupa toda la fila: los formularios no entran en una columna.
   const expandida = editando || reemplazando || espejando || !!creadaEnEspejo || mostrandoVersiones || !!pendienteConfirmar || !!resultadoReproceso;
   const puedeReprocesar = !!pieza.archivoOriginal && tallas.length > 0;
-  // Sin el trazado original guardado (pieza importada antes), el molde se
-  // exporta con muchos nodos de más: reprocesarla los recupera.
-  const sinNodosOriginales = tallas.some((t) => pieza.geometriaPorTalla?.[t] && !pieza.geometriaPorTalla[t].trazadoMm);
 
   return (
     <article
@@ -368,11 +365,6 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-faint-foreground">
           <span>{faltanPiquetes ? 'sin piquetes en alguna talla' : piquetesPorTalla + (piquetesPorTalla === 1 ? ' piquete' : ' piquetes') + ' por talla'}</span>
           {pieza.tela && <span>· {pieza.tela}</span>}
-          {sinNodosOriginales && (
-            <span className="font-medium text-danger" title="Esta pieza se importó antes de que se guardaran sus nodos originales: se exporta con muchos nodos de más. Usá Reprocesar para recuperarlos.">
-              · sale con nodos de más: reprocesar
-            </span>
-          )}
         </div>
         {tallas.length > 1 && (
           <div className="flex flex-wrap gap-1">
