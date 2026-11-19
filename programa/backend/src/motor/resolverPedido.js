@@ -233,6 +233,9 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         // como el contorno de corte para láser, desplazado hacia afuera lo
         // que pida el producto (compensación real de grosor de corte).
         contornoCm: geometria[pieza.nombre]?.vertices || null,
+        // El mismo contorno con sus nodos originales (ver trazado.js): lo que
+        // se escribe en el archivo, sin nodos de más.
+        trazadoCm: geometria[pieza.nombre]?.trazado || null,
         // Piquetes sueltos, en las mismas coordenadas (las mesas los marcan).
         piquetesCm: geometria[pieza.nombre]?.piquetes || [],
         bordeContraste: producto.bordeContraste || null,

@@ -1019,6 +1019,7 @@ async function anidarGrupo({ grupoId, lineas, anchoLienzoCm, separacionCm }) {
           altoCm: dimension.altoCm,
           rotable: !!pieza.rotable,
           contornoCm: geo?.vertices || null,
+          trazadoCm: geo?.trazado || null,
         });
       }
     }

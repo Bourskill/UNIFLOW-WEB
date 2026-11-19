@@ -16,6 +16,8 @@ export const SUFIJO_LADO = '@espejo';
 export const claveDelOtroLado = (clave) => clave + SUFIJO_LADO;
 export const esOtroLado = (clave) => typeof clave === 'string' && clave.endsWith(SUFIJO_LADO);
 
+import { mapearTrazado, invertirTrazado } from './trazado.js';
+
 function espejarX(x, minX, maxX) {
   return minX + maxX - x;
 }
@@ -28,6 +30,7 @@ export function espejarGeometria(geo) {
   return {
     ...geo,
     poligonoMm: geo.poligonoMm.map(([x, y]) => [espejarX(x, minX, maxX), y]).reverse(),
+    ...(geo.trazadoMm ? { trazadoMm: invertirTrazado(mapearTrazado(geo.trazadoMm, ([x, y]) => [espejarX(x, minX, maxX), y])) } : {}),
     ...(geo.piquetesMm ? { piquetesMm: geo.piquetesMm.map((p) => ({ ...p, xMm: espejarX(p.xMm, minX, maxX) })) } : {}),
     ...(geo.salientesMm ? { salientesMm: geo.salientesMm.map((s) => ({ ...s, xMm: espejarX(s.xMm, minX, maxX) })) } : {}),
   };

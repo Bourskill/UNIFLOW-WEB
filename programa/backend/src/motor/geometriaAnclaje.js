@@ -39,6 +39,8 @@ function calcularExtremos(vertices) {
   return { arriba, abajo, izquierda, derecha };
 }
 
+import { mapearTrazado } from './trazado.js';
+
 function round3(n) { return Math.round(n * 1000) / 1000; }
 
 export function geometriaParaAnclaje(pieza, talla) {
@@ -84,6 +86,10 @@ export function geometriaParaAnclaje(pieza, talla) {
     nombre: pieza.nombre,
     pieza: { ancho_cm: dim.anchoCm, alto_cm: dim.altoCm },
     vertices,
+    // El trazado original del contorno (mismos nodos que el archivo, ver
+    // trazado.js), con la misma transformación que los vértices: es lo que
+    // se exporta. null en piezas importadas antes de guardarlo.
+    trazado: geo.trazadoMm ? mapearTrazado(geo.trazadoMm, ([x, y]) => [(x - minX) / 10, (maxY - y) / 10]) : null,
     extremos: calcularExtremos(vertices),
     piquetes,
     salientes,

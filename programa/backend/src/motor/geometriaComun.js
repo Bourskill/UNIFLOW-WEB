@@ -9,6 +9,7 @@
 // se descarta si está vacío (una forma sin nombre no puede ser una talla).
 
 import { piquetesPegadosDe, puntosNotablesDe } from './geometriaSalientes.js';
+import { normalizarTrazado, mapearTrazado } from './trazado.js';
 
 export function normalizarTalla(nombre) {
   const limpio = (nombre || '').trim();
@@ -93,7 +94,7 @@ export function contornoYPiquetesDeTrazos(trazos, mmPorUnidad) {
     const xs = puntosMm.map((p) => p[0]);
     const ys = puntosMm.map((p) => p[1]);
     const areaCajaMm2 = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
-    return { puntosMm, cerrado: t.cerrado, largoCm: largoDeTrazoMm(puntosMm, t.cerrado) / 10, areaCajaMm2 };
+    return { puntosMm, segmentos: t.segmentos, cerrado: t.cerrado, largoCm: largoDeTrazoMm(puntosMm, t.cerrado) / 10, areaCajaMm2 };
   });
 
   let contorno = conMedidas[0];
@@ -130,8 +131,13 @@ export function contornoYPiquetesDeTrazos(trazos, mmPorUnidad) {
   const anchoMm = Math.max(...xs) - Math.min(...xs);
   const altoMm = Math.max(...ys) - Math.min(...ys);
 
+  // El trazado ORIGINAL del contorno (sus mismos nodos y manejadores, ver
+  // trazado.js): es lo que se exporta. poligonoMm, tesselado, es para medir.
+  const trazadoMm = normalizarTrazado(mapearTrazado(contorno.segmentos, ([x, y]) => [x * mmPorUnidad, y * mmPorUnidad]));
+
   return {
     poligonoMm: contorno.puntosMm,
+    ...(trazadoMm ? { trazadoMm } : {}),
     boundingBoxMm: { anchoMm, altoMm },
     piquetesMm,
     // Los "giros" del contorno -- esquinas, picos -- para anclar más allá
