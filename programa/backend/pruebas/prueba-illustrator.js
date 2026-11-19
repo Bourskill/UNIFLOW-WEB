@@ -173,6 +173,32 @@ console.log('\n--- Arte original de Illustrator (efectos vivos) ---');
   comprobar('el documento de Illustrator lleva el arte original (y no su traducción)', conOriginal.includes(azul) && conOriginal.split(azul).length === traducido.split(azul).length);
 }
 
+console.log('\n--- Contorno láser con el trazo alineado por fuera ---');
+{
+  const conCorte = armarMesas([{ ...piezas[1], fondo: null, anchoCm: 10, altoCm: 6, contornoCm: cuadro(10, 6),
+    bordeContraste: { activo: true, colorHex: '#ff0000', grosorCm: 0.5, desplazamientoCm: 0.1 } }]);
+  const cortesLaser = [];
+  const pdfCorte = await generarPdfPaginas(conCorte, { cortesLaser });
+  const corte = cortesLaser[0]?.[0];
+  // Mesa de 12 × 8 cm, pieza a 1 cm del borde: el corte, 1 mm afuera de la pieza.
+  const xs = corte ? corte.puntos.map((q) => q.x / 28.3465) : [];
+  comprobar('el exportador guarda el corte exacto (1 mm afuera de la pieza)', corte && Math.abs(Math.min(...xs) - 0.9) < 1e-3 && Math.abs(Math.max(...xs) - 11.1) < 1e-3, xs.join(','));
+  // En el PDF el trazo va medio grosor más afuera (se ve como trazo por fuera).
+  const lector = await pdfjs.getDocument({ data: new Uint8Array(pdfCorte), verbosity: 0 }).promise;
+  const ops = await (await lector.getPage(1)).getOperatorList();
+  const iTrazo = ops.fnArray.findIndex((f, i) => f === pdfjs.OPS.constructPath && ops.argsArray[i][0] === pdfjs.OPS.stroke);
+  const datos = Array.from(ops.argsArray[iTrazo][1][0]);
+  const xTrazo = datos.filter((_, k) => k % 3 === 1).map((v) => v / 28.3465);
+  comprobar('en el PDF, el trazo se dibuja medio grosor más afuera', Math.abs(Math.min(...xTrazo) - 0.65) < 1e-3, xTrazo.join(','));
+  const t = textoDePartes(await documentoAiDePdf(pdfCorte, { cortesLaser }));
+  comprobar('en Illustrator: estilo de desplazamiento de trazo "Exterior", con su color y grosor',
+    t.includes('(Adobe Stroke Offset) 1 0 /Filter ,') && t.includes('(Exterior) /UnicodeString (DisplayString) ,') &&
+      t.includes('0 1 1 0 1 0 0 XA') && t.includes(' 14.1733 w 10 M'));
+  const nombre = t.match(/\n1 \((Anon [^)]+)\) XW\n/);
+  // El corte, 1 mm afuera de la pieza (que está a 1 cm del borde de la mesa): 0,9 cm = 25,5118 pt.
+  comprobar('el objeto del corte usa ese estilo, sobre el trazado exacto', nombre && t.includes('(' + nombre[1] + ') /Name ,') && /\n%_25\.511\d -?[\d.]+ L\n/.test(t), nombre && nombre[1]);
+}
+
 console.log('\n--- El PDF sigue siendo el mismo para todo lo demás ---');
 const lector = await pdfjs.getDocument({ data: new Uint8Array(bytes), verbosity: 0 }).promise;
 comprobar('mismas páginas', lector.numPages === 2);

@@ -1160,7 +1160,8 @@ router.post('/exportar-mesas/:id', async (req, res) => {
   const mesas = armarMesas(piezasDeMesas);
   // Los artes que traen su original de Illustrator (efectos vivos), página por página.
   const artesNativos = [];
-  let pdfBytes = await generarPdfPaginas(mesas, { artesNativos });
+  const cortesLaser = [];
+  let pdfBytes = await generarPdfPaginas(mesas, { artesNativos, cortesLaser });
   const titulo = (producto.nombre || 'produccion') + ' ' + pedido.lineas.map((l) => l.talla).join('-');
   // Con el documento de Illustrator adentro: lo abre como suyo (RGB, una
   // mesa con nombre por pieza, sin importar). Si eso fallara, sale igual
@@ -1170,6 +1171,7 @@ router.post('/exportar-mesas/:id', async (req, res) => {
     pdfBytes = await conDocumentoIllustrator(pdfBytes, {
       titulo,
       artesNativos,
+      cortesLaser,
       // Solo la pieza: Illustrator ya les pone su número adelante ("01 - ...").
       nombresDeMesas: mesas.map((m) => (variasTallas ? m.talla + ' · ' : '') + (m.piezas[0]?.piezaId || m.nombre)),
     });

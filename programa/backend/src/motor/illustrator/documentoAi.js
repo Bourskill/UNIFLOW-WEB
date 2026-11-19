@@ -31,8 +31,8 @@ const LIENZO_CENTRO = 8191.5;
 const BLOQUE = 65536;
 
 /** Devuelve el PDF con el documento de Illustrator adentro. */
-export async function conDocumentoIllustrator(bytesPdf, { nombresDeMesas = [], titulo = 'UNIFLOW', artesNativos = null } = {}) {
-  const partes = await documentoAiDePdf(bytesPdf, { nombresDeMesas, titulo, artesNativos });
+export async function conDocumentoIllustrator(bytesPdf, { nombresDeMesas = [], titulo = 'UNIFLOW', artesNativos = null, cortesLaser = null } = {}) {
+  const partes = await documentoAiDePdf(bytesPdf, { nombresDeMesas, titulo, artesNativos, cortesLaser });
   return incrustarDocumentoAi(bytesPdf, partes);
 }
 
@@ -111,7 +111,7 @@ function fechaPdf(d) {
 // ---------------------------------------------------------------------------
 // Traducir el PDF a texto .ai
 
-export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo = 'UNIFLOW', artesNativos = null } = {}) {
+export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo = 'UNIFLOW', artesNativos = null, cortesLaser = null } = {}) {
   const lector = await pdfjs.getDocument({
     data: new Uint8Array(bytesPdf), disableFontFace: true, fontExtraProperties: true,
     useSystemFonts: false, isEvalSupported: false, verbosity: 0,
@@ -146,7 +146,11 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
       if (!imagenes.has(id)) imagenes.set(id, await esperarObjeto(p.pagina, id));
     }
     const base = [1, 0, 0, 1, m.izq - p.origen[0], m.abajo - p.origen[1]];
-    const nativos = artesNativos ? { cola: [...(artesNativos[i] || [])], estilo: (nativo, nombre, escala) => estilosNativos.nombre(nativo, nombre, escala) } : null;
+    const nativos = artesNativos || cortesLaser ? {
+      cola: [...(artesNativos?.[i] || [])], cortes: [...(cortesLaser?.[i] || [])],
+      estilo: (nativo, nombre, escala) => estilosNativos.nombre(nativo, nombre, escala),
+      estiloCorte: (rgb, grosorPt) => estilosNativos.corteExterior(rgb, grosorPt),
+    } : null;
     const nodos = traducirPagina(ops, p.pagina, base, degradados, imagenes, textos, nativos);
     arte.push('u');
     for (const nodo of nodos) arte.push(nodo);
@@ -219,6 +223,7 @@ function traducirPagina(lista, pagina, base, degradados, imagenes, textos, nativ
   let e = estadoInicial(base);
   const pila = [];
   let recortePendiente = null;
+  let corteLaser = null;
   let texto = null; // { tm, tlm }
 
   const cerrarRecortesHasta = (n) => {
@@ -307,6 +312,10 @@ function traducirPagina(lista, pagina, base, degradados, imagenes, textos, nativ
       case OPS.setStrokeColorN: e.trazo = colorDePatron(a, e, imagenes) || e.trazo; break;
       case OPS.setFillTransparent: e.opacidadRelleno = 0; break;
       case OPS.setStrokeTransparent: e.opacidadTrazo = 0; break;
+      case OPS.beginMarkedContent:
+        if ((a?.[0]?.name ?? a?.[0]) === 'UniflowCorteLaser' && nativos?.cortes.length) corteLaser = nativos.cortes.shift();
+        break;
+      case OPS.endMarkedContent: corteLaser = null; break;
       case OPS.clip: recortePendiente = 'nonzero'; break;
       case OPS.eoClip: recortePendiente = 'evenodd'; break;
       case OPS.constructPath: {
@@ -314,7 +323,11 @@ function traducirPagina(lista, pagina, base, degradados, imagenes, textos, nativ
         const subcaminos = caminoDesde(datos?.[0], e.ctm);
         if (pintura !== OPS.endPath) {
           const obj = objetoCamino(subcaminos, pintura, e, degradados);
-          if (obj) meter(obj);
+          // El corte láser: su trazado exacto con el trazo alineado por fuera
+          // (estilo "Desplazamiento de trazo · Exterior", como lo guarda
+          // Illustrator), y lo que dibujó el PDF como vista previa.
+          if (obj && corteLaser) meter(corteExterior(obj, corteLaser, e.basePagina, nativos));
+          else if (obj) meter(obj);
         }
         if (recortePendiente) {
           const c = [];
@@ -851,8 +864,33 @@ function ascii85(buf) {
   return s.match(/.{1,100}/g);
 }
 
+function corteExterior(vista, corte, base, nativos) {
+  const puntos = corte.puntos.map((q) => aplicar(base, q.x, q.y));
+  const camino = ['%_' + n(puntos[0][0]) + ' ' + n(puntos[0][1]) + ' m'];
+  for (const [x, y] of [...puntos.slice(1), puntos[0]]) camino.push('%_' + n(x) + ' ' + n(y) + ' L');
+  const lineas = ['0 Ae', 'u', ...vista, 'U', '0 0 Xd', '6 () XW', ...camino, '%_n', '1 (' + nativos.estiloCorte(corte.color, corte.grosorPt) + ') XW'];
+  lineas.caja = vista.caja;
+  return lineas;
+}
+
 // Los efectos vivos de los artes originales, uno por arte y escala: el
 // mismo desenfoque en un diseño achicado a la mitad tiene la mitad de radio.
+const ESTILO_TRAZO_EXTERIOR = (nombre, color, grosor) => [
+  '(' + nombre + ') /Name ,', '/ActiveStyle :', '/CompoundFilter :', '(Chain Style Filter) 0 0 /Filter ,', '1 /Visible ,',
+  '/CompoundFilter :', '(Stack Style Filter) 0 0 /Filter ,', '1 /Visible ,',
+  '/BasicFilter :', '(Adobe Stroke Offset) 1 0 /Filter ,', '1 /Visible ,', '(StrokeOffset.aip) /PluginFileName ,',
+  '(Efecto din\\341mico de Desplazamiento de trazo) /Title ,', '2 /FillOrStroke ,', '/Dictionary : /NotRecorded ,',
+  '/StrokeStyle : 0 R', color + ' XA', '0 1 0 0 0 Xy', '0 J 1 j ' + grosor + ' w 10 M []0 d\r0 XR', '1 0 Xd',
+  '/Def ; ', ' (StrokeStyle) ,', '0 /Bool (StrokeOffsetInside) ,', '(Exterior) /UnicodeString (DisplayString) ,', '; /Dict ;', ' /Part ,',
+  '/BasicFilter :', '(Conduit Filter) 0 0 /Filter ,', '1 /Visible ,', ';', ' /Part ,',
+  '/BasicFilter :', '(Fill Style Filter) 0 0 /Filter ,', '1 /Visible ,', '/Dictionary : /NotRecorded ,',
+  '/FillStyle : 0 1 0 0 0 Xy', '0 J 0 j 1 w 10 M []0 d\r0 XR', '0 0 Xd', '/Def ; ', ' (FillStyle) ,', '0 /Bool (UseEvenOdd) ,', '; /Dict ;', ' /Part ,',
+  ';', ' /Part ,',
+  '/BasicFilter :', '(Blend Style Filter) 0 0 /Filter ,', '1 /Visible ,', '/Dictionary : /NotRecorded ,',
+  '/BlendStyle : 0 1 0 0 0 Xy', '0 J 0 j 1 w 10 M []0 d\r0 XR', '/Def ; ', ' (BlendStyle) ,', '; /Dict ;', ' /Part ,',
+  ';', '', '/Execution ;', ' /Def ;',
+];
+
 class EstilosNativos {
   constructor() { this.porClave = new Map(); }
   nombre(nativo, nombre, escala) {
@@ -872,6 +910,18 @@ class EstilosNativos {
     return def.nombre;
   }
   bloques() { return [...this.porClave.values()].map((d) => d.lineas); }
+  // El trazo por fuera del corte láser: el estilo que guarda Illustrator para
+  // "Alinear trazo: por fuera", con el color y el grosor del contorno.
+  corteExterior(rgb, grosorPt) {
+    const clave = 'corte@' + rgb.map((v) => v.toFixed(4)).join(',') + '@' + grosorPt.toFixed(4);
+    let def = this.porClave.get(clave);
+    if (!def) {
+      const nombre = 'Anon ' + randomBytes(8).toString('base64');
+      def = { nombre, lineas: ESTILO_TRAZO_EXTERIOR(nombre, colorAi(rgb), n(grosorPt)) };
+      this.porClave.set(clave, def);
+    }
+    return def.nombre;
+  }
 }
 
 // --- colores y degradados ---

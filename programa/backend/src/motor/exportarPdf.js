@@ -129,7 +129,7 @@ export async function generarPdfNesting(resultadoNesting) {
 // de una producción (motor/mesas.js): una página = una mesa de trabajo, que
 // Illustrator abre como una mesa por página. Fuentes y arte se incrustan una
 // sola vez para todo el documento.
-export async function generarPdfPaginas(paginas, { artesNativos } = {}) {
+export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } = {}) {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   const fuente = await pdf.embedFont(StandardFonts.Helvetica);
@@ -175,6 +175,7 @@ export async function generarPdfPaginas(paginas, { artesNativos } = {}) {
     const altoPt = resultadoNesting.altoLienzoCm * CM_A_PUNTOS;
     const pagina = pdf.addPage([anchoPt, altoPt]);
     if (artesNativos) { pagina.__artesNativos = []; artesNativos.push(pagina.__artesNativos); }
+    if (cortesLaser) { pagina.__cortesLaser = []; cortesLaser.push(pagina.__cortesLaser); }
     // La página se declara RGB (grupo de transparencia en DeviceRGB, igual
     // que los PDF de Illustrator): sin esto Illustrator abre el archivo como
     // documento CMYK y convierte los colores -- y es para sublimación, RGB.
@@ -264,14 +265,23 @@ export async function generarPdfPaginas(paginas, { artesNativos } = {}) {
       // corte falsa en el archivo. Sin él, se mantiene el rectángulo de
       // siempre (referencia visual del nesting, nunca fue un corte real).
       if (pieza.bordeContraste?.activo && pieza.contornoCm?.length >= 3) {
-        const desplazado = offsetPoligono(pieza.contornoCm, pieza.bordeContraste.desplazamientoCm || 0);
         const color = hexARgb(pieza.bordeContraste.colorHex);
-        const grosorPt = Math.max(pieza.bordeContraste.grosorCm || 0.03, 0.01) * CM_A_PUNTOS;
+        const grosorCm = Math.max(pieza.bordeContraste.grosorCm || 0.03, 0.01);
+        const grosorPt = grosorCm * CM_A_PUNTOS;
+        const desplazamientoCm = pieza.bordeContraste.desplazamientoCm || 0;
         // UN trazado cerrado (no segmentos sueltos): en Illustrator queda
         // como un solo path de corte, listo para el láser.
         const aPt = (v) => ({ x: xPt + v.x * CM_A_PUNTOS, y: yPt + altoRectPt - v.y * CM_A_PUNTOS });
-        const puntos = desplazado.map(aPt);
+        // El trazo va ALINEADO POR FUERA del corte (como "Alinear trazo: por
+        // fuera" de Illustrator): el trazado de corte queda en su lugar y el
+        // trazo crece hacia afuera. Un PDF solo sabe trazos centrados, así que
+        // acá se dibuja medio grosor más afuera (se ve igual); el documento de
+        // Illustrator lleva el corte exacto con su trazo por fuera.
+        const corte = offsetPoligono(pieza.contornoCm, desplazamientoCm).map(aPt);
+        const puntos = offsetPoligono(pieza.contornoCm, desplazamientoCm + grosorCm / 2).map(aPt);
+        pagina.__cortesLaser?.push({ puntos: corte, grosorPt, color: [color.r, color.g, color.b] });
         pagina.pushOperators(
+          PDFOperator.of('BMC', [PDFName.of('UniflowCorteLaser')]),
           pushGraphicsState(),
           setStrokingColor(rgb(color.r, color.g, color.b)),
           setLineWidth(grosorPt),
@@ -280,7 +290,8 @@ export async function generarPdfPaginas(paginas, { artesNativos } = {}) {
           ...puntos.slice(1).map((q) => lineTo(q.x, q.y)),
           closePath(),
           stroke(),
-          popGraphicsState()
+          popGraphicsState(),
+          PDFOperator.of('EMC', [])
         );
       } else {
         pagina.drawRectangle({
