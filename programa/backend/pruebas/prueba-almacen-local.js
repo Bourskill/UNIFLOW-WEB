@@ -93,8 +93,9 @@ console.log('\n--- Traerse los datos de la versión web ---');
   // Una "versión web" de mentira: su respaldo por colección y su Storage.
   const http = await import('node:http');
   const web = http.createServer((req, res) => {
-    // Como Supabase: la API pide clave, los archivos públicos no.
-    if (req.url.startsWith('/api/') && req.headers.authorization !== 'Bearer clave-web-correcta') { res.writeHead(401); return res.end('{}'); }
+    // Como el servidor real: /api/salud abierto; el resto de la API pide clave, los archivos públicos no.
+    if (req.url === '/api/salud') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{"ok":true}'); }
+    if (req.url.startsWith('/api/') &&req.headers.authorization !== 'Bearer clave-web-correcta') { res.writeHead(401); return res.end('{}'); }
     const m = req.url.match(/^\/api\/respaldo\/(\w+)$/);
     if (m) {
       const datos = {

@@ -41,6 +41,38 @@ function tallasSugeridas(piezas, cantidad) {
   return mejor;
 }
 
+// Los nombres de talla que trae el propio archivo (los grupos de cada capa en
+// Illustrator, ver backend illustrator/nombresDeTallas.js), de menor a mayor:
+// la lista que más piezas comparten.
+function tallasDelArchivo(piezas) {
+  const conteo = new Map();
+  for (const p of piezas) {
+    if (!p.nombresTallas?.length) continue;
+    const lista = [...p.nombresTallas].reverse().join(' ');
+    conteo.set(lista, (conteo.get(lista) || 0) + 1);
+  }
+  let mejor = '';
+  let veces = 0;
+  for (const [lista, n] of conteo) if (n > veces) { mejor = lista; veces = n; }
+  return mejor;
+}
+
+// Un PDF sin esos nombres solo trae los contornos. Si la
+// biblioteca todavía no tiene piezas con esa cantidad de tallas (una carpeta
+// nueva, por ejemplo), se ofrece la última lista que se usó para esa cantidad.
+const CLAVE_TALLAS_USADAS = 'uniflow.tallasPorCantidad';
+function tallasRecordadas(cantidad) {
+  try { return JSON.parse(localStorage.getItem(CLAVE_TALLAS_USADAS) || '{}')[cantidad] || ''; } catch { return ''; }
+}
+function recordarTallas(tallas) {
+  if (tallas.length < 2) return;
+  try {
+    const usadas = JSON.parse(localStorage.getItem(CLAVE_TALLAS_USADAS) || '{}');
+    usadas[tallas.length] = tallas.join(' ');
+    localStorage.setItem(CLAVE_TALLAS_USADAS, JSON.stringify(usadas));
+  } catch { /* sin almacenamiento: solo no se recuerda */ }
+}
+
 // La cantidad de tallas "de la prenda": la que más se repite entre las
 // piezas (las de un solo contorno son talla única y no cuentan).
 function cantidadDeTallasComun(piezas) {
@@ -97,7 +129,8 @@ export function ImportarPrenda({ archivo, onQuitar, onGuardado }) {
       setAnalisis(r);
       setFilas(r.piezas.map((p) => ({ incluir: p.tallas.length > 0, nombre: p.nombre })));
       setNombrePrenda(nuevo.name.replace(/\.pdf$/i, '').trim());
-      setTextoTallas(tallasSugeridas(biblioteca, cantidadDeTallasComun(r.piezas)));
+      const cantidad = cantidadDeTallasComun(r.piezas);
+      setTextoTallas(tallasDelArchivo(r.piezas) || tallasSugeridas(biblioteca, cantidad) || tallasRecordadas(cantidad));
       setEstado('listo');
     } catch (e) {
       setError(e.message);
@@ -161,6 +194,7 @@ export function ImportarPrenda({ archivo, onQuitar, onGuardado }) {
     setError(null);
     setGuardando(true);
     const preset = PRESETS_ANGULOS.find((p) => p.id === presetAngulos);
+    recordarTallas(tallas);
     const creadas = [];
     try {
       for (const f of incluidas) {

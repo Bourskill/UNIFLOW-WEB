@@ -71,8 +71,54 @@ function nombreLocal(url) {
   return ruta.replace(/[^a-z0-9_.-]/gi, '_').replace(/^\.+/, '') || 'archivo';
 }
 
-async function importar(origen, clave) {
-  const base = origen.replace(/\/+$/, '').replace(/\/api$/, '') + '/api';
+// ¿Esta dirección es el servidor? (responde /api/salud con JSON; Render puede
+// tardar en despertarse, de ahí la espera larga).
+async function esServidor(origen, esperaMs) {
+  try {
+    const r = await fetch(origen + '/api/salud', { signal: AbortSignal.timeout(esperaMs) });
+    return r.ok && (r.headers.get('content-type') || '').includes('json');
+  } catch {
+    return false;
+  }
+}
+
+// Se puede pegar la dirección de la PÁGINA (Netlify) o la del servidor
+// (Render): con la de la página, el servidor se busca adentro de su código,
+// que es donde la página tiene anotado a quién le pide los datos.
+export async function resolverServidor(direccion) {
+  const origen = direccion.trim().replace(/\/+$/, '').replace(/\/api$/, '');
+  if (await esServidor(origen, 8000)) return origen;
+  importacion && (importacion.paso = 'Buscando el servidor de la versión web');
+  let html = '';
+  try {
+    html = await (await fetch(origen + '/', { signal: AbortSignal.timeout(15000) })).text();
+  } catch {
+    throw new Error('No se pudo abrir ' + origen + '. Revisá la dirección y la conexión a internet.');
+  }
+  const scripts = [...html.matchAll(/<script[^>]+src=["']([^"']+\.js)["']/gi)].map((m) => new URL(m[1], origen + '/').href);
+  const propio = new URL(origen).host;
+  const candidatos = [];
+  for (const script of scripts.slice(0, 5)) {
+    const codigo = await (await fetch(script, { signal: AbortSignal.timeout(30000) })).text().catch(() => '');
+    for (const m of codigo.matchAll(/https:\/\/[a-z0-9.-]+\.[a-z]{2,}(?=[/"'`])/gi)) {
+      const url = m[0];
+      const host = new URL(url).host;
+      if (host === propio || candidatos.includes(url)) continue;
+      // Render primero: es donde vive el servidor de UNIFLOW.
+      if (/\.onrender\.com$/i.test(host)) candidatos.unshift(url); else candidatos.push(url);
+    }
+  }
+  for (const url of candidatos.slice(0, 12)) {
+    if (await esServidor(url, /\.onrender\.com$/i.test(url) ? 90000 : 5000)) return url;
+  }
+  throw new Error('No encontré el servidor de la versión web a partir de ' + origen + '. Pegá la dirección del servidor (la de Render).');
+}
+
+async function importar(direccion, clave) {
+  importacion.paso = 'Buscando el servidor de la versión web';
+  const origen = await resolverServidor(direccion);
+  importacion.servidor = origen;
+  const base = origen + '/api';
   const encabezados = { Authorization: 'Bearer ' + clave };
   const pedirColeccion = async (nombre) => {
     let r = await fetch(base + '/respaldo/' + nombre, { headers: encabezados });

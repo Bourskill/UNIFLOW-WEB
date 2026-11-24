@@ -6,6 +6,16 @@ import { Boton, Input, Aviso, Campo } from './ui.jsx';
 // ser una compartida con otras PCs) y permite traerse todo lo que hay en la
 // versión web. La primera vez, con la carpeta vacía, se abre sola.
 const CLAVE_NO_PREGUNTAR = 'uniflow.escritorio.noImportar';
+const CLAVE_DIRECCION = 'uniflow.escritorio.direccionWeb';
+
+function leerLocal(clave) {
+  try { return localStorage.getItem(clave) || ''; } catch { return ''; }
+}
+// "uniflow-mold.netlify.app" sin https:// también sirve.
+function direccionCompleta(texto) {
+  const t = texto.trim();
+  return !t || /^https?:\/\//i.test(t) ? t : 'https://' + t;
+}
 
 export function CarpetaEscritorio() {
   const [abierto, setAbierto] = useState(false);
@@ -37,7 +47,7 @@ export function CarpetaEscritorio() {
 }
 
 function VentanaCarpeta({ carpeta, onCerrar }) {
-  const [origen, setOrigen] = useState('');
+  const [origen, setOrigen] = useState(() => leerLocal(CLAVE_DIRECCION));
   const [clave, setClave] = useState('');
   const [estado, setEstado] = useState(null);
   const [error, setError] = useState(null);
@@ -48,12 +58,16 @@ function VentanaCarpeta({ carpeta, onCerrar }) {
   async function empezar() {
     setError(null);
     try {
-      setEstado(await importarDesdeWeb(origen.trim(), clave));
+      setEstado(await importarDesdeWeb(direccionCompleta(origen), clave));
       sondeo.current = setInterval(async () => {
         const e = await estadoImportacion().catch(() => null);
         if (!e) return;
         setEstado(e);
         if (e.estado !== 'trabajando') clearInterval(sondeo.current);
+        // La próxima vez, la dirección ya está puesta (la del servidor encontrado).
+        if (e.estado === 'listo' && e.servidor) {
+          try { localStorage.setItem(CLAVE_DIRECCION, e.servidor); } catch { /* sin almacenamiento */ }
+        }
       }, 700);
     } catch (e) {
       setError(e.message);
@@ -84,9 +98,12 @@ function VentanaCarpeta({ carpeta, onCerrar }) {
             Copia a esta carpeta todo lo que hay en la versión web (con sus archivos). Lo que ya esté en la carpeta con el
             mismo nombre se reemplaza por lo de la web.
           </p>
-          <Campo etiqueta="Dirección del servidor web">
-            <Input value={origen} onChange={(e) => setOrigen(e.target.value)} placeholder="https://….onrender.com" disabled={trabajando} />
+          <Campo etiqueta="Dirección de la versión web">
+            <Input value={origen} onChange={(e) => setOrigen(e.target.value)} placeholder="uniflow-….netlify.app" disabled={trabajando} />
           </Campo>
+          <p className="-mt-2 text-xs text-faint-foreground">
+            La misma con la que entrás desde el navegador: el servidor se encuentra solo.
+          </p>
           <Campo etiqueta="Clave de la versión web">
             <Input type="password" value={clave} onChange={(e) => setClave(e.target.value)} disabled={trabajando} autoComplete="off" />
           </Campo>
@@ -122,7 +139,7 @@ function VentanaCarpeta({ carpeta, onCerrar }) {
           {listo ? (
             <Boton variante="primario" onClick={() => window.location.reload()}>Abrir con los datos nuevos</Boton>
           ) : (
-            <Boton variante="primario" disabled={trabajando || !/^https?:\/\//.test(origen.trim()) || !clave} onClick={empezar}>
+            <Boton variante="primario" disabled={trabajando || !origen.trim() || !clave} onClick={empezar}>
               {trabajando ? 'Trayendo…' : 'Traer los datos'}
             </Boton>
           )}

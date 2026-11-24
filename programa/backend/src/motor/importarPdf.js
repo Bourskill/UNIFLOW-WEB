@@ -22,6 +22,8 @@
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { asignarTallasPorNombre, contornoYPiquetesDeTrazos } from './geometriaComun.js';
 import { separarTallasAnidadas } from './tallasAnidadas.js';
+import { leerDocumentoAi } from './illustrator/arteNativo.js';
+import { gruposPorCapa, nombresDeTallasDeCapa } from './illustrator/nombresDeTallas.js';
 
 const PT_A_MM = 25.4 / 72;
 
@@ -292,17 +294,22 @@ export async function resolverGeometriasPorTalla(bufferPdf, mapaTallaAIndice) {
  * taller ya tiene armadas sus molderías. Es la otra cara del importador de
  * arriba (una pieza por archivo, una capa por talla).
  *
- * El archivo no nombra las tallas: cada pieza vuelve con sus contornos de
- * MAYOR a MENOR, y el nombre de cada talla lo pone el usuario (ver
- * tallasAnidadas.js).
+ * El PDF común no nombra las tallas: cada pieza vuelve con sus contornos de
+ * MAYOR a MENOR. Si el archivo se guardó desde Illustrator conservando su
+ * edición, cada talla es un grupo (o subcapa) con nombre ("XS", "S"…), y
+ * esos nombres vuelven en `nombresTallas` (mismo orden que los contornos).
+ * Si no, el nombre de cada talla lo pone el usuario (ver tallasAnidadas.js).
  *
  * @param {Buffer} bufferPdf
  */
 export async function analizarPrendaPdf(bufferPdf) {
   const candidatos = await extraerCandidatosPdf(bufferPdf);
+  const textoAi = await leerDocumentoAi(new Uint8Array(bufferPdf));
+  const grupos = textoAi ? gruposPorCapa(textoAi) : new Map();
   const piezas = candidatos.map((c) => {
     const { tallas, lineasIgnoradas, piquetesSinContorno } = separarTallasAnidadas(c.trazos, PT_A_MM);
-    return { nombre: c.nombre, tallas, lineasIgnoradas, piquetesSinContorno };
+    const nombresTallas = nombresDeTallasDeCapa(grupos, c.nombre, tallas.length, pareceNombreDeTalla);
+    return { nombre: c.nombre, tallas, lineasIgnoradas, piquetesSinContorno, ...(nombresTallas ? { nombresTallas } : {}) };
   });
   return { piezas, mmPorUnidad: PT_A_MM };
 }
