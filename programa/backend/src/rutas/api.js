@@ -1110,6 +1110,8 @@ async function anidarPedido({ pedidoId, anchoLienzoCm, separacionCm }) {
 // pantalla si el pedido no cambió entre medio. Guarda el registro de
 // generación pieza por pieza para poder hacer reposición más adelante sin
 // rehacer el lote completo.
+const LIMITE_LIENZO_ILLUSTRATOR_CM = 570;
+
 router.post('/nesting/generar', async (req, res) => {
   let resultadoNesting;
   try {
@@ -1118,7 +1120,31 @@ router.post('/nesting/generar', async (req, res) => {
     return responderError(res, error);
   }
 
-  const pdfBytes = await generarPdfNesting(resultadoNesting);
+  // El PDF de impresión, con su copia editable de Illustrator adentro (como
+  // el de las mesas): texto editable, arte original con efectos vivos,
+  // corte láser con el trazo por fuera. Un fallo acá responde con un error
+  // claro en vez de cortar la conexión (el "Failed to fetch" del navegador).
+  let pdfBytes;
+  try {
+    const artesNativos = [];
+    const cortesLaser = [];
+    pdfBytes = await generarPdfNesting(resultadoNesting, { artesNativos, cortesLaser });
+    // El lienzo de Illustrator mide 16383 pt (5,78 m) por lado: un rollo más
+    // largo no entra en un documento de Illustrator común y sale como PDF
+    // solo (se abre igual, sin la copia editable).
+    if (resultadoNesting.anchoLienzoCm <= LIMITE_LIENZO_ILLUSTRATOR_CM && resultadoNesting.altoLienzoCm <= LIMITE_LIENZO_ILLUSTRATOR_CM) {
+      try {
+        pdfBytes = await conDocumentoIllustrator(pdfBytes, {
+          titulo: 'Pedido', nombresDeMesas: ['Rollo'], artesNativos, cortesLaser,
+        });
+      } catch (error) {
+        console.error('No se pudo agregar el documento de Illustrator al pedido: ' + error.message);
+      }
+    }
+  } catch (error) {
+    console.error('[api] PDF del pedido', error);
+    return res.status(500).json({ error: 'No se pudo armar el PDF del pedido: ' + error.message });
+  }
 
   const generacion = {
     id: nanoid(),

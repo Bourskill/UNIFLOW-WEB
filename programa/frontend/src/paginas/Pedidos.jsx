@@ -1,437 +1,601 @@
-import { useEffect, useState } from 'react';
-import {
-  crearPedido,
-  editarPedido,
-  eliminarPedido,
-  anidarDesdePedido,
-  generarPdf,
-} from '../api.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { crearPedido, editarPedido, eliminarPedido, anidarDesdePedido, generarPdf } from '../api.js';
 import { obtener } from '../datos/index.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
+import { leerHoja, filasDeTexto, interpretarJugadores } from '../utilidades/hojaDeCalculo.js';
 
-// Las tallas válidas para un pedido son las que tienen TODAS las piezas del
-// grupo del producto -- no una lista fija (XS/S/M/L/XL/XXL en mayúscula):
-// una pieza real puede traer sus tallas numéricas o en minúscula (ver
-// tallaDeTrabajoPorDefecto en Productos.jsx, mismo problema, mismo fix).
-// Antes esta pantalla mostraba SIEMPRE "M" (mayúscula, de la lista fija) y
-// resolverPedido.js fallaba con "no tiene dimensión cargada para la talla M"
-// aunque la pieza sí tuviera "m" -- el error era real, pero la causa era el
-// desajuste de mayúsculas, no una pieza mal cargada.
-// grupoIds (kit multi-prenda) o el viejo grupoId singular -- un producto
-// puede combinar varias prendas, así que la intersección se calcula sobre
-// TODAS las piezas de TODOS sus grupos juntos, no solo uno.
+// Producción → Pedidos: el pedido real de un equipo (talla + nombre + número
+// por jugador), cargado a mano, desde una planilla o pegado de Excel, y desde
+// acá se arma el rollo de impresión (nesting) y su PDF editable.
+
+// --- datos de las prendas ----------------------------------------------------
+
 function gruposDelProducto(producto, grupos) {
   if (!producto) return [];
-  const idsGrupos = producto.grupoIds || (producto.grupoId ? [producto.grupoId] : []);
-  return idsGrupos.map((id) => grupos.find((g) => g.id === id)).filter(Boolean);
+  const ids = producto.grupoIds || (producto.grupoId ? [producto.grupoId] : []);
+  return ids.map((id) => grupos.find((g) => g.id === id)).filter(Boolean);
 }
 
+// Las tallas que tienen TODAS las piezas de la producción (las de talla única
+// sirven para cualquiera).
 function tallasDelProducto(productoId, productos, grupos, piezas) {
   const producto = productos.find((p) => p.id === productoId);
-  const gp = gruposDelProducto(producto, grupos).flatMap((g) => g.piezas);
-  if (gp.length === 0) return [];
-  const conjuntos = gp
+  const conjuntos = gruposDelProducto(producto, grupos)
+    .flatMap((g) => g.piezas)
     .map((x) => piezas.find((p) => p.id === x.piezaId))
-    // Una pieza de talla única (ej. tapacuellos) sirve para cualquier talla:
-    // no achica la lista de tallas posibles.
     .filter((p) => p && !p.tallaUnica)
     .map((p) => new Set(Object.keys(p.dimensionesPorTalla || {})));
   if (conjuntos.length === 0) return [];
-  const interseccion = [...conjuntos[0]].filter((t) => conjuntos.every((s) => s.has(t)));
-  return ordenarTallasNatural(interseccion);
+  return ordenarTallasNatural([...conjuntos[0]].filter((t) => conjuntos.every((s) => s.has(t))));
 }
 
-// Cuando un kit multi-prenda da una intersección de tallas VACÍA, "sin
-// talla" a secas no dice si el problema es que a una pieza puntual le
-// falta cargar una talla, o que las prendas combinadas de verdad no tienen
-// ninguna en común -- este diagnóstico nombra EXACTAMENTE qué prenda/pieza
-// le falta la talla más cercana a estar completa (pedido explícito: mostrar
-// qué prenda no tiene esa talla, no solo "sin talla"). No aplica a un
-// producto de una sola prenda -- ahí "sin talla" ya es lo suficientemente
-// claro (esa única prenda no tiene ninguna talla en común entre SUS piezas).
+// Si un kit de varias prendas no tiene ninguna talla en común, dice qué pieza
+// le falta la talla más cercana a estar completa.
 function diagnosticoSinTallaComun(productoId, productos, grupos, piezas) {
-  const producto = productos.find((p) => p.id === productoId);
-  const gruposDelProd = gruposDelProducto(producto, grupos);
-  if (gruposDelProd.length <= 1) return null;
-
-  const piezasConGrupo = gruposDelProd
-    .flatMap((g) => g.piezas.map((gp) => ({ grupoNombre: g.nombre, rol: gp.rol, pieza: piezas.find((p) => p.id === gp.piezaId) })))
-    .filter((x) => x.pieza);
-  const todasLasTallas = new Set();
-  for (const { pieza } of piezasConGrupo) {
-    for (const t of Object.keys(pieza.dimensionesPorTalla || {})) todasLasTallas.add(t);
-  }
-  if (todasLasTallas.size === 0) return 'Ninguna de las prendas combinadas tiene ninguna talla cargada todavía.';
-
+  const gs = gruposDelProducto(productos.find((p) => p.id === productoId), grupos);
+  if (gs.length <= 1) return null;
+  const conGrupo = gs.flatMap((g) => g.piezas.map((gp) => ({ g: g.nombre, rol: gp.rol, pieza: piezas.find((p) => p.id === gp.piezaId) })))
+    .filter((x) => x.pieza && !x.pieza.tallaUnica);
+  const todas = new Set(conGrupo.flatMap((x) => Object.keys(x.pieza.dimensionesPorTalla || {})));
   let mejor = null;
-  for (const talla of todasLasTallas) {
-    const sinEsta = piezasConGrupo.filter(({ pieza }) => !pieza.dimensionesPorTalla?.[talla]);
-    if (!mejor || sinEsta.length < mejor.sinEsta.length) mejor = { talla, sinEsta };
+  for (const t of todas) {
+    const faltan = conGrupo.filter((x) => !x.pieza.dimensionesPorTalla?.[t]);
+    if (!mejor || faltan.length < mejor.faltan.length) mejor = { t, faltan };
   }
-  if (!mejor || mejor.sinEsta.length === 0) return null; // no debería pasar si la intersección ya dio vacía, pero por las dudas
-  return 'Ninguna talla está cargada en las ' + gruposDelProd.length + ' prendas combinadas -- ejemplo: la talla ' +
-    mejor.talla.toUpperCase() + ' falta en ' + mejor.sinEsta.map((x) => x.grupoNombre + ' · ' + x.rol).join(', ') + '.';
+  if (!mejor?.faltan.length) return null;
+  return 'Por ejemplo, la talla ' + mejor.t.toUpperCase() + ' falta en ' + mejor.faltan.map((x) => x.g + ' · ' + x.rol).join(', ') + '.';
 }
 
-function lineaVacia(productoId, talla) {
-  return { id: crypto.randomUUID(), productoId, talla: talla || '', nombre: '', numero: '', piezasExcluidas: [] };
+// Las piezas que se pueden sacar de una prenda puntual (clave = lo que espera resolverPedido.js).
+function rolesDelProducto(productoId, productos, grupos) {
+  const grupos2 = gruposDelProducto(productos.find((p) => p.id === productoId), grupos);
+  const varias = grupos2.length > 1;
+  return grupos2.flatMap((g) => g.piezas.map((gp) => ({
+    clave: varias ? g.id + '::' + gp.rol : gp.rol,
+    etiqueta: varias ? g.nombre + ' · ' + gp.rol : gp.rol,
+  })));
 }
+
+function nuevaLinea(productoId, talla = '', extra = {}) {
+  return { id: crypto.randomUUID(), productoId, talla, nombre: '', numero: '', piezasExcluidas: [], ...extra };
+}
+
+function resumenPorTalla(lineas) {
+  const cuenta = new Map();
+  for (const l of lineas) cuenta.set(l.talla || '?', (cuenta.get(l.talla || '?') || 0) + 1);
+  return ordenarTallasNatural([...cuenta.keys()].filter((t) => t !== '?')).map((t) => [t, cuenta.get(t)])
+    .concat(cuenta.has('?') ? [['?', cuenta.get('?')]] : []);
+}
+
+// --- página -----------------------------------------------------------------
 
 export function Pedidos({ recargarSenal }) {
-  const [productos, setProductos] = useState([]);
-  const [grupos, setGrupos] = useState([]);
-  const [piezas, setPiezas] = useState([]);
-  const [pedidos, setPedidos] = useState([]);
-  const [cliente, setCliente] = useState('');
-  const [lineas, setLineas] = useState([]);
-  const [error, setError] = useState(null);
-  // Con id, el formulario de arriba (mismo para crear y editar) está
-  // modificando ESE pedido en vez de armar uno nuevo -- ver editar()/guardar().
-  const [editandoId, setEditandoId] = useState(null);
-
-  const [pedidoParaGenerar, setPedidoParaGenerar] = useState(null);
-  const [anchoLienzoCm, setAnchoLienzoCm] = useState(160);
-  const [resultado, setResultado] = useState(null);
-  const [cargando, setCargando] = useState(false);
-  const [errorGenerar, setErrorGenerar] = useState(null);
-  // Ver el comentario igual en Piezas.jsx -- distinto de `cargando` de
-  // arriba (ese es el de "generando el nesting", ya existía). Sin esto, la
-  // primera visita mostraba "Creá primero un producto (Diseño → Productos)"
-  // mientras el fetch inicial seguía en vuelo, aunque ya hubiera productos.
-  const [cargandoInicial, setCargandoInicial] = useState(true);
+  const [datos, setDatos] = useState({ productos: [], grupos: [], piezas: [], pedidos: [] });
+  const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState(null);
+  const [busqueda, setBusqueda] = useState('');
+  // El pedido abierto: { id (null = nuevo), cliente, productoId, lineas }.
+  const [abierto, setAbierto] = useState(null);
+  const [imprimiendo, setImprimiendo] = useState(null); // id del pedido en "Imprimir"
 
   async function recargar() {
-    setCargandoInicial(true);
     setErrorCarga(null);
     try {
-      const [ps, gs, pzs, peds] = await Promise.all([obtener('productos'), obtener('grupos'), obtener('piezas'), obtener('pedidos')]);
-      setProductos(ps);
-      setGrupos(gs);
-      setPiezas(pzs);
-      setPedidos(peds);
-      if (ps.length > 0 && lineas.length === 0) {
-        setLineas([lineaVacia(ps[0].id, tallasDelProducto(ps[0].id, ps, gs, pzs)[0])]);
-      }
+      const [productos, grupos, piezas, pedidos] = await Promise.all(['productos', 'grupos', 'piezas', 'pedidos'].map((c) => obtener(c)));
+      setDatos({ productos, grupos, piezas, pedidos });
     } catch (e) {
       setErrorCarga(e.message);
     } finally {
-      setCargandoInicial(false);
+      setCargando(false);
     }
   }
-
   useEffect(() => {
     recargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recargarSenal]);
 
-  function actualizarLinea(id, cambios) {
-    setLineas((prev) => prev.map((l) => (l.id === id ? { ...l, ...cambios } : l)));
+  const { productos, pedidos } = datos;
+  const lista = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    const todos = pedidos.slice().reverse();
+    if (!q) return todos;
+    return todos.filter((p) => (p.cliente || '').toLowerCase().includes(q) ||
+      (p.lineas || []).some((l) => (l.nombre || '').toLowerCase().includes(q)));
+  }, [pedidos, busqueda]);
+
+  function nuevo() {
+    const productoId = productos[0]?.id || '';
+    setAbierto({ id: null, cliente: '', productoId, lineas: [] });
+    setImprimiendo(null);
+  }
+  function abrir(pedido) {
+    const productoId = pedido.lineas?.[0]?.productoId || productos[0]?.id || '';
+    setAbierto({ id: pedido.id, cliente: pedido.cliente, productoId, lineas: pedido.lineas || [] });
+    setImprimiendo(null);
+  }
+  async function borrar(pedido) {
+    if (!window.confirm('¿Eliminar el pedido de «' + pedido.cliente + '»? No se puede deshacer.')) return;
+    await eliminarPedido(pedido.id);
+    if (abierto?.id === pedido.id) setAbierto(null);
+    if (imprimiendo === pedido.id) setImprimiendo(null);
+    await recargar();
   }
 
-  function alternarPiezaExcluida(id, rol) {
-    setLineas((prev) =>
-      prev.map((l) => {
-        if (l.id !== id) return l;
-        const excluidas = l.piezasExcluidas.includes(rol)
-          ? l.piezasExcluidas.filter((r) => r !== rol)
-          : [...l.piezasExcluidas, rol];
-        return { ...l, piezasExcluidas: excluidas };
-      })
-    );
+  if (cargando) return <p className="text-sm text-muted-foreground">Cargando…</p>;
+  if (errorCarga) return <ErrorCarga mensaje={errorCarga} onReintentar={recargar} />;
+  if (productos.length === 0) return <p className="text-sm text-muted-foreground">Primero armá una producción en Diseño.</p>;
+
+  return (
+    <div className="pagina flex flex-col gap-6">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="mr-auto">
+          <h2 className="text-lg font-semibold">Pedidos</h2>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Cada pedido es la lista de jugadores de un equipo: talla, nombre y número. Cargala a mano, desde una
+            planilla o pegándola de Excel, y después armá el rollo de impresión.
+          </p>
+        </div>
+        <Boton variante="primario" onClick={nuevo}>+ Nuevo pedido</Boton>
+      </div>
+
+      {abierto && (
+        <EditorPedido
+          key={abierto.id || 'nuevo'}
+          inicial={abierto}
+          datos={datos}
+          onCerrar={() => setAbierto(null)}
+          onGuardado={async (id, { imprimir }) => {
+            await recargar();
+            setAbierto(null);
+            if (imprimir) setImprimiendo(id);
+          }}
+        />
+      )}
+
+      {imprimiendo && (
+        <PanelImprimir
+          key={imprimiendo}
+          pedido={pedidos.find((p) => p.id === imprimiendo)}
+          onCerrar={() => setImprimiendo(null)}
+        />
+      )}
+
+      <section className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">
+            {pedidos.length === 0 ? 'Sin pedidos todavía' : pedidos.length + (pedidos.length === 1 ? ' pedido' : ' pedidos')}
+          </h3>
+          {pedidos.length > 0 && (
+            <Input className="ml-auto w-64" placeholder="Buscar equipo o jugador" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+          )}
+        </div>
+        {pedidos.length === 0 ? (
+          <Tarjeta className="flex flex-col items-start gap-2 text-sm text-muted-foreground">
+            Todavía no cargaste ningún pedido.
+            <Boton variante="acento" onClick={nuevo}>Cargar el primero</Boton>
+          </Tarjeta>
+        ) : (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
+            {lista.map((p) => (
+              <TarjetaPedido key={p.id} pedido={p} productos={productos} activo={abierto?.id === p.id || imprimiendo === p.id}
+                onEditar={() => abrir(p)} onImprimir={() => { setImprimiendo(p.id); setAbierto(null); }} onEliminar={() => borrar(p)} />
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function TarjetaPedido({ pedido, productos, activo, onEditar, onImprimir, onEliminar }) {
+  const lineas = pedido.lineas || [];
+  const nombresProd = [...new Set(lineas.map((l) => productos.find((p) => p.id === l.productoId)?.nombre).filter(Boolean))];
+  return (
+    <Tarjeta className={'flex flex-col gap-3 ' + (activo ? 'border-primary' : '')}>
+      <div>
+        <div className="font-semibold">{pedido.cliente || 'Sin nombre'}</div>
+        <div className="text-xs text-faint-foreground">
+          {lineas.length} {lineas.length === 1 ? 'prenda' : 'prendas'}{nombresProd.length ? ' · ' + nombresProd.join(', ') : ''}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {resumenPorTalla(lineas).map(([t, n]) => (
+          <Chip key={t} tono={t === '?' ? 'peligro' : 'neutro'} className="uppercase">{t} × {n}</Chip>
+        ))}
+      </div>
+      <div className="mt-auto flex items-center gap-2 border-t border-border pt-2">
+        <Boton variante="acento" tamano="sm" onClick={onImprimir} disabled={lineas.length === 0}>Imprimir</Boton>
+        <Boton tamano="sm" onClick={onEditar}>Editar</Boton>
+        <Boton variante="fantasma" tamano="sm" className="ml-auto" onClick={onEliminar}>Eliminar</Boton>
+      </div>
+    </Tarjeta>
+  );
+}
+
+// --- editor -------------------------------------------------------------------
+
+function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
+  const { productos, grupos, piezas } = datos;
+  const [cliente, setCliente] = useState(inicial.cliente);
+  const [productoId, setProductoId] = useState(inicial.productoId);
+  const [lineas, setLineas] = useState(inicial.lineas);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState(null);
+  const [importando, setImportando] = useState(null); // { jugadores, avisos, origen }
+  const [pegando, setPegando] = useState(false);
+  const entradaArchivo = useRef(null);
+  const tablaFinal = useRef(null);
+
+  const tallasDe = (id) => tallasDelProducto(id, productos, grupos, piezas);
+  const tallasPorDefecto = tallasDe(productoId);
+  const variosProductos = productos.length > 1;
+  const conPiezasExcluibles = lineas.some((l) => l.piezasExcluidas?.length);
+  const [verPiezas, setVerPiezas] = useState(conPiezasExcluibles);
+
+  const actualizar = (id, cambios) => setLineas((prev) => prev.map((l) => (l.id === id ? { ...l, ...cambios } : l)));
+  function agregar() {
+    setLineas((prev) => [...prev, nuevaLinea(productoId, prev[prev.length - 1]?.talla || tallasPorDefecto[0] || '')]);
+    setTimeout(() => tablaFinal.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30);
+  }
+  function cambiarProductoDelPedido(id) {
+    // Las líneas que usaban la producción anterior pasan a la nueva (con su talla, si existe ahí).
+    const nuevas = tallasDe(id);
+    setLineas((prev) => prev.map((l) => (l.productoId === productoId
+      ? { ...l, productoId: id, piezasExcluidas: [], talla: nuevas.includes(l.talla) ? l.talla : '' }
+      : l)));
+    setProductoId(id);
   }
 
-  function agregarLinea() {
-    const productoId = productos[0]?.id;
-    setLineas((prev) => [...prev, lineaVacia(productoId, tallasDelProducto(productoId, productos, grupos, piezas)[0])]);
-  }
-
-  function quitarLinea(id) {
-    setLineas((prev) => prev.filter((l) => l.id !== id));
-  }
-
-  // clave: lo que de verdad se guarda en linea.piezasExcluidas -- tiene que
-  // matchear EXACTO el pieza.nombre interno que usa resolverPedido.js
-  // (namespaceado grupoId::rol en un kit de varias prendas, rol crudo en
-  // una sola -- dominio/resolverGrupo.js·resolverPiezasDeGrupos). etiqueta:
-  // lo que se le muestra al usuario, siempre legible.
-  function rolesDelProducto(productoId) {
-    const producto = productos.find((p) => p.id === productoId);
-    const gruposDelProd = gruposDelProducto(producto, grupos);
-    const namespacear = gruposDelProd.length > 1;
-    return gruposDelProd.flatMap((grupo) =>
-      grupo.piezas.map((gp) => ({
-        clave: namespacear ? grupo.id + '::' + gp.rol : gp.rol,
-        etiqueta: namespacear ? grupo.nombre + ' · ' + gp.rol : gp.rol,
-      }))
-    );
-  }
-
-  async function guardar(evento) {
-    evento.preventDefault();
+  async function leerArchivo(archivo) {
     setError(null);
-    if (!cliente.trim() || lineas.length === 0) {
-      setError('Falta el nombre del cliente/equipo o no hay ninguna prenda cargada.');
-      return;
-    }
     try {
-      if (editandoId) await editarPedido(editandoId, { cliente, lineas });
-      else await crearPedido({ cliente, lineas });
-      setCliente('');
-      setEditandoId(null);
-      setLineas(
-        productos.length > 0
-          ? [lineaVacia(productos[0].id, tallasDelProducto(productos[0].id, productos, grupos, piezas)[0])]
-          : []
-      );
-      await recargar();
+      const filas = await leerHoja(archivo.name, new Uint8Array(await archivo.arrayBuffer()));
+      const r = interpretarJugadores(filas, tallasPorDefecto);
+      if (r.jugadores.length === 0) throw new Error('La planilla no tiene jugadores (revisá que tenga columnas de nombre, talla y número).');
+      setImportando({ ...r, origen: archivo.name });
     } catch (e) {
       setError(e.message);
     }
   }
+  function leerPegado(texto) {
+    const r = interpretarJugadores(filasDeTexto(texto), tallasPorDefecto);
+    if (r.jugadores.length === 0) { setError('No encontré jugadores en lo que pegaste.'); return; }
+    setPegando(false);
+    setImportando({ ...r, origen: 'lo que pegaste' });
+  }
+  function sumarImportados(reemplazar) {
+    const nuevas = importando.jugadores.map((j) => nuevaLinea(productoId, j.talla, { nombre: j.nombre, numero: j.numero }));
+    setLineas((prev) => (reemplazar ? nuevas : [...prev, ...nuevas]));
+    setImportando(null);
+  }
 
-  function editar(pedido) {
-    setEditandoId(pedido.id);
-    setCliente(pedido.cliente);
-    setLineas(pedido.lineas);
+  const sinTalla = lineas.filter((l) => !l.talla).length;
+  async function guardar(imprimir) {
     setError(null);
-  }
-
-  function cancelarEdicion() {
-    setEditandoId(null);
-    setCliente('');
-    setLineas(
-      productos.length > 0
-        ? [lineaVacia(productos[0].id, tallasDelProducto(productos[0].id, productos, grupos, piezas)[0])]
-        : []
-    );
-    setError(null);
-  }
-
-  async function borrar(id) {
-    await eliminarPedido(id);
-    if (pedidoParaGenerar === id) setPedidoParaGenerar(null);
-    if (editandoId === id) cancelarEdicion();
-    await recargar();
-  }
-
-  async function anidar() {
-    setErrorGenerar(null);
-    setResultado(null);
-    setCargando(true);
+    if (!cliente.trim()) { setError('Poné el nombre del equipo o cliente.'); return; }
+    if (lineas.length === 0) { setError('El pedido no tiene ningún jugador.'); return; }
+    if (sinTalla) { setError(sinTalla === 1 ? 'Hay 1 jugador sin talla.' : 'Hay ' + sinTalla + ' jugadores sin talla.'); return; }
+    setGuardando(true);
     try {
-      const parametros = { pedidoId: pedidoParaGenerar, anchoLienzoCm: Number(anchoLienzoCm) };
-      const datos = await anidarDesdePedido(parametros.pedidoId, parametros.anchoLienzoCm);
-      // El PDF lo arma el servidor de nuevo con ESTOS mismos parámetros, no
-      // con lo que haya en los inputs al apretar "Generar PDF".
-      setResultado({ ...datos, parametros });
+      const datosPedido = { cliente: cliente.trim(), lineas };
+      const r = inicial.id ? await editarPedido(inicial.id, datosPedido) : await crearPedido(datosPedido);
+      await onGuardado(r?.id || inicial.id, { imprimir });
     } catch (e) {
-      setErrorGenerar(e.message);
+      setError(e.message);
     } finally {
-      setCargando(false);
-    }
-  }
-
-  async function descargarPdf() {
-    if (!resultado) return;
-    setErrorGenerar(null);
-    try {
-      await generarPdf(resultado.parametros.pedidoId, resultado.parametros.anchoLienzoCm);
-    } catch (e) {
-      setErrorGenerar(e.message);
+      setGuardando(false);
     }
   }
 
   return (
-    <div className="pagina flex flex-col gap-6">
-      <div>
-        <h2 className="text-lg font-semibold">Pedidos</h2>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Un pedido real es talla + nombre + número por prenda — es lo que hace falta para
-          personalizar de verdad, no solo cantidad por talla.
-        </p>
+    <Tarjeta className="flex flex-col gap-4 border-primary/40">
+      <div className="flex flex-wrap items-start gap-3">
+        <h3 className="mr-auto text-sm font-semibold">{inicial.id ? 'Editando el pedido' : 'Nuevo pedido'}</h3>
+        <Boton variante="fantasma" tamano="sm" onClick={onCerrar}>Cerrar</Boton>
       </div>
 
-      {cargandoInicial ? (
-        <p className="text-sm text-muted-foreground">Cargando…</p>
-      ) : errorCarga ? (
-        <ErrorCarga mensaje={errorCarga} onReintentar={recargar} />
-      ) : productos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Creá primero una producción (en Diseño).</p>
-      ) : (
-        <Tarjeta as="form" onSubmit={guardar} className="flex max-w-2xl flex-col gap-4">
-          {editandoId && (
-            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Editando pedido existente</p>
-          )}
-          <Campo etiqueta="Cliente / equipo">
-            <Input value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Club Atlético X" />
-          </Campo>
-
-          <div>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground">
-              Prendas del pedido
-            </h3>
-            <div className="flex flex-col gap-2">
-              {lineas.map((linea) => {
-                const roles = rolesDelProducto(linea.productoId);
-                const tallas = tallasDelProducto(linea.productoId, productos, grupos, piezas);
-                return (
-                  <div key={linea.id} className="rounded-lg border border-border bg-surface-muted p-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Select
-                        className="max-w-[160px]"
-                        value={linea.productoId}
-                        onChange={(e) => {
-                          const nuevasTallas = tallasDelProducto(e.target.value, productos, grupos, piezas);
-                          actualizarLinea(linea.id, {
-                            productoId: e.target.value,
-                            piezasExcluidas: [],
-                            talla: nuevasTallas.includes(linea.talla) ? linea.talla : nuevasTallas[0] || '',
-                          });
-                        }}
-                      >
-                        {productos.map((p) => (
-                          <option key={p.id} value={p.id}>{p.nombre}</option>
-                        ))}
-                      </Select>
-                      <Select
-                        className="max-w-[80px]"
-                        value={linea.talla}
-                        onChange={(e) => actualizarLinea(linea.id, { talla: e.target.value })}
-                      >
-                        {tallas.length === 0 && <option value="">— sin talla —</option>}
-                        {tallas.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
-                      </Select>
-                      {tallas.length === 0 && (() => {
-                        const diagnostico = diagnosticoSinTallaComun(linea.productoId, productos, grupos, piezas);
-                        return diagnostico ? <span className="text-xs text-danger">{diagnostico}</span> : null;
-                      })()}
-                      <Input
-                        className="max-w-[140px]"
-                        placeholder="Nombre"
-                        value={linea.nombre}
-                        onChange={(e) => actualizarLinea(linea.id, { nombre: e.target.value.toUpperCase() })}
-                      />
-                      <Input
-                        className="max-w-[70px]"
-                        placeholder="N°"
-                        value={linea.numero}
-                        onChange={(e) => actualizarLinea(linea.id, { numero: e.target.value })}
-                      />
-                      <Boton variante="fantasma" tamano="sm" type="button" onClick={() => quitarLinea(linea.id)}>
-                        Quitar
-                      </Boton>
-                    </div>
-
-                    {roles.length > 0 && (
-                      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border pt-2">
-                        <span className="text-xs text-faint-foreground">Excluir piezas de esta prenda puntual:</span>
-                        {roles.map(({ clave, etiqueta }) => {
-                          const activo = linea.piezasExcluidas.includes(clave);
-                          return (
-                            <label key={clave} className="cursor-pointer">
-                              <input
-                                type="checkbox"
-                                className="peer sr-only"
-                                checked={activo}
-                                onChange={() => alternarPiezaExcluida(linea.id, clave)}
-                              />
-                              <Chip tono={activo ? 'peligro' : 'neutro'}>{etiqueta}</Chip>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <Boton type="button" onClick={agregarLinea}>+ Agregar prenda</Boton>
-            <Boton variante="primario" type="submit">{editandoId ? 'Guardar cambios' : 'Guardar pedido'}</Boton>
-            {editandoId && (
-              <Boton variante="fantasma" type="button" onClick={cancelarEdicion}>Cancelar edición</Boton>
-            )}
-          </div>
-          {error && <Aviso tono="error">{error}</Aviso>}
-        </Tarjeta>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo etiqueta="Equipo / cliente">
+          <Input value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Club Atlético X" autoFocus={!inicial.id} />
+        </Campo>
+        <Campo etiqueta="Producción">
+          <Select value={productoId} onChange={(e) => cambiarProductoDelPedido(e.target.value)}>
+            {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </Select>
+        </Campo>
+      </div>
+      {tallasPorDefecto.length === 0 && (
+        <Aviso tono="error">
+          Esa producción no tiene ninguna talla con todas sus piezas cargadas (revisá la prenda en Moldería).{' '}
+          {diagnosticoSinTallaComun(productoId, productos, grupos, piezas)}
+        </Aviso>
       )}
 
-      <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint-foreground">
-          Pedidos cargados
-        </h3>
-        {cargandoInicial ? (
-          <p className="text-sm text-muted-foreground">Cargando…</p>
-        ) : errorCarga ? (
-          <p className="text-sm text-danger">No se pudieron leer los pedidos (ver el error de arriba).</p>
-        ) : pedidos.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Todavía no hay ninguno.</p>
-        ) : (
-          <div className="flex max-w-2xl flex-col gap-2">
-            {pedidos.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
-                <div className="flex-1">
-                  <span className="font-medium">{p.cliente}</span>{' '}
-                  <span className="text-muted-foreground">
-                    — {p.lineas.length} prenda(s):{' '}
-                    {p.lineas.map((l) =>
-                      (l.talla || '').toUpperCase() + ' ' + l.nombre + '/' + l.numero +
-                      // piezasExcluidas puede traer la clave namespaceada
-                      // (grupoId::rol) de un kit multi-prenda -- acá alcanza
-                      // con el rol crudo (después del "::"), sin resolver
-                      // el nombre de cada prenda, para un resumen compacto.
-                      (l.piezasExcluidas?.length ? ' (sin ' + l.piezasExcluidas.map((c) => c.split('::').pop()).join(', ') + ')' : '')
-                    ).join(', ')}
-                  </span>
-                </div>
-                <Boton variante="secundario" tamano="sm" onClick={() => { setPedidoParaGenerar(p.id); setResultado(null); }}>
-                  Generar
-                </Boton>
-                <Boton tamano="sm" onClick={() => editar(p)}>Editar</Boton>
-                <Boton variante="fantasma" tamano="sm" onClick={() => borrar(p.id)}>Eliminar</Boton>
-              </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Boton onClick={agregar}>+ Jugador</Boton>
+        <Boton onClick={() => entradaArchivo.current?.click()}>Cargar planilla…</Boton>
+        <Boton variante="fantasma" onClick={() => setPegando((v) => !v)}>Pegar desde Excel</Boton>
+        <input ref={entradaArchivo} type="file" className="hidden"
+          accept=".csv,.tsv,.txt,.xlsx,.xlsm,.ods,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet"
+          onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ''; if (a) leerArchivo(a); }} />
+        <label className="ml-auto flex items-center gap-1.5 text-xs text-faint-foreground">
+          <input type="checkbox" checked={verPiezas} onChange={(e) => setVerPiezas(e.target.checked)} />
+          Sacar piezas por jugador
+        </label>
+      </div>
+      <p className="-mt-2 text-xs text-faint-foreground">
+        La planilla puede ser .xlsx, .ods o .csv, con columnas <b>Nombre</b>, <b>Talla</b> y <b>Número</b> (en cualquier orden;
+        sin títulos se toman en ese orden). Prendas sin nombre o sin número: dejá esa celda vacía.
+      </p>
+
+      {pegando && <PegarLista onListo={leerPegado} onCancelar={() => setPegando(false)} />}
+      {importando && (
+        <VistaImportacion importacion={importando} hayLineas={lineas.length > 0} onSumar={sumarImportados} onCancelar={() => setImportando(null)} />
+      )}
+
+      {lineas.length > 0 ? (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead className="bg-surface-muted text-left text-xs text-faint-foreground">
+              <tr>
+                <th className="w-10 px-3 py-2 font-medium">#</th>
+                {variosProductos && <th className="px-2 py-2 font-medium">Producción</th>}
+                <th className="w-24 px-2 py-2 font-medium">Talla</th>
+                <th className="px-2 py-2 font-medium">Nombre</th>
+                <th className="w-24 px-2 py-2 font-medium">Número</th>
+                <th className="w-10 px-2 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {lineas.map((l, i) => {
+                const tallas = tallasDe(l.productoId);
+                const roles = verPiezas ? rolesDelProducto(l.productoId, productos, grupos) : [];
+                return [
+                  <tr key={l.id} className="border-t border-border">
+                    <td className="px-3 py-1.5 text-xs text-faint-foreground">{i + 1}</td>
+                    {variosProductos && (
+                      <td className="px-2 py-1.5">
+                        <Select className="h-8 text-xs" value={l.productoId} onChange={(e) => {
+                          const nuevas = tallasDe(e.target.value);
+                          actualizar(l.id, { productoId: e.target.value, piezasExcluidas: [], talla: nuevas.includes(l.talla) ? l.talla : '' });
+                        }}>
+                          {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                        </Select>
+                      </td>
+                    )}
+                    <td className="px-2 py-1.5">
+                      <Select className={'h-8 ' + (l.talla ? '' : 'border-danger text-danger')} value={l.talla} onChange={(e) => actualizar(l.id, { talla: e.target.value })}>
+                        {!l.talla && <option value="">—</option>}
+                        {tallas.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                      </Select>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <Input className="h-8" placeholder="(sin nombre)" value={l.nombre} onChange={(e) => actualizar(l.id, { nombre: e.target.value.toUpperCase() })} />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <Input className="h-8" placeholder="(sin n°)" value={l.numero} onChange={(e) => actualizar(l.id, { numero: e.target.value })} />
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <button type="button" aria-label={'Quitar la fila ' + (i + 1)} className="rounded px-1.5 text-faint-foreground hover:bg-danger-soft hover:text-danger"
+                        onClick={() => setLineas((prev) => prev.filter((x) => x.id !== l.id))}>×</button>
+                    </td>
+                  </tr>,
+                  roles.length > 0 && (
+                    <tr key={l.id + '-p'} className="bg-surface-muted/40">
+                      <td />
+                      <td colSpan={variosProductos ? 5 : 4} className="px-2 pb-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs text-faint-foreground">No lleva:</span>
+                          {roles.map(({ clave, etiqueta }) => {
+                            const fuera = (l.piezasExcluidas || []).includes(clave);
+                            return (
+                              <button key={clave} type="button" aria-pressed={fuera} onClick={() => actualizar(l.id, {
+                                piezasExcluidas: fuera ? l.piezasExcluidas.filter((r) => r !== clave) : [...(l.piezasExcluidas || []), clave],
+                              })}>
+                                <Chip tono={fuera ? 'peligro' : 'neutro'}>{etiqueta}</Chip>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                  ),
+                ];
+              })}
+            </tbody>
+          </table>
+          <div ref={tablaFinal} />
+        </div>
+      ) : (
+        <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+          Todavía no hay jugadores. Agregalos de a uno, cargá una planilla o pegalos desde Excel.
+        </p>
+      )}
+
+      {lineas.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-faint-foreground">
+          <span className="font-semibold">{lineas.length} {lineas.length === 1 ? 'prenda' : 'prendas'}:</span>
+          {resumenPorTalla(lineas).map(([t, n]) => (
+            <Chip key={t} tono={t === '?' ? 'peligro' : 'neutro'} className="uppercase">{t === '?' ? 'sin talla' : t} × {n}</Chip>
+          ))}
+        </div>
+      )}
+
+      {error && <Aviso tono="error">{error}</Aviso>}
+      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+        <Boton variante="primario" disabled={guardando} onClick={() => guardar(false)}>{guardando ? 'Guardando…' : 'Guardar pedido'}</Boton>
+        <Boton variante="acento" disabled={guardando} onClick={() => guardar(true)}>Guardar e imprimir</Boton>
+        <Boton variante="fantasma" className="ml-auto" onClick={onCerrar}>Cancelar</Boton>
+      </div>
+    </Tarjeta>
+  );
+}
+
+function PegarLista({ onListo, onCancelar }) {
+  const [texto, setTexto] = useState('');
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-muted p-3">
+      <span className="text-xs text-faint-foreground">
+        Copiá las celdas en Excel o Google Sheets (con o sin la fila de títulos) y pegalas acá.
+      </span>
+      <textarea className="min-h-[120px] rounded-md border border-border bg-surface p-2 font-mono text-xs" autoFocus
+        placeholder={'Nombre\tTalla\tNúmero\nPEÑA\tM\t10'} value={texto} onChange={(e) => setTexto(e.target.value)} />
+      <div className="flex gap-2">
+        <Boton variante="primario" tamano="sm" disabled={!texto.trim()} onClick={() => onListo(texto)}>Revisar</Boton>
+        <Boton variante="fantasma" tamano="sm" onClick={onCancelar}>Cancelar</Boton>
+      </div>
+    </div>
+  );
+}
+
+function VistaImportacion({ importacion, hayLineas, onSumar, onCancelar }) {
+  const { jugadores, avisos, origen } = importacion;
+  const sinTalla = jugadores.filter((j) => !j.talla).length;
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary-soft/20 p-3">
+      <div className="text-sm">
+        <b>{jugadores.length}</b> {jugadores.length === 1 ? 'jugador' : 'jugadores'} en {origen}
+        {sinTalla > 0 && <span className="text-danger"> · {sinTalla} sin talla válida (se agregan igual, para que la elijas)</span>}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {resumenPorTalla(jugadores).map(([t, n]) => <Chip key={t} tono={t === '?' ? 'peligro' : 'neutro'} className="uppercase">{t === '?' ? 'sin talla' : t} × {n}</Chip>)}
+      </div>
+      <div className="max-h-48 overflow-y-auto rounded border border-border bg-surface text-xs">
+        <table className="w-full">
+          <tbody>
+            {jugadores.map((j) => (
+              <tr key={j.fila} className="border-t border-border first:border-t-0">
+                <td className="w-12 px-2 py-1 text-faint-foreground">fila {j.fila}</td>
+                <td className={'w-16 px-2 py-1 uppercase ' + (j.talla ? '' : 'text-danger')}>{j.talla || j.tallaLeida || '—'}</td>
+                <td className="px-2 py-1">{j.nombre || <span className="text-faint-foreground">(sin nombre)</span>}</td>
+                <td className="w-16 px-2 py-1">{j.numero || <span className="text-faint-foreground">—</span>}</td>
+              </tr>
             ))}
-          </div>
+          </tbody>
+        </table>
+      </div>
+      {avisos.length > 0 && (
+        <details className="text-xs text-danger">
+          <summary className="cursor-pointer">{avisos.length === 1 ? '1 aviso' : avisos.length + ' avisos'}</summary>
+          <ul className="mt-1 list-disc pl-5">{avisos.map((a, i) => <li key={i}>{a.mensaje}</li>)}</ul>
+        </details>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {hayLineas ? (
+          <>
+            <Boton variante="primario" tamano="sm" onClick={() => onSumar(false)}>Agregar al final</Boton>
+            <Boton tamano="sm" onClick={() => onSumar(true)}>Reemplazar la lista</Boton>
+          </>
+        ) : (
+          <Boton variante="primario" tamano="sm" onClick={() => onSumar(true)}>Cargar estos jugadores</Boton>
+        )}
+        <Boton variante="fantasma" tamano="sm" onClick={onCancelar}>Descartar</Boton>
+      </div>
+    </div>
+  );
+}
+
+// --- imprimir -------------------------------------------------------------------
+
+const ANCHOS_COMUNES = [150, 160, 180];
+
+function PanelImprimir({ pedido, onCerrar }) {
+  const [ancho, setAncho] = useState(160);
+  const [resultado, setResultado] = useState(null);
+  const [armando, setArmando] = useState(false);
+  const [descargando, setDescargando] = useState(false);
+  const [error, setError] = useState(null);
+  if (!pedido) return null;
+
+  async function armar() {
+    setError(null);
+    setResultado(null);
+    setArmando(true);
+    try {
+      const r = await anidarDesdePedido(pedido.id, Number(ancho));
+      setResultado({ ...r, ancho: Number(ancho) });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setArmando(false);
+    }
+  }
+  async function descargar() {
+    setError(null);
+    setDescargando(true);
+    try {
+      // El servidor vuelve a armar el rollo con el MISMO ancho (no lo que haya en el campo ahora).
+      await generarPdf(pedido.id, resultado.ancho);
+    } catch (e) {
+      setError(e.message === 'Failed to fetch'
+        ? 'Se cortó la conexión con el servidor mientras armaba el PDF (puede ser un rollo muy pesado). Probá de nuevo; si sigue, probá con menos prendas.'
+        : e.message);
+    } finally {
+      setDescargando(false);
+    }
+  }
+
+  const avisos = resultado?.advertencias || [];
+  return (
+    <Tarjeta className="flex flex-col gap-4 border-primary/40">
+      <div className="flex items-start gap-3">
+        <div className="mr-auto">
+          <h3 className="text-sm font-semibold">Imprimir «{pedido.cliente}»</h3>
+          <p className="text-xs text-faint-foreground">{pedido.lineas.length} prendas · todas las piezas acomodadas en un rollo, listo para sublimar.</p>
+        </div>
+        <Boton variante="fantasma" tamano="sm" onClick={onCerrar}>Cerrar</Boton>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-semibold text-faint-foreground">1 · Ancho del rollo</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {ANCHOS_COMUNES.map((a) => (
+            <button key={a} type="button" aria-pressed={Number(ancho) === a} onClick={() => { setAncho(a); setResultado(null); }}
+              className={'rounded-lg border px-3 py-1.5 text-sm font-medium ' + (Number(ancho) === a ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary/50')}>
+              {a} cm
+            </button>
+          ))}
+          <Input type="number" className="w-24" min={20} value={ancho} onChange={(e) => { setAncho(e.target.value); setResultado(null); }} aria-label="Otro ancho en cm" />
+          <span className="text-xs text-faint-foreground">cm</span>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-semibold text-faint-foreground">2 · Armar el rollo</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <Boton variante="primario" disabled={armando || !(Number(ancho) > 0)} onClick={armar}>{armando ? 'Acomodando las piezas…' : resultado ? 'Volver a armar' : 'Armar el rollo'}</Boton>
+          {resultado && (
+            <span className="text-sm text-muted-foreground">
+              {resultado.anchoLienzoCm} × {resultado.altoLienzoCm} cm · aprovechamiento {resultado.utilizacion}%
+            </span>
+          )}
+        </div>
+        {avisos.length > 0 && (
+          <details className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+            <summary className="cursor-pointer text-amber-300">
+              {avisos.length === 1 ? '1 cosa para revisar' : avisos.length + ' cosas para revisar'} antes de imprimir (no frenan nada)
+            </summary>
+            <ul className="mt-2 list-disc pl-5 text-foreground/90">{avisos.map((a, i) => <li key={i}>{a.mensaje}</li>)}</ul>
+          </details>
         )}
       </div>
 
-      {pedidoParaGenerar && (
-        <Tarjeta className="flex max-w-2xl flex-col gap-3">
-          <h4 className="text-sm font-semibold">
-            Generar: {pedidos.find((p) => p.id === pedidoParaGenerar)?.cliente}
-          </h4>
-          <Campo etiqueta="Ancho del lienzo/rollo (cm)" className="max-w-[160px]">
-            <Input type="number" value={anchoLienzoCm} onChange={(e) => setAnchoLienzoCm(e.target.value)} />
-          </Campo>
-          <div className="flex gap-2">
-            <Boton variante="primario" onClick={anidar} disabled={cargando}>
-              {cargando ? 'Anidando…' : 'Anidar'}
-            </Boton>
-            <Boton onClick={descargarPdf} disabled={!resultado}>Generar PDF</Boton>
-          </div>
-          {errorGenerar && <Aviso tono="error">{errorGenerar}</Aviso>}
-          {resultado && (
-            <p className="text-sm text-muted-foreground">
-              Lienzo {resultado.anchoLienzoCm}×{resultado.altoLienzoCm} cm · utilización {resultado.utilizacion}%
-            </p>
-          )}
-          {/* Lo que conviene revisar ANTES de imprimir: un texto que no cabe en
-              su zona, o con letras que su fuente no trae (backend:
-              ajusteTexto.js·advertenciasDeTextos). No bloquea nada. */}
-          {resultado?.advertencias?.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              {resultado.advertencias.map((a, i) => <Aviso key={i} tono="error">{a.mensaje}</Aviso>)}
-            </div>
-          )}
-        </Tarjeta>
-      )}
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-semibold text-faint-foreground">3 · PDF de impresión</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <Boton variante="acento" disabled={!resultado || descargando} onClick={descargar}>
+            {descargando ? 'Armando el PDF…' : 'Descargar PDF'}
+          </Boton>
+          <span className="text-xs text-faint-foreground">
+            {resultado ? 'Se abre en Illustrator como documento propio: texto editable y efectos vivos.' : 'Primero armá el rollo.'}
+          </span>
+        </div>
+      </div>
 
+      {error && <Aviso tono="error">{error}</Aviso>}
       {resultado && <VistaPreviaNesting resultado={resultado} />}
-    </div>
+    </Tarjeta>
   );
 }

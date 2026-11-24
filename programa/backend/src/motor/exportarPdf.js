@@ -145,8 +145,8 @@ function operadoresDeTrazado(t) {
 }
 
 // El PDF de un nesting: una sola página (el lienzo) con todas las piezas.
-export async function generarPdfNesting(resultadoNesting) {
-  return generarPdfPaginas([resultadoNesting]);
+export async function generarPdfNesting(resultadoNesting, opciones = {}) {
+  return generarPdfPaginas([resultadoNesting], opciones);
 }
 
 // Varias páginas en un mismo PDF -- cada una { anchoLienzoCm, altoLienzoCm,

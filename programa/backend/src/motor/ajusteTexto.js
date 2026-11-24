@@ -436,6 +436,9 @@ export function advertenciasDeTextos(piezas) {
       // Un número se sale por los costados a propósito (manda su alto); solo
       // se avisa cuando el desborde ya es grande -- un dato fuera de lo común
       // para esa zona, que conviene mirar antes de imprimir.
+      // La talla va en su cápsula, que crece con la letra (capsulaTalla.js):
+      // que la letra pase el ancho de su zona es lo esperado, no un error.
+      if (t.capsula) continue;
       if (t.modo === 'calibrado' && a.desbordeAnchoCm > t.anchoCm * DESBORDE_NUMERO_AVISO) {
         avisos.push({ tipo: 'desborda-ancho', pieza: donde, texto: a.texto, mensaje: donde + ': el número «' + a.texto + '» mide ' + a.tintaCm.ancho.toFixed(1) + ' cm de ancho y su zona ' + t.anchoCm.toFixed(1) + ' cm -- se sale bastante por los costados; revisalo antes de imprimir.' });
       }
