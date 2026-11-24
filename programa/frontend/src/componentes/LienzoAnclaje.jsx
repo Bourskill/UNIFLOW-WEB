@@ -855,14 +855,15 @@ export function LienzoAnclaje({
   }
 
   // Un punto del lienzo (cm) como punto del arte (u, v en fracción de la
-  // imagen), más el de su espejo horizontal respecto del centro de la pieza.
+  // imagen), más el de su espejo horizontal respecto del centro del ARTE: con
+  // el par enganchado a nodos simétricos del molde, el centro del diseño cae
+  // justo en el centro de la pieza (el diseño nunca se descentra).
   function marcarEnArte(p) {
     if (!onMarcarEnArte || !rectArteActual.current) return;
     const ra = rectArteActual.current;
     const u = (p.x - ra.x) / ra.ancho, v = (p.y - ra.y) / ra.alto;
     if (u < 0 || u > 1 || v < 0 || v > 1) return; // fuera del diseño
-    const uEspejo = (geo.pieza.ancho_cm - p.x - ra.x) / ra.ancho;
-    onMarcarEnArte({ u: Math.min(Math.max(u, 0), 1), v, uEspejo: Math.min(Math.max(uEspejo, 0), 1) });
+    onMarcarEnArte({ u, v, uEspejo: 1 - u });
   }
 
   // ---- soltar una imagen encima del molde ---------------------------------

@@ -36,7 +36,7 @@ import { normalizarAjusteArte, anclasDeCalce, conCalceResuelto, idAnclaDeCalce }
 import {
   firmaEditor, haySinGuardar, puedeGuardarseSolo, guardarBorrador, leerBorrador, borrarBorrador, borradorParaOfrecer, haceCuanto,
 } from '../utilidades/borradorDiseno.js';
-import { LienzoAnclaje, COLOR } from '../componentes/LienzoAnclaje.jsx';
+import { LienzoAnclaje, COLOR, candidatosDe } from '../componentes/LienzoAnclaje.jsx';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
 
 const BORDE_POR_DEFECTO = { activo: false, colorHex: '#000000', grosorCm: 0.03, desplazamientoCm: 0 };
@@ -742,10 +742,35 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     return id;
   }
 
+  // El nodo del molde que queda en el lugar simétrico de `cand` (reflejado
+  // respecto del centro de la pieza), si hay uno ahí; si no, null.
+  function nodoSimetrico(cand) {
+    if (!geoActiva) return null;
+    const W = geoActiva.pieza.ancho_cm;
+    const objetivo = { x: W - cand.x, y: cand.y };
+    if (Math.abs(objetivo.x - cand.x) < 0.5) return null; // está sobre el centro: es su propio espejo
+    const tolerancia = Math.max(0.5, W * 0.02);
+    let mejor = null, distancia = Infinity;
+    for (const c of candidatosDe(geoActiva, [], null, { piquetes: true, extremos: true, bordes: true, vertices: true, zonas: false })) {
+      // A igual distancia, uno de la misma clase (piquete con piquete, vértice con vértice).
+      const d = Math.hypot(c.x - objetivo.x, c.y - objetivo.y) + (c.clase === cand.clase ? 0 : 0.05);
+      if (d < distancia) { distancia = d; mejor = c; }
+    }
+    return mejor && distancia <= tolerancia ? mejor : null;
+  }
+
   function elegirCandidato(cand) {
     if (modo === 'calceDestino' && calceDestinoId) {
       const destino = { x: { ref: cand.ref, modo: 'fijo', valor: 0 }, y: { ref: cand.ref, modo: 'fijo', valor: 0 } };
-      const lista = puntosCalceDe(piezaActiva).map((p) => (p.id === calceDestinoId ? { ...p, destino } : p));
+      let lista = puntosCalceDe(piezaActiva).map((p) => (p.id === calceDestinoId ? { ...p, destino } : p));
+      // Los moldes son simétricos: el espejo de este punto se engancha solo
+      // al nodo del otro lado (así el arte no se corre y queda centrado).
+      const punto = lista.find((p) => p.id === calceDestinoId);
+      const espejo = nodoSimetrico(cand);
+      if (punto?.par && espejo) {
+        const destinoEspejo = { x: { ref: espejo.ref, modo: 'fijo', valor: 0 }, y: { ref: espejo.ref, modo: 'fijo', valor: 0 } };
+        lista = lista.map((p) => (p.id === punto.par && p.par === punto.id ? { ...p, destino: destinoEspejo } : p));
+      }
       ponerPuntosCalce(piezaActiva, lista);
       // Sigue con el próximo punto sin enganchar (el espejo recién creado).
       const siguiente = lista.find((p) => !p.destino);
