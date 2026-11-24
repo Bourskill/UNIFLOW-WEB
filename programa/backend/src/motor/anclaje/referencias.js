@@ -207,6 +207,18 @@ function puntoMasCercanoDelContorno(vs, p) {
   return mejor;
 }
 
+// Visto en producción (espalda femenina, 2XL en adelante): la MISMA cantidad
+// de extremos, pero el orden por ángulo cambió con la forma de la pieza -- el
+// nº 4 de la XL (la sisa) es en la 2XL un punto del cuello. Que coincida la
+// cuenta no alcanza: si el rasgo con ese número está lejos de donde se marcó
+// el ancla, se busca por posición, igual que si hubiera cambiado la cuenta.
+function seCorrioElOrden(lista, ref) {
+  if (typeof ref.rx !== "number" || typeof ref.ry !== "number") return false;
+  var r = lista[ref.indice];
+  if (!r || typeof r.rx !== "number" || typeof r.ry !== "number") return false;
+  return distanciaRel(r, ref) > TOLERANCIA_REL;
+}
+
 function avisoDeEmparejado(queEs, ref, indice, total, distancia) {
   return "se emparejó por posición con el " + queEs + " " + (indice + 1) + " de " + total +
          " (se puso sobre el " + ((ref.indice || 0) + 1) + " de " + ref.total + ", y está a " +
@@ -304,7 +316,7 @@ function resolverReferencia(ref, ctx) {
                      "contorno no da la vuelta en ningún sitio marcado.");
       }
       var iSl = ref.indice, avisoSl = null;
-      if (typeof ref.total === "number" && ref.total !== sl.length) {
+      if ((typeof ref.total === "number" && ref.total !== sl.length) || seCorrioElOrden(sl, ref)) {
         var emSl = emparejarPorPosicion(sl, ref, "extremo", nombrePieza);
         if (!emSl.ok) return porPosicionRelativa(geo, ref, "extremo", nombrePieza, emSl.texto) || emSl;
         iSl = emSl.indice;
@@ -333,7 +345,7 @@ function resolverReferencia(ref, ctx) {
         return fallo("La pieza «" + nombrePieza + "» no tiene piquetes reconocibles en esta talla.");
       }
       var iPq = ref.indice, avisoPq = null;
-      if (typeof ref.total === "number" && ref.total !== ps.length) {
+      if ((typeof ref.total === "number" && ref.total !== ps.length) || seCorrioElOrden(ps, ref)) {
         var emPq = emparejarPorPosicion(ps, ref, "piquete", nombrePieza);
         if (!emPq.ok) return porPosicionRelativa(geo, ref, "piquete", nombrePieza, emPq.texto) || emPq;
         iPq = emPq.indice;

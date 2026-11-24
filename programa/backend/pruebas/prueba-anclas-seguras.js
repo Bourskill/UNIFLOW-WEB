@@ -48,6 +48,25 @@ console.log('\n--- El piquete no está en esta talla ---');
   comprobar('un ancla vieja sin posición guardada sigue diciendo que no puede', !viejo.ok);
 }
 
+console.log('\n--- Misma cantidad, pero el orden cambió con la talla ---');
+{
+  // Espalda femenina: en la XL el extremo nº 4 es la sisa izquierda; en la
+  // 2XL, con la misma cantidad (8), el nº 4 es un punto del cuello.
+  const geo = (W, H, rel) => ({
+    pieza: { ancho_cm: W, alto_cm: H },
+    vertices: [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: H }, { x: 0, y: H }],
+    salientes: rel.map(([rx, ry]) => ({ x: rx * W, y: ry * H, rx, ry })),
+  });
+  const xl = [[0, 0.99], [1, 0.99], [1, 0.34], [0, 0.34], [0.88, 0.05], [0.66, 0], [0.35, 0.02], [0.12, 0.05]];
+  const dosXl = [[0, 0.99], [1, 0.99], [1, 0.34], [0.88, 0.05], [0, 0.34], [0.66, 0], [0.35, 0.02], [0.12, 0.05]];
+  const sisaIzq = { tipo: 'saliente', indice: 3, total: 8, rx: 0, ry: 0.34 };
+  const enXl = resolverReferencia(sisaIzq, { geometria: { P: geo(54.6, 72.7, xl) }, pieza: 'P' });
+  const en2xl = resolverReferencia(sisaIzq, { geometria: { P: geo(56.6, 74.2, dosXl) }, pieza: 'P' });
+  comprobar('en la XL, por número, sin aviso', enXl.ok && cerca(enXl.punto.x, 0) && !enXl.aviso);
+  comprobar('en la 2XL sigue siendo la sisa, no el cuello (antes: el diseño se iba)', en2xl.ok && cerca(en2xl.punto.x, 0) && cerca(en2xl.punto.y, 0.34 * 74.2, 1e-6), JSON.stringify(en2xl.punto));
+  comprobar('y avisa que se emparejó por posición', en2xl.ok && /emparej/.test(en2xl.aviso || ''));
+}
+
 console.log('\n--- Lo que ya andaba, igual ---');
 {
   const r = resolverEn(pieza(78, 58.9, [[0.539, 0.996], [0.539, 0.058]]));

@@ -79,6 +79,7 @@ export function Pedidos({ recargarSenal }) {
   // El pedido abierto: { id (null = nuevo), cliente, productoId, lineas }.
   const [abierto, setAbierto] = useState(null);
   const [imprimiendo, setImprimiendo] = useState(null); // id del pedido en "Imprimir"
+  const [porTalla, setPorTalla] = useState(null); // id del pedido en "Archivos por talla"
 
   async function recargar() {
     setErrorCarga(null);
@@ -154,6 +155,16 @@ export function Pedidos({ recargarSenal }) {
         />
       )}
 
+      {porTalla && pedidos.find((p) => p.id === porTalla) && (
+        <Tarjeta className="flex flex-col gap-3 border-primary/40">
+          <div className="flex items-start gap-3">
+            <h3 className="mr-auto text-sm font-semibold">Archivos por talla · «{pedidos.find((p) => p.id === porTalla).cliente}»</h3>
+            <Boton variante="fantasma" tamano="sm" onClick={() => setPorTalla(null)}>Cerrar</Boton>
+          </div>
+          <ArchivosPorTalla key={porTalla} pedido={pedidos.find((p) => p.id === porTalla)} sinTitulo />
+        </Tarjeta>
+      )}
+
       {imprimiendo && (
         <PanelImprimir
           key={imprimiendo}
@@ -180,7 +191,8 @@ export function Pedidos({ recargarSenal }) {
           <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
             {lista.map((p) => (
               <TarjetaPedido key={p.id} pedido={p} productos={productos} activo={abierto?.id === p.id || imprimiendo === p.id}
-                onEditar={() => abrir(p)} onImprimir={() => { setImprimiendo(p.id); setAbierto(null); }} onEliminar={() => borrar(p)} />
+                onEditar={() => abrir(p)} onImprimir={() => { setImprimiendo(p.id); setAbierto(null); setPorTalla(null); }}
+                onPorTalla={() => { setPorTalla(p.id); setAbierto(null); setImprimiendo(null); }} onEliminar={() => borrar(p)} />
             ))}
           </div>
         )}
@@ -189,7 +201,7 @@ export function Pedidos({ recargarSenal }) {
   );
 }
 
-function TarjetaPedido({ pedido, productos, activo, onEditar, onImprimir, onEliminar }) {
+function TarjetaPedido({ pedido, productos, activo, onEditar, onImprimir, onPorTalla, onEliminar }) {
   const lineas = pedido.lineas || [];
   const nombresProd = [...new Set(lineas.map((l) => productos.find((p) => p.id === l.productoId)?.nombre).filter(Boolean))];
   return (
@@ -207,6 +219,7 @@ function TarjetaPedido({ pedido, productos, activo, onEditar, onImprimir, onElim
       </div>
       <div className="mt-auto flex items-center gap-2 border-t border-border pt-2">
         <Boton variante="acento" tamano="sm" onClick={onImprimir} disabled={lineas.length === 0}>Imprimir</Boton>
+        <Boton variante="primario" tamano="sm" onClick={onPorTalla} disabled={lineas.length === 0} title="Un PDF por talla (o por jugador) con cada prenda completa">Por talla</Boton>
         <Boton tamano="sm" onClick={onEditar}>Editar</Boton>
         <Boton variante="fantasma" tamano="sm" className="ml-auto" onClick={onEliminar}>Eliminar</Boton>
       </div>
@@ -607,7 +620,7 @@ function PanelImprimir({ pedido, onCerrar }) {
 // Un PDF por talla, con los jugadores: cada uno con su prenda completa y una
 // mesa por pieza (su nombre, número, logos y estilo). Para producir sin el
 // rollo de impresión.
-function ArchivosPorTalla({ pedido }) {
+function ArchivosPorTalla({ pedido, sinTitulo }) {
   const [bajando, setBajando] = useState(null); // talla, o '*' para todas
   const [actual, setActual] = useState(null); // la talla que se está armando ahora
   const [hechas, setHechas] = useState([]);
@@ -633,9 +646,24 @@ function ArchivosPorTalla({ pedido }) {
     }
   }
 
+  async function bajarJugador(linea, quien) {
+    setError(null);
+    setBajando(linea.id);
+    setActual(linea.id);
+    try {
+      await exportarTallaDePedido(pedido.id, linea.talla, base + '_' + linea.talla + '_' + quien.replace(/[^a-z0-9_-]+/gi, '_') + '.pdf', linea.id);
+      setHechas((h) => [...new Set([...h, linea.id])]);
+    } catch (e) {
+      setError(e.message === 'Failed to fetch' ? 'Se cortó la conexión mientras se armaba el archivo. Probá de nuevo.' : e.message);
+    } finally {
+      setBajando(null);
+      setActual(null);
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-2 border-t border-border pt-3">
-      <span className="text-xs font-semibold text-faint-foreground">Archivos por talla (con los jugadores)</span>
+    <div className={'flex flex-col gap-2 ' + (sinTitulo ? '' : 'border-t border-border pt-3')}>
+      {!sinTitulo && <span className="text-xs font-semibold text-faint-foreground">Archivos por talla (con los jugadores)</span>}
       <p className="text-xs text-faint-foreground">
         Un PDF por talla: cada jugador con su prenda completa, una mesa por pieza, con su nombre, número, logos y estilo. Se abre en Illustrator como documento propio.
       </p>
@@ -651,6 +679,25 @@ function ArchivosPorTalla({ pedido }) {
           </Boton>
         )}
       </div>
+      <details className="rounded-lg border border-border px-3 py-2 text-xs">
+        <summary className="cursor-pointer text-muted-foreground">Un archivo por jugador</summary>
+        <div className="mt-2 flex flex-col gap-2">
+          {tallas.map((t) => (
+            <div key={t} className="flex flex-wrap items-center gap-1.5">
+              <span className="w-10 flex-none font-semibold uppercase text-faint-foreground">{t}</span>
+              {pedido.lineas.filter((l) => l.talla === t).map((l, i) => {
+                const quien = [String(l.nombre || '').replace(/\s+/g, ' ').trim(), l.numero].filter(Boolean).join(' ') || 'Prenda ' + (i + 1);
+                return (
+                  <Boton key={l.id} tamano="sm" variante={hechas.includes(l.id) ? 'secundario' : 'fantasma'} disabled={!!bajando}
+                    onClick={() => bajarJugador(l, quien)}>
+                    {actual === l.id ? 'Armando…' : (hechas.includes(l.id) ? '✓ ' : '') + quien}
+                  </Boton>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </details>
       {error && <Aviso tono="error">{error}</Aviso>}
     </div>
   );

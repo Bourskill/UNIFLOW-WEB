@@ -1270,8 +1270,10 @@ router.post('/exportar-pedido/:id', async (req, res) => {
   const fuentes = await leerColeccion('fuentes').catch(() => []);
   const pedido = pedidos.find((p) => p.id === req.params.id);
   if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
-  const lineas = (pedido.lineas || []).filter((l) => String(l.talla) === talla);
-  if (!lineas.length) return res.status(400).json({ error: 'Ese pedido no tiene prendas en talla ' + talla });
+  // Con lineaId: un solo jugador (su prenda completa, sola).
+  const { lineaId } = req.body || {};
+  const lineas = (pedido.lineas || []).filter((l) => String(l.talla) === talla && (!lineaId || l.id === lineaId));
+  if (!lineas.length) return res.status(400).json({ error: lineaId ? 'Ese jugador ya no está en el pedido' : 'Ese pedido no tiene prendas en talla ' + talla });
 
   let piezasDeMesas;
   try {

@@ -502,8 +502,8 @@ export function exportarMesasArchivo(produccionId, { tallas, conEjemplo }) {
 
 // Una talla de un pedido, con los jugadores: cada uno con su prenda completa,
 // una mesa por pieza -- ver rutas/api.js·POST /exportar-pedido/:id.
-export function exportarTallaDePedido(pedidoId, talla, nombreArchivo) {
-  return descargar('/exportar-pedido/' + encodeURIComponent(pedidoId), { talla },
+export function exportarTallaDePedido(pedidoId, talla, nombreArchivo, lineaId = null) {
+  return descargar('/exportar-pedido/' + encodeURIComponent(pedidoId), lineaId ? { talla, lineaId } : { talla },
     nombreArchivo || 'talla-' + talla + '.pdf', 'No se pudo exportar la talla ' + talla);
 }
 
