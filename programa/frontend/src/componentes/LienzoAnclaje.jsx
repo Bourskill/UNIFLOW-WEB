@@ -292,7 +292,7 @@ function pedidoDeAjuste(z) {
   const margen = esTalla ? MARGEN_CAPSULA_CM : 0;
   return {
     id: z.id, texto: z.contenidoTexto,
-    anchoCm: Math.max(z.ancho - 2 * margen, 0.1), altoCm: Math.max(z.alto - 2 * margen, 0.1),
+    anchoCm: Math.max(z.ancho * (z.escalaMolde || 1) - 2 * margen, 0.1), altoCm: Math.max(z.alto * (z.escalaMolde || 1) - 2 * margen, 0.1),
     modo: z.campoPedido === 'numero' || esTalla ? 'calibrado' : 'llenar', fuenteUrl: z.fuenteUrl || null,
     // El estilo cambia el ajuste (letras más abiertas, o el margen que deja
     // el contorno): va en el pedido para que el backend lo tenga en cuenta.

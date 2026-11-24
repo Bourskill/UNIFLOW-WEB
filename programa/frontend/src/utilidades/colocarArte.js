@@ -27,7 +27,7 @@ const numero = (v, porDefecto) => (Number.isFinite(Number(v)) && v !== null && v
 // del molde: con uno, la posición queda fija (la escala sigue siendo la del
 // ajuste); con dos o más, también la escala sale sola (sin deformar ni girar).
 //
-// Cada punto: { id, u, v, destino } -- u/v: dónde está en el arte, en fracción
+// Cada punto: { id, u, v, destino, par? } -- u/v: dónde está en el arte, en fracción
 // de su ancho y su alto (0..1, desde arriba a la izquierda); destino: el punto
 // del molde, con la misma forma que un ancla ({ x: {ref, modo, valor}, y: {…} }),
 // o null mientras no se enganchó.
@@ -41,6 +41,8 @@ function normalizarCalce(lista) {
       u: Number(p.u),
       v: Number(p.v),
       destino: p.destino && p.destino.x?.ref && p.destino.y?.ref ? p.destino : null,
+      // El punto creado como su espejo (se mueven juntos al editarlos a mano).
+      ...(p.par ? { par: String(p.par) } : {}),
     }));
 }
 

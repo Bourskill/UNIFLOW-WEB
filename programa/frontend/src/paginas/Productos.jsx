@@ -19,7 +19,7 @@ import { conjuntoDeZona, importarConjunto } from '../utilidades/conjuntosZonas.j
 import { ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { InputNumero } from '../componentes/InputNumero.jsx';
-import { textoDeTalla, COLOR_TALLA } from '../utilidades/capsulaTalla.js';
+import { textoDeTalla, COLOR_TALLA, escalaDentroDelMolde } from '../utilidades/capsulaTalla.js';
 import { PanelDock } from '../componentes/PanelDock.jsx';
 import { PanelTexto } from '../componentes/PanelTexto.jsx';
 import { PanelAjusteArte } from '../componentes/PanelAjusteArte.jsx';
@@ -649,10 +649,36 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     const idNuevo = () => { let n = 1; while (actuales.some((p) => p.id === 'c' + n) || nuevos.some((p) => p.id === 'c' + n)) n++; return 'c' + n; };
     const nuevos = [];
     nuevos.push({ id: idNuevo(), u, v, destino: null });
-    if (calceEspejo && Math.abs(uEspejo - u) > 0.01) nuevos.push({ id: idNuevo(), u: uEspejo, v, destino: null });
+    if (calceEspejo && Math.abs(uEspejo - u) > 0.01) {
+      nuevos.push({ id: idNuevo(), u: uEspejo, v, destino: null, par: nuevos[0].id });
+      nuevos[0].par = nuevos[1].id;
+    }
     ponerPuntosCalce(piezaActiva, [...actuales, ...nuevos]);
     setCalceDestinoId(nuevos[0].id);
     setModo('calceDestino');
+  }
+  // Cambiar un punto a mano (coordenadas en el diseño o corrimiento en el
+  // molde). Su espejo lo sigue: misma altura, X reflejada.
+  function cambiarPuntoCalce(id, cambios) {
+    const lista = puntosCalceDe(piezaActiva);
+    const antes = lista.find((p) => p.id === id);
+    if (!antes) return;
+    const despues = { ...antes, ...cambios };
+    ponerPuntosCalce(piezaActiva, lista.map((p) => {
+      if (p.id === id) return despues;
+      if (p.id !== antes.par || p.par !== id) return p;
+      const q = { ...p };
+      if ('u' in cambios) q.u = Math.min(Math.max(p.u - (despues.u - antes.u), 0), 1);
+      if ('v' in cambios) q.v = despues.v;
+      if (cambios.destino && p.destino && antes.destino) {
+        const dx = cambios.destino.x, dy = cambios.destino.y;
+        q.destino = {
+          x: dx.modo === p.destino.x.modo ? { ...p.destino.x, valor: p.destino.x.valor - (dx.valor - antes.destino.x.valor) } : { ...p.destino.x, modo: dx.modo, valor: -dx.valor },
+          y: { ...p.destino.y, modo: dy.modo, valor: dy.valor },
+        };
+      }
+      return q;
+    }));
   }
   function engancharCalce(id) { setSeleccion(null); setCalceDestinoId(id); setModo('calceDestino'); }
   function quitarCalce(id) {
@@ -1234,6 +1260,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       // Estilo del texto, para verlo en el lienzo igual que en el PDF.
       // La talla: siempre negra, sin espaciado ni borde (como en el PDF).
       colorHex: esTallaZ ? COLOR_TALLA : cruda?.colorHex || '#ffffff',
+      // La talla no se sale del molde (igual que en el PDF): cuánto se achica.
+      escalaMolde: esTallaZ ? escalaDentroDelMolde({ cx: z.cx, cy: z.cy, ancho: z.ancho, alto: z.alto, rotacionGrados: cruda?.rotacion || 0 }, geoActiva?.vertices) : 1,
       espaciadoMil: esTallaZ ? 0 : Number(cruda?.espaciadoMil) || 0,
       alineacion: cruda?.alineacion || 'centro',
       contorno: !esTallaZ && cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0 ? cruda.contorno : null,
@@ -1543,6 +1571,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                     espejo: calceEspejo, onEspejo: setCalceEspejo,
                     marcando: modo === 'calceArte', enganchandoId: modo === 'calceDestino' ? calceDestinoId : null,
                     onMarcar: empezarCalce, onEnganchar: engancharCalce, onQuitar: quitarCalce,
+                    onCambiarPunto: cambiarPuntoCalce, Medida: LineaMedida,
                     onCancelar: () => { setModo(null); setCalceDestinoId(null); },
                   }}
                 />

@@ -60,3 +60,62 @@ export function caminoDeCapsula({ anchoCm, altoCm, radioCm }) {
     ['Z'],
   ];
 }
+
+// ---- la talla no se sale del molde ------------------------------------------
+// La zona de la talla es su tamaño máximo; si cerca de un borde (o de una
+// curva) esa caja se sale de la pieza, se achica desde su centro lo justo
+// para quedar adentro. Con la caja adentro, la cápsula (que nunca es más
+// grande que la caja) también. Si el centro mismo cae fuera de la pieza no se
+// adivina nada: queda como está.
+
+function dentroDelPoligono([x, y], poli) {
+  let dentro = false;
+  for (let i = 0, j = poli.length - 1; i < poli.length; j = i++) {
+    const [xi, yi] = poli[i], [xj, yj] = poli[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) dentro = !dentro;
+  }
+  return dentro;
+}
+
+// Puntos sobre el borde de la caja (girada como la zona: grados antihorarios).
+function bordeDeCaja(cx, cy, ancho, alto, grados) {
+  const a = ((grados || 0) * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  const puntos = [];
+  const N = 8;
+  for (let i = 0; i < N; i++) {
+    const t = i / N - 0.5;
+    for (const [dx, dy] of [[t * ancho, -alto / 2], [ancho / 2, t * alto], [-t * ancho, alto / 2], [-ancho / 2, -t * alto]]) {
+      puntos.push([cx + dx * c + dy * s, cy - dx * s + dy * c]);
+    }
+  }
+  return puntos;
+}
+
+function cajaAdentro(cx, cy, ancho, alto, grados, poli) {
+  if (!bordeDeCaja(cx, cy, ancho, alto, grados).every((p) => dentroDelPoligono(p, poli))) return false;
+  // Una punta del molde que se mete en la caja (molde cóncavo) también es salirse.
+  const a = ((grados || 0) * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  return !poli.some(([x, y]) => {
+    const dx = x - cx, dy = y - cy;
+    const u = dx * c - dy * s, v = dx * s + dy * c;
+    return Math.abs(u) < ancho / 2 - 1e-6 && Math.abs(v) < alto / 2 - 1e-6;
+  });
+}
+
+/**
+ * Cuánto achicar la caja de la talla (1 = nada) para que entre en el molde.
+ * contorno: los vértices de la pieza en cm ([x, y] o {x, y}), mismas
+ * coordenadas que la zona.
+ */
+export function escalaDentroDelMolde({ cx, cy, ancho, alto, rotacionGrados = 0 }, contorno) {
+  if (!Array.isArray(contorno) || contorno.length < 3 || !(ancho > 0) || !(alto > 0)) return 1;
+  const poli = contorno.map((p) => (Array.isArray(p) ? p : [p.x, p.y]));
+  if (!dentroDelPoligono([cx, cy], poli)) return 1;
+  if (cajaAdentro(cx, cy, ancho, alto, rotacionGrados, poli)) return 1;
+  let adentro = 0, afuera = 1;
+  for (let i = 0; i < 24; i++) {
+    const medio = (adentro + afuera) / 2;
+    if (cajaAdentro(cx, cy, ancho * medio, alto * medio, rotacionGrados, poli)) adentro = medio; else afuera = medio;
+  }
+  return Math.max(adentro, 0.05);
+}

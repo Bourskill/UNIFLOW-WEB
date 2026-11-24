@@ -108,7 +108,8 @@ export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando, calce
 // la pieza de al lado. Cada uno se marca sobre el arte y se engancha a un
 // punto del molde; en cada talla el arte se acomoda para que caigan ahí.
 function SeccionCalce({ calce, enganchados }) {
-  const { puntos, espejo, onEspejo, marcando, enganchandoId, onMarcar, onEnganchar, onQuitar, onCancelar } = calce;
+  const { puntos, espejo, onEspejo, marcando, enganchandoId, onMarcar, onEnganchar, onQuitar, onCancelar, onCambiarPunto, Medida } = calce;
+  const nombreDe = (id) => 'C' + (puntos.findIndex((q) => q.id === id) + 1);
   const ocupado = marcando || !!enganchandoId;
   return (
     <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
@@ -121,7 +122,8 @@ function SeccionCalce({ calce, enganchados }) {
           {puntos.map((p, i) => {
             const activo = enganchandoId === p.id;
             return (
-              <li key={p.id} className={'flex flex-wrap items-center gap-2 rounded-md border px-2 py-1 ' + (activo ? 'border-amber-500/60 bg-amber-500/10' : 'border-border')}>
+              <li key={p.id} className={'flex flex-col gap-2 rounded-md border px-2 py-1.5 ' + (activo ? 'border-amber-500/60 bg-amber-500/10' : 'border-border')}>
+                <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold text-[#ff4d8d]">C{i + 1}</span>
                 <span className="text-muted-foreground">
                   {activo ? 'Hacé clic en el molde…'
@@ -138,6 +140,26 @@ function SeccionCalce({ calce, enganchados }) {
                   <button type="button" onClick={() => onQuitar(p.id)} aria-label={'Quitar el punto de calce ' + (i + 1)}
                     className="rounded px-1.5 py-0.5 text-faint-foreground hover:bg-danger-soft hover:text-danger">×</button>
                 </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="w-24 flex-none text-muted-foreground">En el diseño</span>
+                  <span className="text-faint-foreground">X</span>
+                  <div className="w-20"><InputNumero value={Math.round(p.u * 1000) / 10} step={0.1} wheelStep={1} min={0} max={100}
+                    onChange={(n) => onCambiarPunto(p.id, { u: Math.min(Math.max(n, 0), 100) / 100 })} aria-label={'Posición horizontal del punto ' + (i + 1) + ' en el diseño (%)'} /></div>
+                  <span className="text-faint-foreground">Y</span>
+                  <div className="w-20"><InputNumero value={Math.round(p.v * 1000) / 10} step={0.1} wheelStep={1} min={0} max={100}
+                    onChange={(n) => onCambiarPunto(p.id, { v: Math.min(Math.max(n, 0), 100) / 100 })} aria-label={'Posición vertical del punto ' + (i + 1) + ' en el diseño (%)'} /></div>
+                  <span className="text-faint-foreground">% del diseño, desde arriba a la izquierda</span>
+                </div>
+                {p.destino && Medida && (
+                  <div className="flex flex-col gap-1">
+                    <Medida etiqueta="Mover X en el molde" valor={p.destino.x} onCambiar={(m) => onCambiarPunto(p.id, { destino: { ...p.destino, x: { ...p.destino.x, ...m } } })} />
+                    <Medida etiqueta="Mover Y en el molde" valor={p.destino.y} onCambiar={(m) => onCambiarPunto(p.id, { destino: { ...p.destino, y: { ...p.destino.y, ...m } } })} />
+                  </div>
+                )}
+                {p.par && puntos.some((q) => q.id === p.par) && (
+                  <span className="text-faint-foreground">Espejo de {nombreDe(p.par)}: lo que cambies acá se refleja en él.</span>
+                )}
               </li>
             );
           })}

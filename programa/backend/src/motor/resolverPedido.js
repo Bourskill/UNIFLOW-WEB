@@ -12,7 +12,7 @@
 // duplicar el diseño para todo el equipo — se salta esa pieza solo para
 // esta línea, ninguna otra se entera.
 
-import { MARGEN_CAPSULA_CM, COLOR_CAPSULA, COLOR_TALLA, textoDeTalla } from './capsulaTalla.js';
+import { MARGEN_CAPSULA_CM, COLOR_CAPSULA, COLOR_TALLA, textoDeTalla, escalaDentroDelMolde } from './capsulaTalla.js';
 import { campoDeZona } from './campoDeZona.js';
 import { resolver as resolverAnclaje } from './anclaje/resolver.js';
 import { geometriaDelGrupo } from './geometriaAnclaje.js';
@@ -160,14 +160,19 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
           // ajusta a la zona MENOS el margen de la cápsula, siempre centrada.
           const esTalla = campo === 'talla';
           const margen = esTalla ? MARGEN_CAPSULA_CM : 0;
+          // La talla no se sale del molde: si su caja se sale, se achica desde el centro.
+          const escalaMolde = esTalla
+            ? escalaDentroDelMolde({ cx: zona.cx, cy: zona.cy, ancho: zona.ancho, alto: zona.alto, rotacionGrados: cruda?.rotacion || 0 },
+              geometria[pieza.nombre]?.vertices)
+            : 1;
           return {
             texto: String(valor),
             xCm: zona.x,
             yCm: zona.y,
             cxCm: zona.cx,
             cyCm: zona.cy,
-            anchoCm: Math.max(zona.ancho - 2 * margen, 0.1),
-            altoCm: Math.max(zona.alto - 2 * margen, 0.1),
+            anchoCm: Math.max(zona.ancho * escalaMolde - 2 * margen, 0.1),
+            altoCm: Math.max(zona.alto * escalaMolde - 2 * margen, 0.1),
             ...(esTalla ? { capsula: { colorHex: COLOR_CAPSULA, margenCm: margen } } : {}),
             // Cómo se ajusta al espacio de la zona (motor/ajusteTexto.js,
             // puerto del panel de Illustrator): el número se CALIBRA (todos
@@ -175,7 +180,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             // agrupa los textos que comparten cuerpo: mismo producto, zona y
             // talla (la caja de la zona puede cambiar de talla a talla).
             modo: campo === 'numero' || esTalla ? 'calibrado' : 'llenar',
-            zonaClave: (linea.productoId || '') + '|' + zona.id + '|' + linea.talla,
+            zonaClave: (linea.productoId || '') + '|' + zona.id + '|' + linea.talla + (escalaMolde < 1 ? '|' + pieza.nombre : ''),
             // La talla no tiene estilo propio: siempre negra, sin borde ni espaciado.
             colorHex: esTalla ? COLOR_TALLA : cruda?.colorHex || '#000000',
             rotacionGrados: cruda?.rotacion || 0,

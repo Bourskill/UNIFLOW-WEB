@@ -6,7 +6,7 @@
 
 import { readFileSync } from 'node:fs';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { medidasDeCapsula, MARGEN_CAPSULA_CM } from '../src/motor/capsulaTalla.js';
+import { medidasDeCapsula, MARGEN_CAPSULA_CM, escalaDentroDelMolde } from '../src/motor/capsulaTalla.js';
 import { resolverPiezasDePedido } from '../src/motor/resolverPedido.js';
 import { ajustarTextosDePiezas } from '../src/motor/ajusteTexto.js';
 import { obtenerMedidor } from '../src/motor/medidorFuentes.js';
@@ -70,6 +70,28 @@ comprobar('calibrada (mismo alto en todas las tallas) y siempre centrada', texto
   const tf = pzs.map((p) => p.textos[0]);
   comprobar('femenina: en mayúscula y con guion (S-, XXL-)', tf.map((t) => t?.texto).join() === 'S-,XXL-', tf.map((t) => t?.texto).join());
   comprobar('la talla siempre negra, sin borde ni espaciado', tf.every((t) => t.colorHex === '#000000' && !t.contorno && t.espaciadoMil === 0));
+}
+
+console.log('\n--- La talla no se sale del molde ---');
+{
+  const molde = [[0, 0], [30, 0], [30, 20], [0, 20]];
+  comprobar('adentro: no se toca', escalaDentroDelMolde({ cx: 15, cy: 10, ancho: 3, alto: 1 }, molde) === 1);
+  const s = escalaDentroDelMolde({ cx: 1, cy: 10, ancho: 3, alto: 1 }, molde);
+  comprobar('pegada al borde: se achica justo hasta el borde', cerca(s, 2 / 3, 1e-4), s);
+  const girada = escalaDentroDelMolde({ cx: 15, cy: 1, ancho: 3, alto: 1, rotacionGrados: 90 }, molde);
+  comprobar('girada 90°: cuenta su alto real (3 cm) contra el borde', cerca(girada, 2 / 3, 1e-4), girada);
+  // Un molde con una muesca (cóncavo) que se mete en la caja.
+  const muesca = [[0, 0], [14.8, 0], [15, 9.8], [15.2, 0], [30, 0], [30, 20], [0, 20]];
+  comprobar('una punta del molde que se mete en la caja también cuenta', escalaDentroDelMolde({ cx: 15, cy: 10.5, ancho: 3, alto: 2 }, muesca) < 1);
+  comprobar('con el centro fuera de la pieza no se adivina', escalaDentroDelMolde({ cx: -5, cy: 10, ancho: 3, alto: 1 }, molde) === 1);
+
+  // En el pedido: la zona a 1 cm del borde (su caja de 3 cm se sale 0.5 cm).
+  const alBorde = { ...producto, anclaje: { anclas: [{ ...ancla, x: { ...ancla.x, valor: 1 } }], zonas: [zona] } };
+  const [t] = resolverPiezasDePedido({
+    pedido: { lineas: [{ id: 'b', productoId: 'pr1', talla: 'S', nombre: '', numero: '' }] },
+    productos: [alBorde], grupos: [grupo], piezas: [pieza], disenos: [], fuentes: [],
+  }).map((p) => p.textos[0]);
+  comprobar('en el pedido la letra se ajusta a la caja achicada', cerca(t.anchoCm, 3 * (2 / 3) - 0.2, 1e-3), t.anchoCm);
 }
 
 console.log('\n--- En el PDF ---');
