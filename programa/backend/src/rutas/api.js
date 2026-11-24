@@ -4,7 +4,7 @@ import { leerColeccion, leerRegistro, crearRegistro, actualizarRegistro, borrarR
 import { resolverPiezasDeGrupo, resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting, generarPdfPaginas } from '../motor/exportarPdf.js';
-import { armarMesas } from '../motor/mesas.js';
+import { armarMesas, piezasSinRepetir } from '../motor/mesas.js';
 import { campoDeZona } from '../motor/campoDeZona.js';
 import { conDocumentoIllustrator } from '../motor/illustrator/documentoAi.js';
 import { resolverPiezasDePedido, tallaRealDePieza } from '../motor/resolverPedido.js';
@@ -1280,11 +1280,18 @@ router.post('/exportar-pedido/:id', async (req, res) => {
     return res.status(400).json({ error: error.message });
   }
   piezasDeMesas = await ajustarTextosDePiezas(piezasDeMesas, obtenerMedidor);
-  const mesas = armarMesas(piezasDeMesas);
 
-  // Cada mesa con el jugador adelante: "PÉREZ 10 · ESPALDA".
+  // Una pieza igual para todos los jugadores va una sola vez (mesas.js).
+  const { piezas: sinRepetir, iguales } = piezasSinRepetir(piezasDeMesas, lineas);
+  const mesas = armarMesas(sinRepetir);
+
+  // Cada mesa con el jugador adelante: "PÉREZ 10 · ESPALDA"; las de todos: "Todos (×9) · MANGA".
   const jugadorDe = new Map(lineas.map((l, i) => [l.id, [String(l.nombre || '').replace(/\s+/g, ' ').trim(), String(l.numero || '').trim()].filter(Boolean).join(' ') || 'Prenda ' + (i + 1)]));
-  const nombresDeMesas = mesas.map((m) => (jugadorDe.get(m.piezas[0]?.lineaPedidoId) || '') + ' · ' + (m.piezas[0]?.piezaId || m.nombre));
+  const nombresDeMesas = mesas.map((m) => {
+    const p = m.piezas[0] || {};
+    const quien = iguales.has(p.piezaId) ? 'Todos (×' + iguales.get(p.piezaId) + ')' : jugadorDe.get(p.lineaPedidoId) || '';
+    return quien + ' · ' + (p.piezaId || m.nombre);
+  });
 
   const artesNativos = [];
   const cortesLaser = [];

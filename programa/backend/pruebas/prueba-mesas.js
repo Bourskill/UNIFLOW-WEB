@@ -8,7 +8,7 @@
 
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { armarMesas, MARGEN_MESA_CM, CONTORNO_LASER_POR_DEFECTO } from '../src/motor/mesas.js';
+import { armarMesas, MARGEN_MESA_CM, CONTORNO_LASER_POR_DEFECTO, piezasSinRepetir } from '../src/motor/mesas.js';
 import { generarPdfPaginas, colorDeContraste, rayaDePiquete } from '../src/motor/exportarPdf.js';
 import { resolverPiezasDePedido } from '../src/motor/resolverPedido.js';
 
@@ -101,6 +101,27 @@ console.log('\n--- Piquetes encima: rayita y color de contraste ---');
   const triangulo = [{ x: 0, y: 0 }, { x: 20, y: 20 }, { x: 0, y: 20 }];
   const d = rayaDePiquete({ x: 10, y: 10, ancho_cm: 1, alto_cm: 1 }, triangulo);
   comprobar('piquete en diagonal: la diagonal perpendicular al borde', cerca((d[1].x - d[0].x) * (d[1].y - d[0].y), -1), JSON.stringify(d));
+}
+
+console.log('\n--- Una talla con varios jugadores: lo que es igual va una vez ---');
+{
+  const lineas = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const pieza = (piezaId, lineaPedidoId, textos = []) => ({ piezaId, lineaPedidoId, talla: 'm', anchoCm: 40, altoCm: 50, imagenDataUrl: 'd.pdf', textos,
+    imagenes: [{ url: 'logo.pdf', cxCm: 10, cyCm: 10, ladoCm: 5 }] });
+  const fijo = { texto: 'CLUB', cxCm: 20, cyCm: 5, colorHex: '#fff' };
+  const piezas = lineas.flatMap((l, i) => [
+    pieza('FRENTE', l.id, [fijo]),
+    pieza('ESPALDA', l.id, [{ texto: ['PEREZ', 'GOMEZ', 'DIAZ'][i], cxCm: 20, cyCm: 10, colorHex: '#fff' }]),
+    pieza('MANGA', l.id),
+  ]);
+  const { piezas: r, iguales } = piezasSinRepetir(piezas, lineas);
+  comprobar('las iguales para todos van una sola vez (frente con texto fijo y logo, manga)',
+    r.filter((p) => p.piezaId === 'FRENTE').length === 1 && r.filter((p) => p.piezaId === 'MANGA').length === 1 && iguales.get('MANGA') === 3);
+  comprobar('las que llevan el nombre, una por jugador, en el orden del pedido',
+    r.filter((p) => p.piezaId === 'ESPALDA').map((p) => p.lineaPedidoId).join() === 'a,b,c');
+  comprobar('primero las de todos', r.slice(0, 2).every((p) => iguales.has(p.piezaId)));
+  const uno = piezasSinRepetir(piezas.filter((p) => p.lineaPedidoId === 'a'), [lineas[0]]);
+  comprobar('con un solo jugador, sale todo como siempre', uno.piezas.length === 3 && uno.iguales.size === 0);
 }
 
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');
