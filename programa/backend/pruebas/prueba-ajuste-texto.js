@@ -211,6 +211,47 @@ console.log('\n--- Varios contornos, uno por fuera del otro ---');
   comprobar('con sus anchos, de afuera hacia adentro', [1.2, 1.0, 0.4].every((w, i) => cerca(anchos.slice(-3)[i], w * 28.3465, 0.05)), JSON.stringify(anchos));
 }
 
+console.log('\n--- Texto en varios renglones (saltos de línea) ---');
+{
+  const { normalizarLineas } = await import('../src/motor/ajusteTexto.js');
+  comprobar('se parte por los saltos de línea, sin renglones vacíos',
+    JSON.stringify(normalizarLineas('MEDIOS Y\r\n\n  CONTENIDO ')) === '["MEDIOS Y","CONTENIDO"]');
+  const a = ajustarTexto({ medidor, texto: 'MEDIOS Y\nCONTENIDO', anchoCm: 30, altoCm: 8, modo: 'llenar' });
+  comprobar('dos renglones', a.lineas.length === 2 && a.texto === 'MEDIOS Y\nCONTENIDO');
+  const banda = a.altoBandaCm;
+  const paso = a.lineas[1].dyCm - a.lineas[0].dyCm;
+  comprobar('uno debajo del otro, con el 30% del alto de la letra entre ellos', cerca(paso, banda * 1.3, 1e-6), paso + ' / ' + banda);
+  comprobar('el bloque entero cabe en el alto de la zona', banda + paso <= 8 + 1e-6 && a.cabe);
+  comprobar('y queda centrado en la zona (la base del de abajo en el borde)', cerca(a.lineas[1].dyCm, 4, 1e-6) && cerca(a.lineas[0].dyCm - banda, -4, 1e-6));
+  const centros = a.lineas.map((l) => l.dxCm + (l.tintaCm.izq + l.tintaCm.der) / 2);
+  comprobar('cada renglón se centra por su propio ancho', cerca(centros[0], 0, 1e-6) && cerca(centros[1], 0, 1e-6), centros.join());
+  const izq = ajustarTexto({ medidor, texto: 'MEDIOS Y\nCONTENIDO', anchoCm: 30, altoCm: 8, modo: 'llenar', alineacion: 'izquierda' });
+  const bordes = izq.lineas.map((l) => l.dxCm + l.tintaCm.izq);
+  comprobar('alineados a la izquierda, los dos arrancan en el borde de la zona', cerca(bordes[0], -15, 1e-6) && cerca(bordes[1], -15, 1e-6), bordes.join());
+  const pegado = ajustarTexto({ medidor, texto: 'A\nB', anchoCm: 30, altoCm: 8, modo: 'llenar', interlineado: 0 });
+  comprobar('con interlineado 0, cada renglón llena la mitad del alto', cerca(pegado.altoBandaCm, 4, 1e-6), pegado.altoBandaCm);
+  const uno = ajustarTexto({ medidor, texto: 'GIL', anchoCm: 30, altoCm: 8, modo: 'llenar' });
+  comprobar('un solo renglón sigue igual que antes', uno.lineas.length === 1 && cerca(uno.lineas[0].dyCm, uno.dyCm) && cerca(uno.altoBandaCm, 8, 1e-6));
+  const num = ajustarTexto({ medidor, texto: '1\n0', anchoCm: 10, altoCm: 8, modo: 'calibrado' });
+  comprobar('un número va siempre en un renglón', num.lineas.length === 1 && num.texto === '1 0');
+
+  const pieza = {
+    id: 'p0', piezaId: 'Espalda', talla: 'm', anchoCm: 50, altoCm: 70, posicion: { x: 0, y: 0 }, rotacionGrados: 0, imagenes: [],
+    textos: [{ texto: 'MEDIOS Y\nCONTENIDO', cxCm: 25, cyCm: 10, anchoCm: 30, altoCm: 8, xCm: 0, yCm: 0, modo: 'llenar', zonaClave: 'n|m',
+      colorHex: '#ffffff', rotacionGrados: 0, fuenteUrl: null, contornos: [{ colorHex: '#000000', grosorCm: 0.2 }] }],
+  };
+  const [conAjuste] = await ajustarTextosDePiezas([pieza], obtenerMedidor);
+  const bytes = await generarPdfNesting({ anchoLienzoCm: 60, altoLienzoCm: 80, piezas: [{ ...conAjuste, imagenDataUrl: null }] });
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: false }).promise;
+  const items = (await (await doc.getPage(1)).getTextContent()).items.filter((i) => i.str.trim());
+  // (pdf.js lee el espacio de la fuente incrustada como otro carácter: se compara sin espacios)
+  const letras = (s) => s.replace(/[^A-Z]/g, '');
+  const arriba = items.filter((i) => letras(i.str) === 'MEDIOSY'), abajo = items.filter((i) => letras(i.str) === 'CONTENIDO');
+  comprobar('en el PDF: cada renglón con su contorno y su relleno', arriba.length === 2 && abajo.length === 2, items.map((i) => i.str).join('|'));
+  comprobar('el primero encima del segundo, a un paso de distancia', arriba.length && abajo.length &&
+    cerca(arriba[0].transform[5] - abajo[0].transform[5], conAjuste.textos[0].ajuste.lineas[1].dyCm * 28.3465 - conAjuste.textos[0].ajuste.lineas[0].dyCm * 28.3465, 0.05));
+}
+
 console.log('\n--- Sin nada que ajustar: null, nunca un número inventado ---');
 {
   comprobar('texto vacío', ajustarTexto({ medidor, texto: '', anchoCm: 10, altoCm: 5, modo: 'llenar' }) === null);

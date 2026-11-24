@@ -192,6 +192,9 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             espaciadoMil: esTalla ? 0 : Number(cruda?.espaciadoMil) || 0,
             alineacion: !esTalla && ['izquierda', 'derecha'].includes(cruda?.alineacion) ? cruda.alineacion : 'centro',
             contornos: esTalla ? [] : contornosDeZona(cruda),
+            // Texto en varios renglones (saltos de línea): espacio entre ellos,
+            // en % del alto de la letra (ajusteTexto.js·INTERLINEADO).
+            interlineado: Number.isFinite(Number(cruda?.interlineado)) && cruda?.interlineado !== null && cruda?.interlineado !== '' ? Number(cruda.interlineado) : undefined,
           };
         })
         .filter(Boolean);

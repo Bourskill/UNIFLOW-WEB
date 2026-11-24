@@ -38,14 +38,19 @@ function TextoAjustado({ texto, familia }) {
           c.fillStyle = texto.capsula.colorHex || '#ffffff';
           c.fill();
         }
-        c.translate(a.dxCm * PX_POR_CM, a.dyCm * PX_POR_CM);
-        c.scale(a.escalaH / 100, 1);
         c.font = a.cuerpoCm * PX_POR_CM + 'px ' + cssDeFamilia(familia);
         c.fontKerning = 'none';
         c.letterSpacing = (a.trackingMil / 1000) * a.cuerpoCm * PX_POR_CM + 'px';
         c.fillStyle = texto.colorHex;
         c.textBaseline = 'alphabetic';
-        c.fillText(a.texto ?? texto.texto, 0, 0);
+        // Cada renglón (texto con saltos de línea) en su lugar, como en el PDF.
+        for (const l of a.lineas || [{ texto: a.texto ?? texto.texto, dxCm: a.dxCm, dyCm: a.dyCm }]) {
+          c.save();
+          c.translate(l.dxCm * PX_POR_CM, l.dyCm * PX_POR_CM);
+          c.scale(a.escalaH / 100, 1);
+          c.fillText(l.texto, 0, 0);
+          c.restore();
+        }
         c.restore();
       }}
     />

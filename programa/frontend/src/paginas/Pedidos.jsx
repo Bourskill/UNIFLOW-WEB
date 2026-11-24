@@ -3,7 +3,7 @@ import { crearPedido, editarPedido, eliminarPedido, anidarDesdePedido, generarPd
 import { obtener } from '../datos/index.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
-import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
+import { Boton, Campo, Input, InputMultilinea, Select, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 import { leerHoja, filasDeTexto, interpretarJugadores } from '../utilidades/hojaDeCalculo.js';
 
 // Producción → Pedidos: el pedido real de un equipo (talla + nombre + número
@@ -372,7 +372,9 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
                       </Select>
                     </td>
                     <td className="px-2 py-1.5">
-                      <Input className="h-8" placeholder="(sin nombre)" value={l.nombre} onChange={(e) => actualizar(l.id, { nombre: e.target.value.toUpperCase() })} />
+                      {/* Enter: otro renglón (el nombre sale en varias líneas, una encima de la otra). */}
+                      <InputMultilinea className="min-h-8 py-1" placeholder="(sin nombre)" value={l.nombre} title="Enter para otro renglón"
+                        onChange={(e) => actualizar(l.id, { nombre: e.target.value.toUpperCase() })} />
                     </td>
                     <td className="px-2 py-1.5">
                       <Input className="h-8" placeholder="(sin n°)" value={l.numero} onChange={(e) => actualizar(l.id, { numero: e.target.value })} />

@@ -366,32 +366,38 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
                 // Con su modo real: un número sigue yendo a alto completo.
                 modo: texto.modo === 'calibrado' ? 'calibrado' : 'llenar',
                 espaciadoMil: texto.espaciadoMil || 0, contornoCm: grosorTotal(contornosDeTexto(texto)),
-                alineacion: texto.alineacion || 'centro',
+                alineacion: texto.alineacion || 'centro', interlineado: texto.interlineado,
               }) || a;
             }
           }
           const rad = ((texto.rotacionGrados || 0) * Math.PI) / 180;
           const cxPt = xPt + texto.cxCm * CM_A_PUNTOS;
           const cyPt = yPt + altoRectPt - texto.cyCm * CM_A_PUNTOS;
-          // Origen del texto respecto del centro de la zona, con Y hacia arriba
-          // (PDF) -- la Y del ajuste crece hacia abajo.
-          const dx = a.dxCm * CM_A_PUNTOS;
-          const dy = -a.dyCm * CM_A_PUNTOS;
-          const x = cxPt + dx * Math.cos(rad) - dy * Math.sin(rad);
-          const y = cyPt + dx * Math.sin(rad) + dy * Math.cos(rad);
           const tamanoPt = a.cuerpoCm * CM_A_PUNTOS;
+          // Cada renglón (un texto con saltos de línea va en varios) con su
+          // origen respecto del centro de la zona, con Y hacia arriba (PDF) --
+          // la Y del ajuste crece hacia abajo. Un ajuste guardado antes de los
+          // renglones trae solo dxCm/dyCm: es un renglón.
+          const renglones = (a.lineas || [{ texto: a.texto ?? texto.texto, dxCm: a.dxCm, dyCm: a.dyCm }]).map((l) => {
+            const dx = l.dxCm * CM_A_PUNTOS;
+            const dy = -l.dyCm * CM_A_PUNTOS;
+            return {
+              x: cxPt + dx * Math.cos(rad) - dy * Math.sin(rad),
+              y: cyPt + dx * Math.sin(rad) + dy * Math.cos(rad),
+              codificado: fontElegida.encodeText(l.texto),
+            };
+          });
 
           pagina.setFont(fontElegida);
-          const textoCodificado = fontElegida.encodeText(a.texto ?? texto.texto);
-          const operadoresDeTexto = () => [
+          const operadoresDeTexto = () => renglones.flatMap((r) => [
             beginText(),
             setFontAndSize(pagina.fontKey, tamanoPt),
             setCharacterSpacing((a.trackingMil / 1000) * tamanoPt),
             setCharacterSqueeze(a.escalaH),
-            rotateAndSkewTextRadiansAndTranslate(rad, 0, 0, x, y),
-            showText(textoCodificado),
+            rotateAndSkewTextRadiansAndTranslate(rad, 0, 0, r.x, r.y),
+            showText(r.codificado),
             endText(),
-          ];
+          ]);
 
           // La talla: primero su cápsula blanca, centrada en la zona y girada
           // con ella (capsulaTalla.js).
@@ -438,13 +444,7 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
           pagina.pushOperators(
             pushGraphicsState(),
             setFillingColor(rgb(color.r, color.g, color.b)),
-            beginText(),
-            setFontAndSize(pagina.fontKey, tamanoPt),
-            setCharacterSpacing((a.trackingMil / 1000) * tamanoPt),
-            setCharacterSqueeze(a.escalaH),
-            rotateAndSkewTextRadiansAndTranslate(rad, 0, 0, x, y),
-            showText(fontElegida.encodeText(a.texto ?? texto.texto)),
-            endText(),
+            ...operadoresDeTexto(),
             popGraphicsState()
           );
           continue;

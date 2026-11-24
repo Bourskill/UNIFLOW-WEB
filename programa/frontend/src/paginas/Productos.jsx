@@ -17,7 +17,7 @@ import {
 import { obtener, confirmarGuardado, borrarRegistro } from '../datos/index.js';
 import { conjuntoDeZona, importarConjunto } from '../utilidades/conjuntosZonas.js';
 import { ordenarTallasNatural } from '../constantes.js';
-import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
+import { Boton, Campo, Input, InputMultilinea, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { InputNumero } from '../componentes/InputNumero.jsx';
 import { textoDeTalla, COLOR_TALLA, escalaDentroDelMolde } from '../utilidades/capsulaTalla.js';
 import { contornosDeZona } from '../utilidades/contornosTexto.js';
@@ -101,7 +101,15 @@ function tallaDeTrabajoPorDefecto(pieza) {
   return conL || tallas[Math.floor((tallas.length - 1) / 2)];
 }
 
+// Un texto en varios renglones, en una línea para los rótulos: "MEDIOS Y / CONTENIDO".
+const enUnRenglon = (t) => (t ? String(t).split(/\s*\n\s*/).filter(Boolean).join(' / ') : t);
+
 function etiquetaZona(zona) {
+  const e = etiquetaZonaCruda(zona);
+  return typeof e === 'string' ? enUnRenglon(e) : e;
+}
+
+function etiquetaZonaCruda(zona) {
   if (zona.tipo === 'logo') return zona.logoRuta ? 'Logo · ' + nombreDeArchivo(zona.logoRuta) : 'Logo (sin elegir)';
   const campo = campoDeZona(zona);
   if (campo === 'fijo') return zona.valorFijo || zona.id;
@@ -1285,6 +1293,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       espaciadoMil: esTallaZ ? 0 : Number(cruda?.espaciadoMil) || 0,
       alineacion: cruda?.alineacion || 'centro',
       contornos: esTallaZ ? [] : contornosDeZona(cruda),
+      interlineado: Number.isFinite(Number(cruda?.interlineado)) && cruda?.interlineado != null && cruda?.interlineado !== '' ? Number(cruda.interlineado) : undefined,
     };
   });
 
@@ -2121,9 +2130,17 @@ function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasR
             </p>
           </>
         ) : campoDeZona(zona) === 'fijo' ? (
-          <Input placeholder="Texto fijo" value={zona.valorFijo || ''} onChange={(e) => onActualizar({ valorFijo: e.target.value })} />
+          <>
+            <InputMultilinea placeholder="Texto fijo" value={zona.valorFijo || ''} onChange={(e) => onActualizar({ valorFijo: e.target.value })} />
+            <p className="text-[11px] text-faint-foreground">Enter para otro renglón: quedan uno encima del otro.</p>
+          </>
+        ) : campoDeZona(zona) === 'nombre' ? (
+          <>
+            <InputMultilinea placeholder="Ejemplo: PEÑA" value={zona.valorEjemplo || ''} onChange={(e) => onActualizar({ valorEjemplo: e.target.value })} />
+            <p className="text-[11px] text-faint-foreground">Enter para otro renglón. En el pedido, el nombre también puede llevar varios.</p>
+          </>
         ) : (
-          <Input placeholder={campoDeZona(zona) === 'nombre' ? 'Ejemplo: PEÑA' : 'Ejemplo: 7'} value={zona.valorEjemplo || ''} onChange={(e) => onActualizar({ valorEjemplo: e.target.value })} />
+          <Input placeholder="Ejemplo: 7" value={zona.valorEjemplo || ''} onChange={(e) => onActualizar({ valorEjemplo: e.target.value })} />
         )}
       </div>
 

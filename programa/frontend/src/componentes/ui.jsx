@@ -50,6 +50,12 @@ export function Input({ className = '', ...props }) {
   return <input className={CLASE_INPUT + ' ' + className} {...props} />;
 }
 
+// Como Input, pero Enter agrega un renglón: crece con cada uno (sin barra).
+export function InputMultilinea({ className = '', value, ...props }) {
+  const renglones = Math.min(String(value ?? '').split('\n').length, 6);
+  return <textarea rows={renglones} value={value} className={CLASE_INPUT + ' resize-none leading-snug ' + className} {...props} />;
+}
+
 export function Select({ className = '', ...props }) {
   return <select className={CLASE_INPUT + ' ' + className} {...props} />;
 }

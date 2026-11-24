@@ -330,6 +330,8 @@ router.post('/texto/ajustar', async (req, res) => {
         medidor, texto: z.texto, anchoCm: z.anchoCm, altoCm: z.altoCm, modo, cuerpoCalibradoCm,
         espaciadoMil: z.espaciadoMil || 0, contornoCm: z.contornoCm || 0,
         alineacion: ['izquierda', 'derecha'].includes(z.alineacion) ? z.alineacion : 'centro',
+        // Espacio entre renglones (texto en varias líneas); ajustarTexto lo acota.
+        interlineado: Number.isFinite(z.interlineado) ? z.interlineado : undefined,
       }),
     };
   }

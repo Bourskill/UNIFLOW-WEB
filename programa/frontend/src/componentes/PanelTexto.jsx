@@ -14,8 +14,9 @@ import { contornosDeZona, CONTORNOS_MAX, CONTORNO_ANILLO_MAX_CM } from '../utili
 // exportarPdf.js) -- el espaciado y el borde cambian además cuánto entra el
 // texto en su zona.
 
-// Mismos límites que acepta el backend (ajusteTexto.js·ESPACIADO_MIL).
+// Mismos límites que acepta el backend (ajusteTexto.js·ESPACIADO_MIL / INTERLINEADO).
 const ESPACIADO = { min: -200, max: 500 };
+const INTERLINEADO = { min: -50, max: 200, porDefecto: 30 };
 
 // Colores de uso más común en camisetas, para no abrir el selector cada vez.
 const COLORES_RAPIDOS = ['#ffffff', '#000000', '#d32f2f', '#1565c0', '#fbc02d', '#2e7d32', '#ef6c00', '#6a1b9a', '#9e9e9e', '#c9a227'];
@@ -238,8 +239,14 @@ function SelectorFuente({ fuentes, fuenteId, muestra, onElegir, onFuenteAgregada
  */
 export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
   const esNumero = campoDeZona(zona) === 'numero';
-  const muestra =
+  const textoZona =
     (campoDeZona(zona) === 'fijo' ? zona.valorFijo : zona.valorEjemplo) || (esNumero ? '10' : 'PEÑA');
+  // Un texto con Enter va en varios renglones (ajusteTexto.js·normalizarLineas).
+  const renglones = String(textoZona).split('\n').map((l) => l.trim()).filter(Boolean);
+  const muestra = renglones.join(' ') || textoZona;
+  const variosRenglones = !esNumero && renglones.length > 1;
+  const interlineado = Number.isFinite(Number(zona.interlineado)) && zona.interlineado != null && zona.interlineado !== ''
+    ? Number(zona.interlineado) : INTERLINEADO.porDefecto;
   const contornos = contornosDeZona(zona);
   const espaciado = Number(zona.espaciadoMil) || 0;
   const alineacion = zona.alineacion || 'centro';
@@ -308,6 +315,29 @@ export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
           />
         </div>
       </Seccion>
+
+      {variosRenglones && (
+        <Seccion
+          titulo="Espacio entre renglones"
+          ayuda="Cuánto aire queda entre un renglón y el de abajo, en % del alto de la letra: 0 los deja pegados. Todos los renglones van al mismo tamaño y el bloque entero llena la zona."
+          derecha={interlineado !== INTERLINEADO.porDefecto && (
+            <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => onActualizar({ interlineado: null })}>Normal</button>
+          )}
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="range" min={INTERLINEADO.min} max={INTERLINEADO.max} step={5} value={interlineado}
+              onChange={(e) => onActualizar({ interlineado: Number(e.target.value) })}
+              className="flex-1 accent-primary" aria-label="Espacio entre renglones"
+            />
+            <InputNumero
+              className="w-20" step={5} wheelStep={5} min={INTERLINEADO.min} max={INTERLINEADO.max} value={interlineado}
+              onChange={(n) => onActualizar({ interlineado: Math.min(Math.max(Math.round(n), INTERLINEADO.min), INTERLINEADO.max) })}
+            />
+            <span className="text-xs text-muted-foreground">%</span>
+          </div>
+        </Seccion>
+      )}
 
       <Seccion
         titulo="Contornos"

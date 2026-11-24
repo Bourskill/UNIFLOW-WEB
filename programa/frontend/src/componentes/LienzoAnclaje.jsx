@@ -250,8 +250,6 @@ function medidaLogoAjustada({ cruz, lado, ancho, alto, natural }) {
 // fuente. Se dibuja por su línea de base, sin kerning (pdf-lib tampoco lo
 // aplica) para que el ancho coincida con el impreso.
 function TextoAjustado({ z, ajuste, familia }) {
-  const x = z.cx + ajuste.dxCm;
-  const y = z.cy + ajuste.dyCm;
   const h = ajuste.escalaH / 100;
   // Tal cual sale en el PDF: el color real y, SOLO si la zona los tiene, sus
   // contornos -- por DEBAJO, del de más afuera al pegado a la letra, cada uno
@@ -264,19 +262,27 @@ function TextoAjustado({ z, ajuste, familia }) {
     ? caminoDeCapsula(medidasDeCapsula(ajuste, MARGEN_CAPSULA_CM))
       .map(([op, ...p]) => op + (op === 'Z' ? '' : ' ' + p.map((v, i) => (i % 2 ? z.cy + v : z.cx + v)).join(' '))).join(' ')
     : null;
-  const propiedades = {
-    x, y, fontSize: ajuste.cuerpoCm, fontFamily: familia,
-    style: { letterSpacing: ajuste.trackingMil / 1000 + 'em', fontKerning: 'none' },
-    transform: h !== 1 ? 'translate(' + x + ' ' + y + ') scale(' + h + ' 1) translate(' + -x + ' ' + -y + ')' : undefined,
-  };
-  const contenido = ajuste.texto ?? z.contenidoTexto;
+  // Un texto con saltos de línea va en varios renglones, cada uno con su
+  // origen (como en el PDF); un ajuste sin `lineas` es un solo renglón.
+  const renglones = (ajuste.lineas || [{ texto: ajuste.texto ?? z.contenidoTexto, dxCm: ajuste.dxCm, dyCm: ajuste.dyCm }])
+    .map((l) => {
+      const lx = z.cx + l.dxCm, ly = z.cy + l.dyCm;
+      return {
+        texto: l.texto,
+        propiedades: {
+          x: lx, y: ly, fontSize: ajuste.cuerpoCm, fontFamily: familia,
+          style: { letterSpacing: ajuste.trackingMil / 1000 + 'em', fontKerning: 'none' },
+          transform: h !== 1 ? 'translate(' + lx + ' ' + ly + ') scale(' + h + ' 1) translate(' + -lx + ' ' + -ly + ')' : undefined,
+        },
+      };
+    });
   return (
     <>
     {capsula && <path d={capsula} fill="#ffffff" />}
-    {pasadas.map((p, i) => (
-      <text key={i} {...propiedades} fill="none" stroke={p.colorHex} strokeWidth={p.anchoTrazoCm} strokeLinejoin="round">{contenido}</text>
-    ))}
-    <text {...propiedades} fill={z.colorHex || '#e6e9f0'}>{contenido}</text>
+    {pasadas.map((p, i) => renglones.map((r, j) => (
+      <text key={i + '-' + j} {...r.propiedades} fill="none" stroke={p.colorHex} strokeWidth={p.anchoTrazoCm} strokeLinejoin="round">{r.texto}</text>
+    )))}
+    {renglones.map((r, j) => <text key={'r' + j} {...r.propiedades} fill={z.colorHex || '#e6e9f0'}>{r.texto}</text>)}
     </>
   );
 }
@@ -298,6 +304,7 @@ function pedidoDeAjuste(z) {
     espaciadoMil: z.espaciadoMil || 0,
     contornoCm: Math.min(grosorTotal(z.contornos || []), 6), // tope del backend (ajusteTexto.js·CONTORNO_MAX_CM)
     alineacion: esTalla ? 'centro' : z.alineacion || 'centro',
+    ...(Number.isFinite(z.interlineado) ? { interlineado: z.interlineado } : {}),
   };
 }
 

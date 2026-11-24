@@ -64,6 +64,29 @@ export function normalizarTexto(texto) {
     .trim();
 }
 
+/**
+ * Los renglones de un nombre o texto: se parte por los saltos de línea (Enter
+ * en el campo, o una celda de planilla con varios renglones) y cada renglón se
+ * normaliza como arriba. Los renglones vacíos no cuentan.
+ */
+export function normalizarLineas(texto) {
+  return String(texto ?? '')
+    .replace(/\r\n?|[\u2028\u2029\u0085\u000B\u000C]/g, '\n')
+    .split('\n')
+    .map(normalizarTexto)
+    .filter((l) => l !== '');
+}
+
+// Espacio entre renglones, en % del alto de la letra (la banda de
+// mayúsculas): 0 = un renglón pegado al otro.
+export const INTERLINEADO = { min: -50, max: 200, porDefecto: 30 };
+
+function limitarInterlineado(pct) {
+  const n = Number(pct);
+  if (pct === null || pct === undefined || pct === '' || !Number.isFinite(n)) return INTERLINEADO.porDefecto;
+  return Math.min(Math.max(n, INTERLINEADO.min), INTERLINEADO.max);
+}
+
 // Límites del estilo que se puede elegir en la zona (y que acepta la API).
 export const ESPACIADO_MIL = { min: -200, max: 500 };
 // El contorno es lo que ocupan TODOS los contornos juntos (contornosTexto.js).
@@ -183,6 +206,19 @@ function medirTinta(glifos, cuerpo, trackingMil, escalaH) {
   };
 }
 
+// Varios renglones al mismo cuerpo/tracking/escala: el ancho es el del
+// renglón más ancho; el alto, de la tinta de arriba del primero a la de abajo
+// del último (paso = distancia entre líneas de base, en em).
+function medirBloque(glifosPorLinea, cuerpo, trackingMil, escalaH, paso) {
+  const lineas = glifosPorLinea.map((g) => medirTinta(g, cuerpo, trackingMil, escalaH));
+  if (lineas.length === 1) return { ...lineas[0], lineas };
+  return {
+    lineas,
+    ancho: Math.max(...lineas.map((l) => l.ancho)),
+    alto: (lineas.length - 1) * paso * cuerpo + Math.max(...lineas.map((l) => l.alto)),
+  };
+}
+
 function bandaDe(medidor, modo) {
   return modo === 'calibrado' ? (medidor.bandaNumeros || medidor.banda) : medidor.banda;
 }
@@ -234,7 +270,7 @@ export function calibrarCuerpo({ medidor, candidatos, anchoCm, altoCm, reglas = 
  */
 export function ajustarTexto({
   medidor, texto, anchoCm, altoCm, modo, cuerpoCalibradoCm = null, reglas = REGLAS_TEXTO,
-  espaciadoMil = 0, contornoCm = 0, alineacion = 'centro',
+  espaciadoMil = 0, contornoCm = 0, alineacion = 'centro', interlineado = INTERLINEADO.porDefecto,
 }) {
   // Estilo elegido en la zona (panel de Diseño): el espaciado entre letras
   // es el punto de partida del tracking, y el contorno de color ocupa
@@ -247,17 +283,26 @@ export function ajustarTexto({
     anchoCm = Math.max(anchoCm - 2 * contorno, 0.01);
     altoCm = Math.max(altoCm - 2 * contorno, 0.01);
   }
-  const valor = normalizarTexto(texto);
-  if (valor === '' || !(anchoCm > 0) || !(altoCm > 0)) return null;
-  const glifos = medidor.glifos(valor);
-  if (glifos.length === 0) return null;
-
   const esNumero = modo === 'calibrado';
+  // Un nombre o texto puede ir en varios renglones (uno encima del otro); un
+  // número o una talla, siempre en uno.
+  const renglones = (esNumero ? [normalizarTexto(texto)] : normalizarLineas(texto))
+    .map((l) => ({ texto: l, glifos: medidor.glifos(l) }))
+    .filter((r) => r.texto !== '' && r.glifos.length > 0);
+  if (renglones.length === 0 || !(anchoCm > 0) || !(altoCm > 0)) return null;
+  const valor = renglones.map((r) => r.texto).join('\n');
+  const glifosPorLinea = renglones.map((r) => r.glifos);
+  const n = renglones.length;
+
   const banda = bandaDe(medidor, modo);
   const alturaBanda = banda.maxY - banda.minY;
+  // Entre renglones: de línea de base a línea de base, en em.
+  const paso = alturaBanda * (1 + limitarInterlineado(interlineado) / 100);
+  // El alto que ocupan las bandas de todos los renglones, por em de cuerpo.
+  const altoBloque = alturaBanda + (n - 1) * paso;
   // Medido YA con el espaciado elegido: si no, un nombre con letras más
   // abiertas no entraría y perdería su espaciado en el primer paso.
-  const ancho1 = medirTinta(glifos, 1, espaciado, 100).ancho;
+  const ancho1 = medirBloque(glifosPorLinea, 1, espaciado, 100, paso).ancho;
   const pasos = [];
 
   let cuerpo;
@@ -267,13 +312,13 @@ export function ajustarTexto({
     cuerpo = limitarCuerpo(cuerpoCalibradoCm > 0 ? cuerpoCalibradoCm : altoCm / alturaBanda);
     pasos.push('cifra al alto de la zona: ' + cuerpo.toFixed(2) + ' cm');
   } else {
-    cuerpo = limitarCuerpo(Math.min(anchoCm / ancho1, altoCm / alturaBanda));
+    cuerpo = limitarCuerpo(Math.min(anchoCm / ancho1, altoCm / altoBloque));
     pasos.push('al alto de la zona: ' + cuerpo.toFixed(2) + ' cm');
   }
   const nominal = cuerpo;
   let tracking = espaciado;
   let escalaH = 100;
-  let tinta = medirTinta(glifos, cuerpo, tracking, escalaH);
+  let tinta = medirBloque(glifosPorLinea, cuerpo, tracking, escalaH, paso);
   // El alto se compara por la BANDA (mayúsculas, o cifras planas), no por la
   // tinta: una letra o cifra redonda (G, O, S, 0, 8) o una tilde sobresalen
   // unas décimas por arriba/abajo -- es la tipografía de toda la vida (y en
@@ -282,8 +327,8 @@ export function ajustarTexto({
   // manda, y si es más ancho que la zona se sale por los costados (pedido
   // explícito: "no importa si se desborda del ancho"). Para él, "cabe" es
   // solo el alto -- que por construcción siempre da.
-  const cabe = () => (esNumero || tinta.ancho <= anchoCm + TOLERANCIA_CM) && alturaBanda * cuerpo <= altoCm + TOLERANCIA_CM;
-  const remedir = () => { tinta = medirTinta(glifos, cuerpo, tracking, escalaH); };
+  const cabe = () => (esNumero || tinta.ancho <= anchoCm + TOLERANCIA_CM) && altoBloque * cuerpo <= altoCm + TOLERANCIA_CM;
+  const remedir = () => { tinta = medirBloque(glifosPorLinea, cuerpo, tracking, escalaH, paso); };
 
   const reducirCuerpo = () => {
     if (cabe() || !(reglas.cuerpoMinimoFactor < 1)) return;
@@ -317,21 +362,32 @@ export function ajustarTexto({
   // borde de color, la que llega al borde de la zona es la línea del borde:
   // anchoCm ya descuenta su grosor). Un número más ancho que su zona se sale
   // solo por el lado contrario al de la alineación.
-  const dxCm = alineacion === 'izquierda' ? -anchoCm / 2 - tinta.izq
-    : alineacion === 'derecha' ? anchoCm / 2 - tinta.der
-    : -(tinta.izq + tinta.der) / 2;
+  // Con varios renglones, cada uno se alinea por su propia tinta.
+  const dxDe = (t) => (alineacion === 'izquierda' ? -anchoCm / 2 - t.izq
+    : alineacion === 'derecha' ? anchoCm / 2 - t.der
+    : -(t.izq + t.der) / 2);
   // En vertical, la banda (de mayúsculas, o de cifras planas) centrada: un
   // número a alto completo queda con la base de la cifra en el borde de
-  // abajo y su tope en el de arriba.
+  // abajo y su tope en el de arriba. Varios renglones: el bloque entero
+  // centrado, cada renglón un paso más abajo que el anterior.
   const centroBanda = ((banda.minY + banda.maxY) / 2) * cuerpo;
+  const lineas = renglones.map((r, i) => ({
+    texto: r.texto,
+    dxCm: dxDe(tinta.lineas[i]),
+    dyCm: centroBanda + (i - (n - 1) / 2) * paso * cuerpo,
+    // Dónde empieza y termina su tinta, desde su origen (cm).
+    tintaCm: { izq: tinta.lineas[i].izq, der: tinta.lineas[i].der },
+  }));
   return {
-    texto: valor, // el texto normalizado que se midió: es EL que hay que dibujar
+    texto: valor, // el texto normalizado que se midió: es EL que hay que dibujar (renglones separados por \n)
+    // Cada renglón con su origen respecto del centro de la zona (como dxCm/dyCm).
+    lineas,
     sinGlifo: medidor.sinGlifo(valor),
     cuerpoCm: cuerpo,
     trackingMil: tracking,
     escalaH,
-    dxCm,
-    dyCm: centroBanda,
+    dxCm: lineas[0].dxCm,
+    dyCm: lineas[0].dyCm,
     cabe: cabe(),
     pasos,
     tintaCm: { ancho: tinta.ancho, alto: tinta.alto },
@@ -405,6 +461,7 @@ export async function ajustarTextosDePiezas(piezas, obtenerMedidor, reglas = REG
         espaciadoMil: t.espaciadoMil || 0,
         contornoCm: grosorTotal(contornosDeTexto(t)),
         alineacion: t.alineacion || 'centro',
+        interlineado: t.interlineado,
       });
       // El texto que se escribe en el PDF es el mismo que se midió.
       return { ...t, texto: ajuste ? ajuste.texto : t.texto, fuenteUrl, ajuste };
