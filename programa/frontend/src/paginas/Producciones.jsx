@@ -106,9 +106,11 @@ export function Producciones({ recargarSenal, onEditar }) {
 function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
   const disponibles = useMemo(() => tallasDeProduccion(produccion, grupos, piezas), [produccion, grupos, piezas]);
   const [elegidas, setElegidas] = useState(() => new Set(disponibles));
-  // Lo que se cargó en cada zona en Diseño (el nombre, el número) sale tal
-  // cual: exportar una producción es exportar lo que se ve en Diseño.
-  const conEjemplo = true;
+  // Las zonas de nombre y número: con lo que se cargó en Diseño (lo que se
+  // ve ahí) o vacías -- para prendas sin nombre/número, o para llenarlas
+  // después jugador por jugador. Las demás zonas (textos fijos, talla,
+  // logos) salen siempre.
+  const [conEjemplo, setConEjemplo] = useState(true);
   const [porSeparado, setPorSeparado] = useState(true);
   const [trabajando, setTrabajando] = useState(null);
   const [error, setError] = useState(null);
@@ -191,6 +193,19 @@ function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
               Un archivo por talla
               <span className="text-xs text-faint-foreground">(varias tallas bajan juntas en un .zip; si no, todas en un solo PDF, una detrás de otra)</span>
             </label>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-faint-foreground">Nombre y número del jugador</span>
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Nombre y número del jugador">
+              <button type="button" aria-pressed={conEjemplo} className={chip(conEjemplo)} onClick={() => setConEjemplo(true)}>Como en Diseño</button>
+              <button type="button" aria-pressed={!conEjemplo} className={chip(!conEjemplo)} onClick={() => setConEjemplo(false)}>Vacíos</button>
+              <span className="text-xs text-faint-foreground">
+                {conEjemplo
+                  ? 'Salen con lo que cargaste en esas zonas en Diseño.'
+                  : 'Esas zonas quedan en blanco (prendas sin nombre ni número). Los textos fijos, la talla y los logos salen igual.'}
+              </span>
+            </div>
           </div>
 
           {error && <Aviso tono="error">{error}</Aviso>}
