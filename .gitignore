@@ -20,3 +20,6 @@ backend.log
 backend-error.log
 
 .DS_Store
+
+# App de escritorio: lo que arma preparar.mjs (copia del backend y la app ya armada).
+programa/escritorio/app/

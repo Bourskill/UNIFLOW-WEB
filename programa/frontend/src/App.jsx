@@ -10,6 +10,7 @@ import { CorteLaser } from './paginas/CorteLaser.jsx';
 import { Producciones } from './paginas/Producciones.jsx';
 import { Icono } from './componentes/Icono.jsx';
 import { EstadoServidor } from './componentes/EstadoServidor.jsx';
+import { CarpetaEscritorio } from './componentes/CarpetaEscritorio.jsx';
 import { Avisos } from './componentes/Avisos.jsx';
 import { SubTabs } from './componentes/SubTabs.jsx';
 import { PanelDock } from './componentes/PanelDock.jsx';
@@ -109,6 +110,7 @@ function App() {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs text-faint-foreground">Producción / {pestanaActual.etiqueta}</span>
+          <CarpetaEscritorio />
           <EstadoServidor />
         </div>
       </header>

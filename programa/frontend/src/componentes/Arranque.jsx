@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { verificarSalud, entrarConClave, leerClaveGuardada, EVENTO_SIN_CLAVE } from '../api.js';
+import { verificarSalud, entrarConClave, leerClaveGuardada, esEscritorio, EVENTO_SIN_CLAVE } from '../api.js';
 import { almacen } from '../datos/index.js';
 import {
   progresoTotal, imagenesDeDisenos, GRUPOS_DE_DATOS, PESO_COLECCION,
@@ -61,7 +61,7 @@ export function Arranque({ children }) {
       if (cancelado) return;
       if (ok) {
         setServidorTardo(Date.now() - inicio);
-        setFase(leerClaveGuardada() ? 'cargando' : 'clave');
+        setFase(leerClaveGuardada() || esEscritorio() ? 'cargando' : 'clave');
       } else if (Date.now() - inicio > TOPE_DESPERTAR_MS) {
         setFase('caido');
       } else {

@@ -343,6 +343,15 @@ router.delete('/fuentes/:id', async (req, res) => {
   res.status(204).end();
 });
 
+// Respaldo: una colección ENTERA tal cual está guardada (sin recortes como
+// los de la Biblioteca). La usa la app de escritorio para traerse los datos
+// de la versión web, y sirve como copia de seguridad.
+export const COLECCIONES_RESPALDO = ['piezas', 'grupos', 'disenos', 'productos', 'plantillas', 'pedidos', 'fuentes', 'generaciones'];
+router.get('/respaldo/:coleccion', async (req, res) => {
+  if (!COLECCIONES_RESPALDO.includes(req.params.coleccion)) return res.status(404).json({ error: 'Colección desconocida' });
+  res.json(await leerColeccion(req.params.coleccion));
+});
+
 function crudSimple(nombreColeccion) {
   router.get('/' + nombreColeccion, async (req, res) => {
     res.json(await leerColeccion(nombreColeccion));

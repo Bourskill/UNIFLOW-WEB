@@ -3,7 +3,9 @@
 // Se normaliza el sufijo /api acá para que dé igual si la variable se cargó
 // como el origen solo (https://host) o con el sufijo ya puesto
 // (https://host/api) — ambas formas terminan en la misma BASE_URL.
-const ORIGEN = (import.meta.env.VITE_API_URL || 'http://localhost:4000')
+// La app de escritorio (programa/escritorio) sirve la página desde el mismo
+// servidor local: VITE_MISMO_ORIGEN=1 al armarla, y la API queda en /api.
+const ORIGEN = (import.meta.env.VITE_MISMO_ORIGEN === '1' ? '' : import.meta.env.VITE_API_URL || 'http://localhost:4000')
   .replace(/\/+$/, '')
   .replace(/\/api$/, '');
 const BASE_URL = ORIGEN + '/api';
@@ -118,13 +120,34 @@ async function pedirJson(ruta, opciones = {}) {
 // El servidor gratis de Render se duerme tras inactividad; despertarlo puede
 // tardar hasta un minuto. Esto es justamente lo que EstadoServidor.jsx
 // consulta para avisar en vez de dejar que cada pantalla falle en silencio.
+let escritorio = import.meta.env.VITE_MISMO_ORIGEN === '1';
+/** ¿Es la app de escritorio (datos en una carpeta, sin clave)? Lo dice el servidor. */
+export function esEscritorio() {
+  return escritorio;
+}
+
 export async function verificarSalud() {
   try {
     const respuesta = await fetch(BASE_URL + '/salud', { signal: AbortSignal.timeout(5000) });
+    if (respuesta.ok) escritorio = !!(await respuesta.json().catch(() => ({}))).escritorio;
     return respuesta.ok;
   } catch {
     return false;
   }
+}
+
+// --- App de escritorio: la carpeta de datos y traerse la versión web ---------
+export function datosDeEscritorio() {
+  return pedirJson('/escritorio');
+}
+export function resumenDeEscritorio() {
+  return pedirJson('/escritorio/resumen');
+}
+export function importarDesdeWeb(origen, clave) {
+  return pedirJson('/escritorio/importar', { method: 'POST', body: JSON.stringify({ origen, clave }) });
+}
+export function estadoImportacion() {
+  return pedirJson('/escritorio/importar');
 }
 
 // Sube un archivo pesado (imagen de Diseño, PDF/DXF original de Pieza) a
@@ -151,7 +174,8 @@ export async function subirArchivo(datos, contentType, nombre) {
   if (!pedido.ok) throw new Error(firma.error || 'No se pudo preparar la subida (' + pedido.status + ')');
   let respuesta;
   try {
-    respuesta = await fetch(firma.urlSubida, {
+    // En la app de escritorio la dirección es relativa (/api/archivos-locales/…).
+    respuesta = await fetch(new URL(firma.urlSubida, ORIGEN || window.location.origin), {
       method: 'PUT',
       headers: { 'content-type': contentType, 'x-upsert': 'true', 'cache-control': 'max-age=3600' },
       body: blob,

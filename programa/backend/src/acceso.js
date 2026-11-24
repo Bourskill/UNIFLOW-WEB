@@ -16,7 +16,10 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 const LARGO_MINIMO = 12;
 
 const clave = process.env.CLAVE_ACCESO || '';
-if (clave.length < LARGO_MINIMO) {
+// En la app de escritorio (UNIFLOW_CARPETA) el servidor solo atiende a esta
+// PC (127.0.0.1, ver server.js): no hay clave que pedir.
+const sinClave = !!process.env.UNIFLOW_CARPETA;
+if (!sinClave && clave.length < LARGO_MINIMO) {
   // Falla al arrancar en vez de levantar un backend abierto: nunca se sirve
   // la API sin clave por olvidarse de configurarla.
   throw new Error(
@@ -64,7 +67,7 @@ function anotarFallo(ip) {
 
 export function exigirClaveDeAcceso(rutasAbiertas) {
   return (req, res, next) => {
-    if (req.method === 'OPTIONS' || rutasAbiertas.has(req.path)) return next();
+    if (sinClave || req.method === 'OPTIONS' || rutasAbiertas.has(req.path)) return next();
 
     const ip = req.ip || req.socket.remoteAddress || '';
     if (bloqueada(ip)) {
