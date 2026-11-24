@@ -14,6 +14,7 @@
 
 import { MARGEN_CAPSULA_CM, COLOR_CAPSULA, COLOR_TALLA, textoDeTalla, escalaDentroDelMolde } from './capsulaTalla.js';
 import { campoDeZona } from './campoDeZona.js';
+import { contornosDeZona } from './contornosTexto.js';
 import { resolver as resolverAnclaje } from './anclaje/resolver.js';
 import { geometriaDelGrupo } from './geometriaAnclaje.js';
 import { resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
@@ -186,12 +187,11 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             rotacionGrados: cruda?.rotacion || 0,
             fuenteUrl: fuente?.archivoUrl || null,
             // Estilo de la zona (panel de Diseño): espaciado entre letras en
-            // milésimas de em, y un contorno de color por fuera de la letra.
+            // milésimas de em, y uno o varios contornos de color por fuera de
+            // la letra (contornosTexto.js), del pegado a la letra al de afuera.
             espaciadoMil: esTalla ? 0 : Number(cruda?.espaciadoMil) || 0,
             alineacion: !esTalla && ['izquierda', 'derecha'].includes(cruda?.alineacion) ? cruda.alineacion : 'centro',
-            contorno: !esTalla && cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0
-              ? { colorHex: cruda.contorno.colorHex || '#000000', grosorCm: Number(cruda.contorno.grosorCm) }
-              : null,
+            contornos: esTalla ? [] : contornosDeZona(cruda),
           };
         })
         .filter(Boolean);

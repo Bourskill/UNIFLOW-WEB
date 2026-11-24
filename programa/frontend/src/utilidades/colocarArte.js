@@ -15,6 +15,8 @@ export const AJUSTE_ARTE_INICIAL = Object.freeze({
   dxCm: 0,
   dyCm: 0,
   calce: [], // puntos de calce (ver abajo)
+  espejoH: false, // el arte volteado de izquierda a derecha (sobre su propio centro)
+  espejoV: false, // el arte volteado de arriba abajo
 });
 
 const numero = (v, porDefecto) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : porDefecto);
@@ -87,11 +89,14 @@ export function normalizarAjusteArte(ajuste) {
     dxCm: numero(a.dxCm, 0),
     dyCm: numero(a.dyCm, 0),
     calce: normalizarCalce(a.calce),
+    espejoH: a.espejoH === true,
+    espejoV: a.espejoV === true,
   };
 }
 
 /**
- * @returns {{x:number, y:number, ancho:number, alto:number}} rectángulo de la imagen en cm
+ * @returns {{x:number, y:number, ancho:number, alto:number, espejoH:boolean, espejoV:boolean}}
+ *   rectángulo de la imagen en cm, y si va volteada adentro de ese rectángulo
  */
 export function colocarArte({ anchoCm, altoCm, anchoImagen, altoImagen, ajuste }) {
   const a = normalizarAjusteArte(ajuste);
@@ -108,7 +113,9 @@ export function colocarArte({ anchoCm, altoCm, anchoImagen, altoImagen, ajuste }
   // corrimiento no se usan).
   const calce = Array.isArray(ajuste?.calceCm) ? ajuste.calceCm : [];
   if (calce.length > 0) {
-    // Cada punto del arte, en "anchos de imagen": (u, v / proporción).
+    // Cada punto del arte, en "anchos de imagen": (u, v / proporción). Se
+    // miden sobre el arte COMO SE VE (con espejo, ya volteado): voltear no
+    // desarma el calce, y con un par simétrico da exactamente lo mismo.
     const ps = calce.map((c) => [c.u, c.v / proporcion]);
     const ts = calce.map((c) => [c.x, c.y]);
     const media = (l) => [l.reduce((s, q) => s + q[0], 0) / l.length, l.reduce((s, q) => s + q[1], 0) / l.length];
@@ -123,10 +130,10 @@ export function colocarArte({ anchoCm, altoCm, anchoImagen, altoImagen, ajuste }
       });
       if (den > 1e-9 && num / den > 1e-3) { ancho = num / den; alto = ancho / proporcion; }
     }
-    return { x: tm[0] - ancho * pm[0], y: tm[1] - ancho * pm[1], ancho, alto };
+    return { x: tm[0] - ancho * pm[0], y: tm[1] - ancho * pm[1], ancho, alto, espejoH: a.espejoH, espejoV: a.espejoV };
   }
 
   const x = a.alineacionH === 'izquierda' ? 0 : a.alineacionH === 'derecha' ? anchoCm - ancho : (anchoCm - ancho) / 2;
   const y = a.alineacionV === 'arriba' ? 0 : a.alineacionV === 'abajo' ? altoCm - alto : (altoCm - alto) / 2;
-  return { x: x + a.dxCm, y: y + a.dyCm, ancho, alto };
+  return { x: x + a.dxCm, y: y + a.dyCm, ancho, alto, espejoH: a.espejoH, espejoV: a.espejoV };
 }

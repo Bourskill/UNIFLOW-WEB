@@ -20,6 +20,7 @@ import { ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { InputNumero } from '../componentes/InputNumero.jsx';
 import { textoDeTalla, COLOR_TALLA, escalaDentroDelMolde } from '../utilidades/capsulaTalla.js';
+import { contornosDeZona } from '../utilidades/contornosTexto.js';
 import { PanelDock } from '../componentes/PanelDock.jsx';
 import { PanelTexto } from '../componentes/PanelTexto.jsx';
 import { PanelAjusteArte } from '../componentes/PanelAjusteArte.jsx';
@@ -1283,7 +1284,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       escalaMolde: esTallaZ ? escalaDentroDelMolde({ cx: z.cx, cy: z.cy, ancho: z.ancho, alto: z.alto, rotacionGrados: cruda?.rotacion || 0 }, geoActiva?.vertices) : 1,
       espaciadoMil: esTallaZ ? 0 : Number(cruda?.espaciadoMil) || 0,
       alineacion: cruda?.alineacion || 'centro',
-      contorno: !esTallaZ && cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0 ? cruda.contorno : null,
+      contornos: esTallaZ ? [] : contornosDeZona(cruda),
     };
   });
 

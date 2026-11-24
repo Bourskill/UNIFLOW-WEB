@@ -5,6 +5,7 @@ import { useFuentesWeb } from './useFuentesWeb.js';
 import { colocarArte } from '../utilidades/colocarArte.js';
 import { fondoActivo, ejeDegradado } from '../utilidades/fondoPieza.js';
 import { medidasDeCapsula, caminoDeCapsula, MARGEN_CAPSULA_CM } from '../utilidades/capsulaTalla.js';
+import { grosorTotal, pasadasDeContornos } from '../utilidades/contornosTexto.js';
 
 // Puerto FIEL del lienzo de Anclajes del panel de Illustrator
 // (programa/panel/js/main.js: dibujarLienzo/candidatosDe/sinMontonera) --
@@ -252,32 +253,30 @@ function TextoAjustado({ z, ajuste, familia }) {
   const x = z.cx + ajuste.dxCm;
   const y = z.cy + ajuste.dyCm;
   const h = ajuste.escalaH / 100;
-  // Tal cual sale en el PDF: el color real y, SOLO si la zona lo tiene
-  // activado, su borde -- por DEBAJO (paint-order) con el doble del grosor,
-  // así lo que se ve es exactamente el grosor elegido por fuera de la letra.
-  // Sin borde activado, la letra va limpia (pedido explícito: antes llevaba
-  // un halo oscuro siempre y parecía un borde negro que no se había pedido).
-  const contorno = z.contorno && Number(z.contorno.grosorCm) > 0 ? z.contorno : null;
+  // Tal cual sale en el PDF: el color real y, SOLO si la zona los tiene, sus
+  // contornos -- por DEBAJO, del de más afuera al pegado a la letra, cada uno
+  // con el doble de lo que llega hasta su borde (contornosTexto.js), así cada
+  // uno se ve exactamente con su grosor. Sin contornos, la letra va limpia
+  // (pedido explícito: antes llevaba un halo oscuro siempre).
+  const pasadas = pasadasDeContornos(z.contornos || []);
   // La talla: su cápsula blanca debajo, centrada en la zona (capsulaTalla.js).
   const capsula = z.campoPedido === 'talla'
     ? caminoDeCapsula(medidasDeCapsula(ajuste, MARGEN_CAPSULA_CM))
       .map(([op, ...p]) => op + (op === 'Z' ? '' : ' ' + p.map((v, i) => (i % 2 ? z.cy + v : z.cx + v)).join(' '))).join(' ')
     : null;
+  const propiedades = {
+    x, y, fontSize: ajuste.cuerpoCm, fontFamily: familia,
+    style: { letterSpacing: ajuste.trackingMil / 1000 + 'em', fontKerning: 'none' },
+    transform: h !== 1 ? 'translate(' + x + ' ' + y + ') scale(' + h + ' 1) translate(' + -x + ' ' + -y + ')' : undefined,
+  };
+  const contenido = ajuste.texto ?? z.contenidoTexto;
   return (
     <>
     {capsula && <path d={capsula} fill="#ffffff" />}
-    <text
-      x={x} y={y}
-      fontSize={ajuste.cuerpoCm} fontFamily={familia}
-      style={{ letterSpacing: ajuste.trackingMil / 1000 + 'em', fontKerning: 'none' }}
-      transform={h !== 1 ? 'translate(' + x + ' ' + y + ') scale(' + h + ' 1) translate(' + -x + ' ' + -y + ')' : undefined}
-      fill={z.colorHex || '#e6e9f0'}
-      {...(contorno
-        ? { stroke: contorno.colorHex, strokeWidth: 2 * Number(contorno.grosorCm), strokeLinejoin: 'round', paintOrder: 'stroke' }
-        : {})}
-    >
-      {ajuste.texto ?? z.contenidoTexto}
-    </text>
+    {pasadas.map((p, i) => (
+      <text key={i} {...propiedades} fill="none" stroke={p.colorHex} strokeWidth={p.anchoTrazoCm} strokeLinejoin="round">{contenido}</text>
+    ))}
+    <text {...propiedades} fill={z.colorHex || '#e6e9f0'}>{contenido}</text>
     </>
   );
 }
@@ -297,7 +296,7 @@ function pedidoDeAjuste(z) {
     // El estilo cambia el ajuste (letras más abiertas, o el margen que deja
     // el contorno): va en el pedido para que el backend lo tenga en cuenta.
     espaciadoMil: z.espaciadoMil || 0,
-    contornoCm: z.contorno ? Number(z.contorno.grosorCm) || 0 : 0,
+    contornoCm: Math.min(grosorTotal(z.contornos || []), 6), // tope del backend (ajusteTexto.js·CONTORNO_MAX_CM)
     alineacion: esTalla ? 'centro' : z.alineacion || 'centro',
   };
 }
@@ -861,6 +860,7 @@ export function LienzoAnclaje({
   function marcarEnArte(p) {
     if (!onMarcarEnArte || !rectArteActual.current) return;
     const ra = rectArteActual.current;
+    // Sobre el arte como se ve (con espejo, ya volteado: colocarArte.js).
     const u = (p.x - ra.x) / ra.ancho, v = (p.y - ra.y) / ra.alto;
     if (u < 0 || u > 1 || v < 0 || v > 1) return; // fuera del diseño
     onMarcarEnArte({ u, v, uEspejo: 1 - u });
@@ -918,6 +918,14 @@ export function LienzoAnclaje({
     : null;
   const rectArte = rectArteCalculado;
   rectArteActual.current = rectArte;
+  // Espejo del arte (Ajustar diseño): volteado sobre el centro de su rectángulo.
+  const volteoArte = rectArte && (rectArte.espejoH || rectArte.espejoV)
+    ? (() => {
+        const sx = rectArte.espejoH ? -1 : 1, sy = rectArte.espejoV ? -1 : 1;
+        const cx = rectArte.x + rectArte.ancho / 2, cy = rectArte.y + rectArte.alto / 2;
+        return 'translate(' + cx * (1 - sx) + ' ' + cy * (1 - sy) + ') scale(' + sx + ' ' + sy + ')';
+      })()
+    : undefined;
 
   return (
     <div
@@ -981,11 +989,14 @@ export function LienzoAnclaje({
               <>
                 {editandoArte && (
                   <image href={imagenUrl} x={rectArte.x} y={rectArte.y} width={rectArte.ancho} height={rectArte.alto}
-                    preserveAspectRatio="none" opacity={0.3} pointerEvents="none" />
+                    transform={volteoArte} preserveAspectRatio="none" opacity={0.3} pointerEvents="none" />
                 )}
-                <image data-fondo={editandoArte ? undefined : '1'} href={imagenUrl}
-                  x={rectArte.x} y={rectArte.y} width={rectArte.ancho} height={rectArte.alto}
-                  clipPath={'url(#' + idRecorte + ')'} preserveAspectRatio="none" pointerEvents={editandoArte ? 'none' : undefined} />
+                {/* El recorte va en el grupo, no en la imagen: si no, con espejo se voltearía también el molde. */}
+                <g clipPath={'url(#' + idRecorte + ')'}>
+                  <image data-fondo={editandoArte ? undefined : '1'} href={imagenUrl}
+                    x={rectArte.x} y={rectArte.y} width={rectArte.ancho} height={rectArte.alto} transform={volteoArte}
+                    preserveAspectRatio="none" pointerEvents={editandoArte ? 'none' : undefined} />
+                </g>
                 {editandoArte && (
                   <rect x={rectArte.x} y={rectArte.y} width={rectArte.ancho} height={rectArte.alto}
                     fill="transparent" stroke="#4c8dff" strokeWidth={cmPorPx * 1.5} strokeDasharray={cmPorPx * 6 + ' ' + cmPorPx * 4}

@@ -69,7 +69,7 @@ comprobar('calibrada (mismo alto en todas las tallas) y siempre centrada', texto
   });
   const tf = pzs.map((p) => p.textos[0]);
   comprobar('femenina: en mayúscula y con guion (S-, XXL-)', tf.map((t) => t?.texto).join() === 'S-,XXL-', tf.map((t) => t?.texto).join());
-  comprobar('la talla siempre negra, sin borde ni espaciado', tf.every((t) => t.colorHex === '#000000' && !t.contorno && t.espaciadoMil === 0));
+  comprobar('la talla siempre negra, sin borde ni espaciado', tf.every((t) => t.colorHex === '#000000' && t.contornos.length === 0 && t.espaciadoMil === 0));
 }
 
 console.log('\n--- La talla no se sale del molde ---');

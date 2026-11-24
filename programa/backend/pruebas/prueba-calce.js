@@ -76,5 +76,38 @@ console.log('\n--- En el pedido, talla por talla ---');
   comprobar('sin calce, el ajuste sigue igual', conCalceResuelto('Frente', null, {}) === null);
 }
 
+console.log('\n--- Espejo del diseño ---');
+{
+  const img = { anchoImagen: 2000, altoImagen: 1000 };
+  const normal = colocarArte({ anchoCm: 38, altoCm: 50, ...img, ajuste: { alineacionH: 'izquierda' } });
+  const volteado = colocarArte({ anchoCm: 38, altoCm: 50, ...img, ajuste: { alineacionH: 'izquierda', espejoH: true } });
+  comprobar('el espejo no mueve el rectángulo, solo voltea adentro', volteado.espejoH === true && volteado.espejoV === false &&
+    cerca(volteado.x, normal.x) && cerca(volteado.ancho, normal.ancho));
+  const conCalce = colocarArte({ anchoCm: 38, altoCm: 50, ...img, ajuste: { espejoH: true, calceCm: [{ u: 0.1, v: 0.5, x: 3, y: 12 }, { u: 0.9, v: 0.5, x: 35, y: 12 }] } });
+  const [p1x, p1y] = dondeCae(conCalce, 0.1, 0.5), [p2x, p2y] = dondeCae(conCalce, 0.9, 0.5); // sobre el arte como se ve
+  comprobar('voltear no desarma el calce: los puntos siguen en sus nodos',
+    cerca(p1x, 3) && cerca(p1y, 12) && cerca(p2x, 35) && cerca(p2y, 12) && conCalce.espejoH, [p1x, p1y, p2x, p2y].join(' '));
+  comprobar('un ajuste viejo no viene volteado', normalizarAjusteArte({}).espejoH === false && normalizarAjusteArte({ espejoH: 'si' }).espejoH === false);
+
+  // En el PDF: el arte va dentro de una matriz que lo voltea sobre su centro.
+  const { PDFDocument, rgb } = await import('pdf-lib');
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 100]).drawRectangle({ x: 0, y: 0, width: 50, height: 100, color: rgb(1, 0, 0) });
+  const url = 'data:application/pdf;base64,' + Buffer.from(await doc.save()).toString('base64');
+  const { generarPdfNesting } = await import('../src/motor/exportarPdf.js');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const matrices = async (ajuste) => {
+    const bytes = await generarPdfNesting({ anchoLienzoCm: 40, altoLienzoCm: 30, piezas: [{ piezaId: 'F', talla: 'm', posicion: { x: 0, y: 0 }, anchoCm: 20, altoCm: 10, imagenDataUrl: url, ajusteArte: ajuste, textos: [], imagenes: [] }] });
+    const pag = await (await pdfjs.getDocument({ data: new Uint8Array(bytes) }).promise).getPage(1);
+    const ops = await pag.getOperatorList();
+    return ops.fnArray.map((f, i) => (f === pdfjs.OPS.transform ? ops.argsArray[i] : null)).filter(Boolean);
+  };
+  const sinEspejo = await matrices({ base: 'encajar' });
+  const conEspejo = await matrices({ base: 'encajar', espejoH: true });
+  const cx = 10 * 28.3465; // centro del arte (encajado, 20 cm de ancho) en puntos
+  comprobar('sin espejo, ninguna matriz que voltee', !sinEspejo.some((m) => m[0] < 0));
+  comprobar('con espejo, la matriz voltea en X sobre el centro del arte', conEspejo.some((m) => m[0] === -1 && m[3] === 1 && cerca(m[4], 2 * cx, 0.01)), JSON.stringify(conEspejo));
+}
+
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');
 process.exit(fallos ? 1 : 0);

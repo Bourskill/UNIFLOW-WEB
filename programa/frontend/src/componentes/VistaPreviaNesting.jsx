@@ -114,7 +114,11 @@ function PiezaEnLienzo({ pieza, familias }) {
     : null;
   const imagenKonva = imagen && (
     rectArte
-      ? <ImagenKonva image={imagen} x={rectArte.x * PX_POR_CM} y={rectArte.y * PX_POR_CM} width={rectArte.ancho * PX_POR_CM} height={rectArte.alto * PX_POR_CM} />
+      // Con espejo (Ajustar diseño), volteada en su lugar: escala -1 desde el borde opuesto.
+      ? <ImagenKonva image={imagen}
+          x={(rectArte.x + (rectArte.espejoH ? rectArte.ancho : 0)) * PX_POR_CM} y={(rectArte.y + (rectArte.espejoV ? rectArte.alto : 0)) * PX_POR_CM}
+          scaleX={rectArte.espejoH ? -1 : 1} scaleY={rectArte.espejoV ? -1 : 1}
+          width={rectArte.ancho * PX_POR_CM} height={rectArte.alto * PX_POR_CM} />
       : <ImagenKonva image={imagen} width={ancho} height={alto} />
   );
 

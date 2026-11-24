@@ -41,6 +41,8 @@ const CUERPO_MAXIMO_CM = 1296 / 28.3465;
 // costados genera un aviso; menos, es el desborde normal y no se menciona.
 const DESBORDE_NUMERO_AVISO = 0.25;
 
+import { contornosDeTexto, grosorTotal } from './contornosTexto.js';
+
 export const REGLAS_TEXTO = {
   trackingMinimo: -30, // milésimas de em, como el "tracking" de Illustrator
   condensacionMaxima: 90, // % mínimo de escala horizontal
@@ -64,7 +66,8 @@ export function normalizarTexto(texto) {
 
 // Límites del estilo que se puede elegir en la zona (y que acepta la API).
 export const ESPACIADO_MIL = { min: -200, max: 500 };
-export const CONTORNO_MAX_CM = 3;
+// El contorno es lo que ocupan TODOS los contornos juntos (contornosTexto.js).
+export const CONTORNO_MAX_CM = 6;
 
 function limitarEspaciado(mil) {
   const n = Number(mil);
@@ -400,7 +403,7 @@ export async function ajustarTextosDePiezas(piezas, obtenerMedidor, reglas = REG
         cuerpoCalibradoCm: t.modo === 'calibrado' ? cuerpoPorZona.get(grupoDeCalibracion(t)) : null,
         reglas,
         espaciadoMil: t.espaciadoMil || 0,
-        contornoCm: t.contorno?.grosorCm || 0,
+        contornoCm: grosorTotal(contornosDeTexto(t)),
         alineacion: t.alineacion || 'centro',
       });
       // El texto que se escribe en el PDF es el mismo que se midió.

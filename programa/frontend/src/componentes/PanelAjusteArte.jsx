@@ -50,6 +50,19 @@ export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando, calce
           </div>
         </div>
 
+        <div className="flex flex-col gap-1.5">
+          <span className="font-medium text-foreground">Espejo</span>
+          <div className="flex gap-1">
+            {[['espejoH', '⇆ Horizontal', 'Voltear el diseño de izquierda a derecha'],
+              ['espejoV', '⇅ Vertical', 'Voltear el diseño de arriba abajo']].map(([campo, texto, titulo]) => (
+              <button key={campo} type="button" title={titulo} aria-pressed={a[campo]} onClick={() => poner({ [campo]: !a[campo] })}
+                className={'rounded-md border px-2.5 py-1 ' + (a[campo] ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary')}>
+                {texto}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className={'flex flex-col gap-1.5 ' + (escalaPorCalce ? 'pointer-events-none opacity-40' : '')} aria-disabled={escalaPorCalce}>
           <span className="font-medium text-foreground">Escala</span>
           <div className="flex items-center gap-2">

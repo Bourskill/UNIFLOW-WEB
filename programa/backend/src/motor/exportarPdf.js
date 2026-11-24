@@ -12,11 +12,13 @@ import {
   beginText, endText, setFontAndSize, setFillingColor, showText,
   setCharacterSpacing, setCharacterSqueeze, rotateAndSkewTextRadiansAndTranslate,
   setStrokingColor, setLineWidth, setLineJoin, LineJoinStyle, setTextRenderingMode, TextRenderingMode, stroke,
+  concatTransformationMatrix,
 } from 'pdf-lib';
 import ClipperLib from 'clipper-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { bytesDeFuente, obtenerMedidor, urlDeStoragePermitida, leerConTope } from './medidorFuentes.js';
 import { ajustarTexto } from './ajusteTexto.js';
+import { contornosDeTexto, grosorTotal, pasadasDeContornos } from './contornosTexto.js';
 import { colocarArte } from './colocarArte.js';
 import { fondoActivo, ejeDegradado, colorEn } from './fondoPieza.js';
 import { medidasDeCapsula, caminoDeCapsula, COLOR_CAPSULA } from './capsulaTalla.js';
@@ -257,6 +259,7 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
         // lo que sobresale de la pieza se recorta. Sin ajuste, se estira al
         // rectángulo como siempre.
         let rectImagen = { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt };
+        let espejo = null;
         if (pieza.ajusteArte) {
           const r = colocarArte({
             anchoCm: pieza.anchoCm, altoCm: pieza.altoCm,
@@ -268,6 +271,7 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
             width: r.ancho * CM_A_PUNTOS,
             height: r.alto * CM_A_PUNTOS,
           };
+          if (r.espejoH || r.espejoV) espejo = { h: r.espejoH, v: r.espejoV };
         }
         const recorte = trazadoEnPagina
           || (pieza.ajusteArte
@@ -281,10 +285,10 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
             clip(),
             endPath()
           );
-          dibujarArte(pagina, arte, rectImagen);
+          dibujarArte(pagina, arte, rectImagen, espejo);
           pagina.pushOperators(popGraphicsState());
         } else {
-          dibujarArte(pagina, arte, rectImagen);
+          dibujarArte(pagina, arte, rectImagen, espejo);
         }
       }
 
@@ -361,7 +365,7 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
                 medidor, texto: texto.texto, anchoCm: texto.anchoCm, altoCm: texto.altoCm,
                 // Con su modo real: un número sigue yendo a alto completo.
                 modo: texto.modo === 'calibrado' ? 'calibrado' : 'llenar',
-                espaciadoMil: texto.espaciadoMil || 0, contornoCm: texto.contorno?.grosorCm || 0,
+                espaciadoMil: texto.espaciadoMil || 0, contornoCm: grosorTotal(contornosDeTexto(texto)),
                 alineacion: texto.alineacion || 'centro',
               }) || a;
             }
@@ -413,16 +417,17 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
             );
           }
 
-          // Contorno de color (estilo de la zona): primero el trazo, con el
-          // DOBLE del grosor elegido y esquinas redondeadas -- la mitad de
-          // adentro queda tapada por el relleno de la pasada siguiente, así
-          // que lo que se ve es exactamente "grosor" por FUERA de la letra.
-          if (texto.contorno && texto.contorno.grosorCm > 0) {
-            const borde = hexARgb(texto.contorno.colorHex);
+          // Contornos de color (estilo de la zona, contornosTexto.js): antes
+          // del relleno, un trazo por contorno, del de más afuera al pegado a
+          // la letra, cada uno con el DOBLE de lo que llega hasta su borde y
+          // esquinas redondeadas -- la mitad de adentro la tapan el siguiente
+          // y el relleno, así que cada uno se ve exactamente con su grosor.
+          for (const pasada of pasadasDeContornos(contornosDeTexto(texto))) {
+            const borde = hexARgb(pasada.colorHex);
             pagina.pushOperators(
               pushGraphicsState(),
               setStrokingColor(rgb(borde.r, borde.g, borde.b)),
-              setLineWidth(2 * texto.contorno.grosorCm * CM_A_PUNTOS),
+              setLineWidth(pasada.anchoTrazoCm * CM_A_PUNTOS),
               setLineJoin(LineJoinStyle.Round),
               setTextRenderingMode(TextRenderingMode.Outline),
               ...operadoresDeTexto(),
@@ -601,7 +606,19 @@ async function incrustarFuente(pdf, bytes) {
   return pdf.embedFont(bytes, nombre ? { customName: nombre } : {});
 }
 
-function dibujarArte(pagina, arte, rect) {
+// espejo: { h, v } -- el arte volteado sobre el centro de su rectángulo (Diseño
+// → Ajustar diseño → Espejo). Va como una matriz alrededor del dibujo: el PDF
+// del diseño sigue entrando vectorial, y el documento de Illustrator lo lee de
+// esa misma matriz (documentoAi.js usa la transformación vigente).
+function dibujarArte(pagina, arte, rect, espejo = null) {
+  if (espejo && (espejo.h || espejo.v)) {
+    const sx = espejo.h ? -1 : 1, sy = espejo.v ? -1 : 1;
+    const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2;
+    pagina.pushOperators(pushGraphicsState(), concatTransformationMatrix(sx, 0, 0, sy, cx * (1 - sx), cy * (1 - sy)));
+    dibujarArte(pagina, arte, rect);
+    pagina.pushOperators(popGraphicsState());
+    return;
+  }
   if (arte.tipo === 'pdf') {
     // En orden: el documento de Illustrator reemplaza cada PDF incrustado
     // por su arte original, si lo tiene (null si no).

@@ -179,6 +179,38 @@ console.log('\n--- El contorno llega al PDF: trazo por debajo, relleno encima --
   comprobar('con el doble del grosor (la mitad de adentro la tapa el relleno)', anchos.some((w) => cerca(w, 2 * 0.3 * 28.3465, 0.05)), JSON.stringify(anchos));
 }
 
+console.log('\n--- Varios contornos, uno por fuera del otro ---');
+{
+  const { contornosDeZona, pasadasDeContornos } = await import('../src/motor/contornosTexto.js');
+  comprobar('una zona de antes, con un solo borde activado, se sigue leyendo',
+    JSON.stringify(contornosDeZona({ contorno: { activo: true, colorHex: '#ff0000', grosorCm: 0.3 } })) === '[{"colorHex":"#ff0000","grosorCm":0.3}]');
+  comprobar('y uno desactivado no da contornos', contornosDeZona({ contorno: { activo: false, colorHex: '#ff0000', grosorCm: 0.3 } }).length === 0);
+  comprobar('la lista nueva manda sobre el borde viejo',
+    contornosDeZona({ contornos: [], contorno: { activo: true, grosorCm: 0.3 } }).length === 0);
+  const anillos = [{ colorHex: '#000000', grosorCm: 0.2 }, { colorHex: '#ffffff', grosorCm: 0.3 }, { colorHex: '#ff0000', grosorCm: 0.1 }];
+  const pasadasC = pasadasDeContornos(anillos);
+  comprobar('se pinta del de afuera al pegado a la letra, cada uno hasta su borde',
+    pasadasC.map((p) => p.colorHex).join() === '#ff0000,#ffffff,#000000' &&
+    cerca(pasadasC[0].anchoTrazoCm, 1.2, 1e-9) && cerca(pasadasC[1].anchoTrazoCm, 1.0, 1e-9) && cerca(pasadasC[2].anchoTrazoCm, 0.4, 1e-9), JSON.stringify(pasadasC));
+
+  const pieza = {
+    id: 'p0', piezaId: 'Espalda', talla: 'm', anchoCm: 50, altoCm: 70, posicion: { x: 0, y: 0 }, rotacionGrados: 0, imagenes: [],
+    textos: [{ texto: 'PEÑA', cxCm: 25, cyCm: 10, anchoCm: 30, altoCm: 5, xCm: 0, yCm: 0, modo: 'llenar', zonaClave: 'n|m',
+      colorHex: '#ffffff', rotacionGrados: 0, fuenteUrl: null, espaciadoMil: 0, contornos: anillos }],
+  };
+  const [conAjuste] = await ajustarTextosDePiezas([pieza], obtenerMedidor);
+  const solo = ajustarTexto({ medidor, texto: 'PEÑA', anchoCm: 30 - 1.2, altoCm: 5 - 1.2, modo: 'llenar' });
+  comprobar('el texto deja adentro de la zona el espacio de los tres juntos', cerca(conAjuste.textos[0].ajuste.cuerpoCm, solo.cuerpoCm, 1e-9));
+  const bytes = await generarPdfNesting({ anchoLienzoCm: 60, altoLienzoCm: 80, piezas: [{ ...conAjuste, imagenDataUrl: null }] });
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: false }).promise;
+  const pagina = await doc.getPage(1);
+  const items = (await pagina.getTextContent()).items.filter((i) => i.str === 'PEÑA');
+  comprobar('en el PDF: tres trazos y el relleno', items.length === 4, String(items.length));
+  const ops = await pagina.getOperatorList();
+  const anchos = ops.fnArray.map((f, i) => (f === pdfjs.OPS.setLineWidth ? ops.argsArray[i][0] : null)).filter((w) => w !== null);
+  comprobar('con sus anchos, de afuera hacia adentro', [1.2, 1.0, 0.4].every((w, i) => cerca(anchos.slice(-3)[i], w * 28.3465, 0.05)), JSON.stringify(anchos));
+}
+
 console.log('\n--- Sin nada que ajustar: null, nunca un número inventado ---');
 {
   comprobar('texto vacío', ajustarTexto({ medidor, texto: '', anchoCm: 10, altoCm: 5, modo: 'llenar' }) === null);

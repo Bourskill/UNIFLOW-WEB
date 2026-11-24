@@ -6,16 +6,16 @@ import { NOMBRE_PESO, urlDeMuestra } from '../utilidades/bancoFuentes.js';
 import { useFuentesWeb, cssDeFamilia } from './useFuentesWeb.js';
 import { InputNumero } from './InputNumero.jsx';
 import { Ayuda } from './ui.jsx';
+import { contornosDeZona, CONTORNOS_MAX, CONTORNO_ANILLO_MAX_CM } from '../utilidades/contornosTexto.js';
 
 // Estilo del texto de una zona (nombre, número o texto fijo): fuente, color,
-// espaciado entre letras, alineación y borde de color. Todo lo que se elige
+// espaciado entre letras, alineación y contornos de color (uno o varios). Todo lo que se elige
 // acá llega igual al lienzo y al PDF (backend: ajusteTexto.js y
 // exportarPdf.js) -- el espaciado y el borde cambian además cuánto entra el
 // texto en su zona.
 
-// Mismos límites que acepta el backend (ajusteTexto.js·ESPACIADO_MIL / CONTORNO_MAX_CM).
+// Mismos límites que acepta el backend (ajusteTexto.js·ESPACIADO_MIL).
 const ESPACIADO = { min: -200, max: 500 };
-const CONTORNO_MAX_CM = 3;
 
 // Colores de uso más común en camisetas, para no abrir el selector cada vez.
 const COLORES_RAPIDOS = ['#ffffff', '#000000', '#d32f2f', '#1565c0', '#fbc02d', '#2e7d32', '#ef6c00', '#6a1b9a', '#9e9e9e', '#c9a227'];
@@ -26,7 +26,12 @@ const ALINEACIONES = [
   { valor: 'derecha', etiqueta: 'Derecha' },
 ];
 
-const CONTORNO_POR_DEFECTO = { activo: false, colorHex: '#000000', grosorCm: 0.2 };
+// Un contorno nuevo: negro, o blanco si el anterior ya es oscuro (así se
+// distinguen los dos de entrada).
+const nuevoContorno = (anterior) => ({
+  colorHex: anterior && anterior.colorHex.toLowerCase() === '#000000' ? '#ffffff' : '#000000',
+  grosorCm: 0.2,
+});
 
 function Seccion({ titulo, ayuda, children, derecha }) {
   return (
@@ -235,10 +240,17 @@ export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
   const esNumero = campoDeZona(zona) === 'numero';
   const muestra =
     (campoDeZona(zona) === 'fijo' ? zona.valorFijo : zona.valorEjemplo) || (esNumero ? '10' : 'PEÑA');
-  const contorno = { ...CONTORNO_POR_DEFECTO, ...(zona.contorno || {}) };
+  const contornos = contornosDeZona(zona);
   const espaciado = Number(zona.espaciadoMil) || 0;
   const alineacion = zona.alineacion || 'centro';
-  const cambiarContorno = (cambios) => onActualizar({ contorno: { ...contorno, ...cambios } });
+  // Se guarda siempre la lista; el `contorno` único de antes queda sin efecto.
+  const guardarContornos = (lista) => onActualizar({ contornos: lista, contorno: null });
+  const cambiarContorno = (i, cambios) => guardarContornos(contornos.map((c, j) => (j === i ? { ...c, ...cambios } : c)));
+  const moverContorno = (i, paso) => {
+    const lista = [...contornos];
+    [lista[i], lista[i + paso]] = [lista[i + paso], lista[i]];
+    guardarContornos(lista);
+  };
 
   return (
     <div className="flex flex-col gap-4 border-t border-border pt-3">
@@ -298,38 +310,54 @@ export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
       </Seccion>
 
       <Seccion
-        titulo="Borde de color"
-        ayuda={'Un contorno alrededor de cada letra, por fuera. Sin activarlo, el texto no lleva ningún borde. ' +
-          (esNumero ? 'En un número, el borde puede salirse de la zona (manda el alto completo).' : 'El texto deja ese margen adentro de su zona, así el borde no se sale.')}
-        derecha={(
-          <button
-            type="button" role="switch" aria-checked={contorno.activo} aria-label="Borde de color"
-            onClick={() => cambiarContorno({ activo: !contorno.activo })}
-            className={'relative h-5 w-9 rounded-full transition-colors ' + (contorno.activo ? 'bg-primary' : 'border border-border bg-surface')}
-          >
-            <span className={'absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ' + (contorno.activo ? 'translate-x-4' : 'translate-x-0')} />
+        titulo="Contornos"
+        ayuda={'Bordes de color alrededor de cada letra, por fuera: el 1 va pegado a la letra y cada uno siguiente rodea al anterior. Sin ninguno, el texto no lleva borde. ' +
+          (esNumero ? 'En un número, los contornos pueden salirse de la zona (manda el alto completo).' : 'El texto deja adentro de su zona el espacio de todos juntos, así no se salen.')}
+        derecha={contornos.length < CONTORNOS_MAX && (
+          <button type="button" className="text-[11px] text-primary hover:underline"
+            onClick={() => guardarContornos([...contornos, nuevoContorno(contornos[contornos.length - 1])])}>
+            + Agregar contorno
           </button>
         )}
       >
-        {contorno.activo && (
-          <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-muted/40 p-2">
-            <SelectorColor valor={contorno.colorHex} etiqueta="Color del borde" onCambiar={(c) => cambiarContorno({ colorHex: c })} />
+        {contornos.length === 0 && <span className="text-[11px] text-faint-foreground">Sin contornos.</span>}
+        {contornos.map((c, i) => (
+          <div key={i} className="flex flex-col gap-2 rounded-lg border border-border bg-surface-muted/40 p-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">
+                Contorno {i + 1}{contornos.length > 1 ? (i === 0 ? ' · pegado a la letra' : i === contornos.length - 1 ? ' · el de afuera' : '') : ''}
+              </span>
+              <span className="ml-auto flex items-center gap-1">
+                {i > 0 && (
+                  <button type="button" title="Más cerca de la letra" aria-label={'Acercar el contorno ' + (i + 1) + ' a la letra'}
+                    onClick={() => moverContorno(i, -1)} className="rounded border border-border px-1.5 text-[11px] text-faint-foreground hover:border-primary">↑</button>
+                )}
+                {i < contornos.length - 1 && (
+                  <button type="button" title="Más afuera" aria-label={'Alejar el contorno ' + (i + 1) + ' de la letra'}
+                    onClick={() => moverContorno(i, 1)} className="rounded border border-border px-1.5 text-[11px] text-faint-foreground hover:border-primary">↓</button>
+                )}
+                <button type="button" title="Quitar este contorno" aria-label={'Quitar el contorno ' + (i + 1)}
+                  onClick={() => guardarContornos(contornos.filter((_, j) => j !== i))}
+                  className="rounded border border-border px-1.5 text-[11px] text-faint-foreground hover:border-danger hover:text-danger">✕</button>
+              </span>
+            </div>
+            <SelectorColor valor={c.colorHex} etiqueta={'Color del contorno ' + (i + 1)} onCambiar={(color) => cambiarContorno(i, { colorHex: color })} />
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-faint-foreground">Grosor</span>
               <InputNumero
-                className="w-20" step={0.05} wheelStep={0.1} min={0.01} max={CONTORNO_MAX_CM} value={contorno.grosorCm}
-                onChange={(n) => cambiarContorno({ grosorCm: Math.min(Math.max(n, 0.01), CONTORNO_MAX_CM) })}
+                className="w-20" step={0.05} wheelStep={0.1} min={0.01} max={CONTORNO_ANILLO_MAX_CM} value={c.grosorCm}
+                onChange={(n) => cambiarContorno(i, { grosorCm: Math.min(Math.max(n, 0.01), CONTORNO_ANILLO_MAX_CM) })}
               />
               <span className="text-xs text-muted-foreground">cm</span>
               {[0.1, 0.2, 0.4].map((g) => (
-                <button key={g} type="button" onClick={() => cambiarContorno({ grosorCm: g })}
-                  className={'rounded-full border px-2 py-0.5 text-[10px] ' + (contorno.grosorCm === g ? 'border-primary bg-primary-soft text-primary' : 'border-border text-faint-foreground hover:border-primary')}>
+                <button key={g} type="button" onClick={() => cambiarContorno(i, { grosorCm: g })}
+                  className={'rounded-full border px-2 py-0.5 text-[10px] ' + (c.grosorCm === g ? 'border-primary bg-primary-soft text-primary' : 'border-border text-faint-foreground hover:border-primary')}>
                   {g}
                 </button>
               ))}
             </div>
           </div>
-        )}
+        ))}
       </Seccion>
     </div>
   );
