@@ -1699,6 +1699,32 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
             </div>
           </div>
 
+          {/* Color de los piquetes (y del molde) en las mesas: automático =
+              blanco o negro, lo que resalte contra el diseño en cada lugar
+              (exportarPdf.js·colorVisibleEn); o uno elegido a mano. */}
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface-muted px-4 py-3 text-sm">
+            <span className="font-medium text-foreground">Color de piquetes</span>
+            <span className="text-xs text-faint-foreground">en las mesas por talla, para verlos al confeccionar</span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <button type="button" aria-pressed={!bordeContraste.colorPiquetes}
+                onClick={() => setBordeContraste((prev) => ({ ...prev, colorPiquetes: null }))}
+                title="Blanco o negro en cada piquete, lo que más resalte contra el diseño ahí"
+                className={'rounded-md border px-2.5 py-1 text-xs ' + (!bordeContraste.colorPiquetes ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary')}>
+                Automático
+              </button>
+              {['#000000', '#ffffff', '#ff00ff', '#00ff00'].map((c) => (
+                <button key={c} type="button" title={c} aria-label={'Piquetes de color ' + c} aria-pressed={bordeContraste.colorPiquetes === c}
+                  onClick={() => setBordeContraste((prev) => ({ ...prev, colorPiquetes: c }))}
+                  className={'h-6 w-6 rounded-md border ' + (bordeContraste.colorPiquetes === c ? 'border-primary ring-2 ring-primary/50' : 'border-border')}
+                  style={{ background: c }} />
+              ))}
+              <input type="color" aria-label="Otro color de piquetes" title="Otro color"
+                className="h-7 w-7 cursor-pointer rounded-md border border-border bg-transparent p-0.5"
+                value={bordeContraste.colorPiquetes || '#000000'}
+                onChange={(e) => setBordeContraste((prev) => ({ ...prev, colorPiquetes: e.target.value }))} />
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center gap-2">
             <Boton variante="primario" type="submit" disabled={estadoGuardado === 'guardando'}>
               {estadoGuardado === 'guardando' ? 'Guardando…' : editandoId ? 'Guardar cambios' : 'Guardar producción'}

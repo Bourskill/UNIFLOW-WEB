@@ -259,6 +259,9 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         // Piquetes sueltos, en las mismas coordenadas (las mesas los marcan).
         piquetesCm: geometria[pieza.nombre]?.piquetes || [],
         bordeContraste: producto.bordeContraste || null,
+        // Color de piquetes y molde en las mesas: el elegido, o null = automático
+        // (lo que resalte contra el diseño, ver exportarPdf.js).
+        colorMarcas: /^#[0-9a-f]{6}$/i.test(producto.bordeContraste?.colorPiquetes || "") ? producto.bordeContraste.colorPiquetes : null,
       });
     }
   }

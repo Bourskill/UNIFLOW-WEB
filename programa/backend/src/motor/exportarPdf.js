@@ -20,6 +20,7 @@ import { bytesDeFuente, obtenerMedidor, urlDeStoragePermitida, leerConTope } fro
 import { ajustarTexto } from './ajusteTexto.js';
 import { contornosDeTexto, grosorTotal, pasadasDeContornos } from './contornosTexto.js';
 import { colocarArte } from './colocarArte.js';
+import { leerPng } from './png.js';
 import { fondoActivo, ejeDegradado, colorEn } from './fondoPieza.js';
 import { medidasDeCapsula, caminoDeCapsula, COLOR_CAPSULA } from './capsulaTalla.js';
 import { leerDocumentoAi, arteNativoDe } from './illustrator/arteNativo.js';
@@ -177,6 +178,16 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
     if (!cacheArte.has(url)) cacheArte.set(url, incrustarArte(pdf, url));
     return cacheArte.get(url);
   }
+  // Los píxeles del arte (su vista PNG), para elegir el color de los
+  // piquetes que resalte sobre el diseño. null si no se pueden leer.
+  const cachePixeles = new Map();
+  function pixelesDe(url) {
+    if (!url) return Promise.resolve(null);
+    if (!cachePixeles.has(url)) {
+      cachePixeles.set(url, bajarArchivo(url).then(({ bytes }) => leerPng(bytes)).catch(() => null));
+    }
+    return cachePixeles.get(url);
+  }
   async function fuentePersonalizada(url) {
     if (!url) return null;
     if (cacheFuentes.has(url)) return cacheFuentes.get(url);
@@ -242,6 +253,7 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
         );
       }
 
+      let rectArteCm = null; // dónde quedó el arte (cm de la pieza), para el color de los piquetes
       if (pieza.imagenDataUrl) {
         // Imagen (PNG/JPG) o PDF: el PDF entra VECTORIAL (página incrustada
         // como Form XObject, sin rasterizar), así los vectores del diseño
@@ -260,6 +272,7 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
         // rectángulo como siempre.
         let rectImagen = { x: xPt, y: yPt, width: anchoRectPt, height: altoRectPt };
         let espejo = null;
+        rectArteCm = { x: 0, y: 0, ancho: pieza.anchoCm, alto: pieza.altoCm };
         if (pieza.ajusteArte) {
           const r = colocarArte({
             anchoCm: pieza.anchoCm, altoCm: pieza.altoCm,
@@ -272,6 +285,7 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
             height: r.alto * CM_A_PUNTOS,
           };
           if (r.espejoH || r.espejoV) espejo = { h: r.espejoH, v: r.espejoV };
+          rectArteCm = r;
         }
         const recorte = trazadoEnPagina
           || (pieza.ajusteArte
@@ -519,9 +533,13 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
 
       // En las mesas: ENCIMA de todo, el molde mismo en contorno fino (con
       // sus piquetes pegados, que son parte del contorno) y los piquetes
-      // sueltos como rayitas, en blanco o negro según lo que contraste con
-      // el fondo -- como se arma a mano para ver dónde coser.
+      // sueltos con su forma real -- como se arma a mano para ver dónde
+      // coser. Color: el elegido en la producción, o (automático) blanco o
+      // negro, lo que resalte contra lo que se ve ahí: el diseño sobre el fondo.
       if (pieza.marcarPiquetes && trazadoEnPagina) {
+        const manual = /^#[0-9a-f]{6}$/i.test(pieza.colorMarcas || '') ? (() => { const c = hexARgb(pieza.colorMarcas); return rgb(c.r, c.g, c.b); })() : null;
+        const pixeles = manual ? null : await pixelesDe(pieza.imagenVistaUrl || (/\.png($|\?)/i.test(pieza.imagenDataUrl || '') ? pieza.imagenDataUrl : null));
+        const colorMarca = (punto) => manual || blancoONegroSobre(colorVisibleEn({ pieza, fondo, pixeles, rect: rectArteCm, punto }));
         const aPt = (v) => ({ x: xPt + v.x * CM_A_PUNTOS, y: yPt + altoRectPt - v.y * CM_A_PUNTOS });
         const trazo = (puntos, cerrado, color) => [
           setStrokingColor(color),
@@ -532,10 +550,12 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
         ];
         const ops = [pushGraphicsState(), setLineWidth(GROSOR_MARCAS_PT), setLineJoin(LineJoinStyle.Round)];
         // El molde con sus nodos originales (ver trazado.js).
-        ops.push(setStrokingColor(colorDeContraste(fondo, pieza)), ...trazadoEnPagina, closePath(), stroke());
+        ops.push(setStrokingColor(colorMarca(null)), ...trazadoEnPagina, closePath(), stroke());
         for (const q of pieza.piquetesCm || []) {
-          const raya = rayaDePiquete(q, pieza.contornoCm);
-          if (raya) ops.push(...trazo(raya.map(aPt), false, colorDeContraste(fondo, pieza, q)));
+          // Con su trazo real (forma y orientación del archivo); los de
+          // piezas importadas antes, con la raya de su caja.
+          const forma = Array.isArray(q.puntos) && q.puntos.length >= 2 ? q.puntos : rayaDePiquete(q, pieza.contornoCm);
+          if (forma) ops.push(...trazo(forma.map(aPt), !!q.cerrado, colorMarca(q)));
         }
         ops.push(popGraphicsState());
         pagina.pushOperators(...ops);
@@ -682,21 +702,77 @@ const GROSOR_MARCAS_PT = 0.85;
  * negro. Sin fondo, la tela es blanca → negro.
  */
 export function colorDeContraste(fondoCrudo, pieza, punto = null) {
+  return blancoONegroSobre(colorDeFondoEn(fondoCrudo, pieza, punto));
+}
+
+// El color del fondo de la pieza en un punto (0-255): sin fondo, la tela blanca.
+function colorDeFondoEn(fondoCrudo, pieza, punto = null) {
   const fondo = fondoActivo(fondoCrudo);
-  if (!fondo) return rgb(0, 0, 0);
+  if (!fondo) return [255, 255, 255];
   let t = 0.5;
   if (fondo.tipo === 'degradado' && punto) {
     const e = ejeDegradado({ anchoCm: pieza.anchoCm, altoCm: pieza.altoCm, anguloGrados: fondo.anguloGrados });
     const dx = e.x2 - e.x1, dy = e.y2 - e.y1;
     t = ((punto.x - e.x1) * dx + (punto.y - e.y1) * dy) / (dx * dx + dy * dy || 1);
   }
-  const [r, g, b] = colorEn(fondo, fondo.tipo === 'solido' ? 0 : t).map((v) => {
+  return colorEn(fondo, fondo.tipo === 'solido' ? 0 : t);
+}
+
+/** Blanco o negro, lo que más se vea sobre ese color (0-255) -- umbral WCAG. */
+export function blancoONegroSobre([r8, g8, b8]) {
+  const [r, g, b] = [r8, g8, b8].map((v) => {
     const c = v / 255;
     return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   });
   const luminancia = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  // Mismo umbral que el contraste WCAG entre blanco y negro.
   return luminancia > 0.179 ? rgb(0, 0, 0) : rgb(1, 1, 1);
+}
+
+/**
+ * El color que SE VE en la pieza alrededor de un punto (cm; sin punto, en
+ * toda la pieza): el diseño (sus píxeles, desde su vista PNG) sobre el fondo,
+ * promediado. Es lo que manda para que los piquetes y el molde resalten
+ * "contra la mayoría del diseño" al confeccionar.
+ * @param {{ancho,alto,rgba}|null} pixeles  la imagen del arte, o null
+ * @param {{x,y,ancho,alto,espejoH?,espejoV?}|null} rect  dónde va el arte (cm de la pieza)
+ */
+export function colorVisibleEn({ pieza, fondo, pixeles, rect, punto = null, radioCm = 2 }) {
+  const W = pieza.anchoCm, H = pieza.altoCm;
+  const x0 = punto ? Math.max(0, punto.x - radioCm) : 0, x1 = punto ? Math.min(W, punto.x + radioCm) : W;
+  const y0 = punto ? Math.max(0, punto.y - radioCm) : 0, y1 = punto ? Math.min(H, punto.y + radioCm) : H;
+  const pasos = punto ? 9 : 28;
+  const poli = !punto && Array.isArray(pieza.contornoCm) && pieza.contornoCm.length >= 3 ? pieza.contornoCm : null;
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < pasos; i++) {
+    for (let j = 0; j < pasos; j++) {
+      const p = { x: x0 + ((i + 0.5) / pasos) * (x1 - x0), y: y0 + ((j + 0.5) / pasos) * (y1 - y0) };
+      if (poli && !dentroDe(poli, p)) continue;
+      let c = colorDeFondoEn(fondo, pieza, p);
+      if (pixeles && rect && rect.ancho > 0 && rect.alto > 0) {
+        let u = (p.x - rect.x) / rect.ancho, v = (p.y - rect.y) / rect.alto;
+        if (u >= 0 && u <= 1 && v >= 0 && v <= 1) {
+          if (rect.espejoH) u = 1 - u;
+          if (rect.espejoV) v = 1 - v;
+          const px = Math.min(pixeles.ancho - 1, Math.floor(u * pixeles.ancho));
+          const py = Math.min(pixeles.alto - 1, Math.floor(v * pixeles.alto));
+          const o = (py * pixeles.ancho + px) * 4, a = pixeles.rgba[o + 3] / 255;
+          c = [0, 1, 2].map((k) => pixeles.rgba[o + k] * a + c[k] * (1 - a));
+        }
+      }
+      r += c[0]; g += c[1]; b += c[2]; n++;
+    }
+  }
+  return n ? [r / n, g / n, b / n] : colorDeFondoEn(fondo, pieza, punto);
+}
+
+function dentroDe(poli, p) {
+  let dentro = false;
+  for (let i = 0, j = poli.length - 1; i < poli.length; j = i++) {
+    const a = poli[i], c = poli[j];
+    const ax = a.x ?? a[0], ay = a.y ?? a[1], cx = c.x ?? c[0], cy = c.y ?? c[1];
+    if ((ay > p.y) !== (cy > p.y) && p.x < ((cx - ax) * (p.y - ay)) / (cy - ay || 1e-12) + ax) dentro = !dentro;
+  }
+  return dentro;
 }
 
 /**

@@ -122,7 +122,9 @@ export function contornoYPiquetesDeTrazos(trazos, mmPorUnidad) {
     const ys = t.puntosMm.map((p) => p[1]);
     const minX = Math.min(...xs), maxX = Math.max(...xs);
     const minY = Math.min(...ys), maxY = Math.max(...ys);
-    agregarPiquete({ xMm: (minX + maxX) / 2, yMm: (minY + maxY) / 2, anchoMm: maxX - minX, altoMm: maxY - minY });
+    // Con su trazo real (forma y orientación): es lo que se dibuja en las mesas.
+    agregarPiquete({ xMm: (minX + maxX) / 2, yMm: (minY + maxY) / 2, anchoMm: maxX - minX, altoMm: maxY - minY,
+      puntosMm: t.puntosMm.map(([x, y]) => [Math.round(x * 100) / 100, Math.round(y * 100) / 100]), ...(t.cerrado ? { cerrado: true } : {}) });
   }
   for (const p of piquetesPegadosDe(contorno.puntosMm)) agregarPiquete(p);
 

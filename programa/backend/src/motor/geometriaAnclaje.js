@@ -83,6 +83,9 @@ export function geometriaParaAnclaje(pieza, talla) {
     return {
       x, y, ancho_cm: p.anchoMm / 10, alto_cm: p.altoMm / 10,
       rx: round3(x / dim.anchoCm), ry: round3(y / dim.altoCm),
+      // Su trazo real, si la pieza se importó guardándolo.
+      ...(Array.isArray(p.puntosMm) && p.puntosMm.length >= 2
+        ? { puntos: p.puntosMm.map(([px, py]) => ({ x: (px - minX) / 10, y: (maxY - py) / 10 })), cerrado: !!p.cerrado } : {}),
     };
   });
 

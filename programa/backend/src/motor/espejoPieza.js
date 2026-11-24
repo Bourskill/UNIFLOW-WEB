@@ -31,7 +31,7 @@ export function espejarGeometria(geo) {
     ...geo,
     poligonoMm: geo.poligonoMm.map(([x, y]) => [espejarX(x, minX, maxX), y]).reverse(),
     ...(geo.trazadoMm ? { trazadoMm: invertirTrazado(mapearTrazado(geo.trazadoMm, ([x, y]) => [espejarX(x, minX, maxX), y])) } : {}),
-    ...(geo.piquetesMm ? { piquetesMm: geo.piquetesMm.map((p) => ({ ...p, xMm: espejarX(p.xMm, minX, maxX) })) } : {}),
+    ...(geo.piquetesMm ? { piquetesMm: geo.piquetesMm.map((p) => ({ ...p, xMm: espejarX(p.xMm, minX, maxX), ...(p.puntosMm ? { puntosMm: p.puntosMm.map(([x, y]) => [espejarX(x, minX, maxX), y]) } : {}) })) } : {}),
     ...(geo.salientesMm ? { salientesMm: geo.salientesMm.map((s) => ({ ...s, xMm: espejarX(s.xMm, minX, maxX) })) } : {}),
   };
 }
