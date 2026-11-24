@@ -513,20 +513,23 @@ comprobar("Pero lo AVISA: no se empareja en silencio",
   /emparejó por posición/.test(r4.avisos.join(" ")),
   r4.avisos.join(" | "));
 
-// Si el punto ya no está, se para. La promesa se mantiene.
+// Si el punto ya no está, NO se para (el diseño tiene que verse en todas
+// las tallas): va al mismo lugar relativo de la pieza, y lo avisa.
 var LEJOS = [[0.10,0.08],[0.30,0.05],[0.50,0.12],[0.70,0.05],[0.90,0.08],[0.12,0.96],[0.88,0.96]];
 var rLejos = resolver.resolver(sobreEl6, geoConSalientes(70, 85, LEJOS), { talla: "4XL" });
-comprobar("Si en la talla nueva no hay nada donde estaba, se PARA",
-  rLejos.errores.length > 0 && !rLejos.zonas.Z,
-  rLejos.errores.join(" | "));
+comprobar("Si en la talla nueva no hay nada donde estaba, va al mismo lugar relativo",
+  rLejos.errores.length === 0 && !!rLejos.zonas.Z && Math.abs(rLejos.anclas.A_SISA.x - 0.92 * 70) < 2 && Math.abs(rLejos.anclas.A_SISA.y - (0.35 * 85 + 3)) < 2, // pegado al contorno si está cerca
+  rLejos.errores.join(" | ") + " x=" + (rLejos.anclas.A_SISA || {}).x + " y=" + (rLejos.anclas.A_SISA || {}).y);
+comprobar("Y avisa que hay que revisar esa talla", /Revisá esa talla/.test(rLejos.avisos.join(" ")), rLejos.avisos.join(" | "));
 
-// Y si hay dos igual de cerca, tampoco elige por su cuenta.
+// Dos igual de cerca pero pegados (a menos de 1,5 cm): son el mismo rasgo
+// dibujado dos veces -- se usa el más cercano, avisando.
 var DOBLE = [[0.10,0.08],[0.30,0.05],[0.50,0.12],[0.70,0.05],[0.90,0.08],
              [0.915,0.35],[0.925,0.355],[0.88,0.96],[0.12,0.96],[0.08,0.35]];
 var rDoble = resolver.resolver(sobreEl6, geoConSalientes(70, 85, DOBLE), { talla: "4XL" });
-comprobar("Con dos candidatos igual de cerca, no elige por ti",
-  rDoble.errores.length > 0,
-  rDoble.errores.join(" | "));
+comprobar("Con dos candidatos pegados igual de cerca, usa el más cercano y avisa",
+  rDoble.errores.length === 0 && casi(rDoble.anclas.A_SISA.x, 0.915 * 70) && /emparejó por posición/.test(rDoble.avisos.join(" ")),
+  rDoble.errores.join(" | ") + " x=" + (rDoble.anclas.A_SISA || {}).x);
 
 // ============================================================
 console.log("\n--- Zonas de logo: una sola medida ---");

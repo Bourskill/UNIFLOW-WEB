@@ -252,6 +252,23 @@ console.log('\n--- Texto en varios renglones (saltos de línea) ---');
     cerca(arriba[0].transform[5] - abajo[0].transform[5], conAjuste.textos[0].ajuste.lineas[1].dyCm * 28.3465 - conAjuste.textos[0].ajuste.lineas[0].dyCm * 28.3465, 0.05));
 }
 
+console.log('\n--- Alineación vertical en la zona ---');
+{
+  // Un nombre largo, limitado por el ancho: le sobra alto.
+  const medio = ajustarTexto({ medidor, texto: 'RODRIGUEZ MARTINEZ', anchoCm: 20, altoCm: 8, modo: 'llenar' });
+  const arriba = ajustarTexto({ medidor, texto: 'RODRIGUEZ MARTINEZ', anchoCm: 20, altoCm: 8, modo: 'llenar', alineacionV: 'arriba' });
+  const abajo = ajustarTexto({ medidor, texto: 'RODRIGUEZ MARTINEZ', anchoCm: 20, altoCm: 8, modo: 'llenar', alineacionV: 'abajo' });
+  const b = medio.altoBandaCm;
+  comprobar('le sobra alto (el ancho manda)', b < 7.5, b);
+  comprobar('arriba: el tope de las mayúsculas en el borde de arriba', cerca(arriba.dyCm - b, -4, 1e-6), arriba.dyCm - b);
+  comprobar('abajo: la línea de base en el borde de abajo', cerca(abajo.dyCm, 4, 1e-6), abajo.dyCm);
+  comprobar('mismo tamaño en los tres', medio.cuerpoCm === arriba.cuerpoCm && medio.cuerpoCm === abajo.cuerpoCm);
+  const corto = ajustarTexto({ medidor, texto: 'GIL', anchoCm: 20, altoCm: 8, modo: 'llenar', alineacionV: 'arriba' });
+  comprobar('un nombre que llena el alto no se mueve', cerca(corto.dyCm, 4, 1e-6), corto.dyCm);
+  const num = ajustarTexto({ medidor, texto: '7', anchoCm: 20, altoCm: 8, modo: 'calibrado', alineacionV: 'arriba' });
+  comprobar('un número tampoco (va a alto completo)', cerca(num.dyCm, ajustarTexto({ medidor, texto: '7', anchoCm: 20, altoCm: 8, modo: 'calibrado' }).dyCm, 1e-9));
+}
+
 console.log('\n--- Sin nada que ajustar: null, nunca un número inventado ---');
 {
   comprobar('texto vacío', ajustarTexto({ medidor, texto: '', anchoCm: 10, altoCm: 5, modo: 'llenar' }) === null);

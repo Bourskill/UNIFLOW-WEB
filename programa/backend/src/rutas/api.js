@@ -332,6 +332,7 @@ router.post('/texto/ajustar', async (req, res) => {
         alineacion: ['izquierda', 'derecha'].includes(z.alineacion) ? z.alineacion : 'centro',
         // Espacio entre renglones (texto en varias líneas); ajustarTexto lo acota.
         interlineado: Number.isFinite(z.interlineado) ? z.interlineado : undefined,
+        alineacionV: ['arriba', 'abajo'].includes(z.alineacionV) ? z.alineacionV : 'centro',
       }),
     };
   }
@@ -1248,6 +1249,63 @@ router.post('/exportar-mesas/:id', async (req, res) => {
     console.error('No se pudo agregar el documento de Illustrator: ' + error.message);
   }
   const nombreArchivo = titulo
+    .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 120);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="' + nombreArchivo + '.pdf"');
+  res.send(Buffer.from(pdfBytes));
+});
+
+// Una TALLA de un pedido, con los jugadores: cada jugador de esa talla con
+// su prenda completa, UNA mesa por pieza (como /exportar-mesas, pero con el
+// nombre y el número reales de cada uno, sus logos y su estilo). Es el
+// archivo "por talla" para producir sin pasar por el rollo de impresión.
+// No guarda registro en `generaciones`.
+const MAX_PRENDAS_CON_ILLUSTRATOR_WEB = 3;
+router.post('/exportar-pedido/:id', async (req, res) => {
+  const { talla } = req.body || {};
+  if (typeof talla !== 'string' || !talla) return res.status(400).json({ error: 'Falta la talla' });
+  const [pedidos, productos, grupos, piezas, disenos] = await Promise.all([
+    leerColeccion('pedidos'), leerColeccion('productos'), leerColeccion('grupos'), leerColeccion('piezas'), leerColeccion('disenos'),
+  ]);
+  const fuentes = await leerColeccion('fuentes').catch(() => []);
+  const pedido = pedidos.find((p) => p.id === req.params.id);
+  if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+  const lineas = (pedido.lineas || []).filter((l) => String(l.talla) === talla);
+  if (!lineas.length) return res.status(400).json({ error: 'Ese pedido no tiene prendas en talla ' + talla });
+
+  let piezasDeMesas;
+  try {
+    piezasDeMesas = resolverPiezasDePedido({ pedido: { ...pedido, lineas }, productos, grupos, piezas, disenos, fuentes });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  piezasDeMesas = await ajustarTextosDePiezas(piezasDeMesas, obtenerMedidor);
+  const mesas = armarMesas(piezasDeMesas);
+
+  // Cada mesa con el jugador adelante: "PÉREZ 10 · ESPALDA".
+  const jugadorDe = new Map(lineas.map((l, i) => [l.id, [String(l.nombre || '').replace(/\s+/g, ' ').trim(), String(l.numero || '').trim()].filter(Boolean).join(' ') || 'Prenda ' + (i + 1)]));
+  const nombresDeMesas = mesas.map((m) => (jugadorDe.get(m.piezas[0]?.lineaPedidoId) || '') + ' · ' + (m.piezas[0]?.piezaId || m.nombre));
+
+  const artesNativos = [];
+  const cortesLaser = [];
+  let pdfBytes;
+  try {
+    pdfBytes = await generarPdfPaginas(mesas, { artesNativos, cortesLaser });
+  } catch (error) {
+    console.error('[api] PDF por talla', error);
+    return res.status(500).json({ error: 'No se pudo armar el PDF de la talla ' + talla + ': ' + error.message });
+  }
+  // La copia de Illustrator repite cada imagen del diseño en cada mesa: en la
+  // app de escritorio no hay problema; en el servidor web (memoria chica),
+  // solo con pocas prendas -- si no, sale el PDF solo (Illustrator lo abre igual).
+  if (process.env.UNIFLOW_CARPETA || lineas.length <= MAX_PRENDAS_CON_ILLUSTRATOR_WEB) {
+    try {
+      pdfBytes = await conDocumentoIllustrator(pdfBytes, { titulo: (pedido.cliente || 'Pedido') + ' ' + talla, artesNativos, cortesLaser, nombresDeMesas });
+    } catch (error) {
+      console.error('No se pudo agregar el documento de Illustrator: ' + error.message);
+    }
+  }
+  const nombreArchivo = ((pedido.cliente || 'pedido') + ' talla ' + talla)
     .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 120);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', 'attachment; filename="' + nombreArchivo + '.pdf"');

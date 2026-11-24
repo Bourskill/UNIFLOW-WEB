@@ -68,7 +68,7 @@ export const EVENTO_ESCRITURA = 'uniflow:escritura';
 // ellos pediría todo de nuevo una y otra vez.
 const RUTAS_SOLO_CALCULO = [
   '/piezas/analizar', '/piezas/resolver-multitalla', '/piezas/detectar-pdf',
-  '/anclaje/', '/texto/', '/nesting/desde-', '/archivos', '/acceso', '/exportar-mesas/',
+  '/anclaje/', '/texto/', '/nesting/desde-', '/archivos', '/acceso', '/exportar-mesas/', '/exportar-pedido/',
 ];
 
 function cambiaDatos(ruta, metodo) {
@@ -498,6 +498,13 @@ export function exportarMesas(produccionId, { tallas, conEjemplo }, nombreArchiv
 /** Lo mismo, pero devuelve el PDF (Blob) en vez de descargarlo: para juntar varias tallas en un .zip. */
 export function exportarMesasArchivo(produccionId, { tallas, conEjemplo }) {
   return bajar('/exportar-mesas/' + encodeURIComponent(produccionId), { tallas, conEjemplo: !!conEjemplo }, 'No se pudo exportar la producción');
+}
+
+// Una talla de un pedido, con los jugadores: cada uno con su prenda completa,
+// una mesa por pieza -- ver rutas/api.js·POST /exportar-pedido/:id.
+export function exportarTallaDePedido(pedidoId, talla, nombreArchivo) {
+  return descargar('/exportar-pedido/' + encodeURIComponent(pedidoId), { talla },
+    nombreArchivo || 'talla-' + talla + '.pdf', 'No se pudo exportar la talla ' + talla);
 }
 
 // --- Historial de producción -------------------------------------------------

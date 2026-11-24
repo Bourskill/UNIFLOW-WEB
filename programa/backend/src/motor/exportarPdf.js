@@ -366,7 +366,7 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
                 // Con su modo real: un número sigue yendo a alto completo.
                 modo: texto.modo === 'calibrado' ? 'calibrado' : 'llenar',
                 espaciadoMil: texto.espaciadoMil || 0, contornoCm: grosorTotal(contornosDeTexto(texto)),
-                alineacion: texto.alineacion || 'centro', interlineado: texto.interlineado,
+                alineacion: texto.alineacion || 'centro', interlineado: texto.interlineado, alineacionV: texto.alineacionV || 'centro',
               }) || a;
             }
           }

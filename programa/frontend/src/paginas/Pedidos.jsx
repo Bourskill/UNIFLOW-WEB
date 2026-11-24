@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { crearPedido, editarPedido, eliminarPedido, anidarDesdePedido, generarPdf } from '../api.js';
+import { crearPedido, editarPedido, eliminarPedido, anidarDesdePedido, generarPdf, exportarTallaDePedido } from '../api.js';
 import { obtener } from '../datos/index.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
@@ -598,6 +598,60 @@ function PanelImprimir({ pedido, onCerrar }) {
 
       {error && <Aviso tono="error">{error}</Aviso>}
       {resultado && <VistaPreviaNesting resultado={resultado} />}
+
+      <ArchivosPorTalla pedido={pedido} />
     </Tarjeta>
+  );
+}
+
+// Un PDF por talla, con los jugadores: cada uno con su prenda completa y una
+// mesa por pieza (su nombre, número, logos y estilo). Para producir sin el
+// rollo de impresión.
+function ArchivosPorTalla({ pedido }) {
+  const [bajando, setBajando] = useState(null); // talla, o '*' para todas
+  const [actual, setActual] = useState(null); // la talla que se está armando ahora
+  const [hechas, setHechas] = useState([]);
+  const [error, setError] = useState(null);
+  const tallas = ordenarTallasNatural([...new Set(pedido.lineas.map((l) => l.talla).filter(Boolean))]);
+  const cuantas = (t) => pedido.lineas.filter((l) => l.talla === t).length;
+  const base = String(pedido.cliente || 'pedido').replace(/[^a-z0-9_-]+/gi, '_');
+
+  async function bajar(lista, marca) {
+    setError(null);
+    setBajando(marca);
+    try {
+      for (const t of lista) {
+        setActual(t);
+        await exportarTallaDePedido(pedido.id, t, base + '_talla_' + t + '.pdf');
+        setHechas((h) => [...new Set([...h, t])]);
+      }
+    } catch (e) {
+      setError(e.message === 'Failed to fetch' ? 'Se cortó la conexión mientras se armaba el archivo. Probá de nuevo esa talla.' : e.message);
+    } finally {
+      setBajando(null);
+      setActual(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-border pt-3">
+      <span className="text-xs font-semibold text-faint-foreground">Archivos por talla (con los jugadores)</span>
+      <p className="text-xs text-faint-foreground">
+        Un PDF por talla: cada jugador con su prenda completa, una mesa por pieza, con su nombre, número, logos y estilo. Se abre en Illustrator como documento propio.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {tallas.map((t) => (
+          <Boton key={t} tamano="sm" variante={hechas.includes(t) ? 'secundario' : 'primario'} disabled={!!bajando} onClick={() => bajar([t], t)}>
+            {actual === t ? 'Armando ' + t.toUpperCase() + '…' : (hechas.includes(t) ? '✓ ' : '') + t.toUpperCase() + ' · ' + cuantas(t)}
+          </Boton>
+        ))}
+        {tallas.length > 1 && (
+          <Boton tamano="sm" variante="acento" disabled={!!bajando} onClick={() => bajar(tallas, '*')}>
+            {bajando === '*' ? 'Bajando todas…' : 'Todas las tallas (' + tallas.length + ' archivos)'}
+          </Boton>
+        )}
+      </div>
+      {error && <Aviso tono="error">{error}</Aviso>}
+    </div>
   );
 }

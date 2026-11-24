@@ -21,6 +21,14 @@ const INTERLINEADO = { min: -50, max: 200, porDefecto: 30 };
 // Colores de uso más común en camisetas, para no abrir el selector cada vez.
 const COLORES_RAPIDOS = ['#ffffff', '#000000', '#d32f2f', '#1565c0', '#fbc02d', '#2e7d32', '#ef6c00', '#6a1b9a', '#9e9e9e', '#c9a227'];
 
+// Dónde queda el texto en el alto de su zona cuando le sobra lugar (un nombre
+// largo baja de cuerpo): pegado arriba, al medio o abajo.
+const ALINEACIONES_V = [
+  { valor: 'arriba', etiqueta: 'Arriba' },
+  { valor: 'centro', etiqueta: 'Medio' },
+  { valor: 'abajo', etiqueta: 'Abajo' },
+];
+
 const ALINEACIONES = [
   { valor: 'izquierda', etiqueta: 'Izquierda' },
   { valor: 'centro', etiqueta: 'Centro' },
@@ -75,6 +83,17 @@ function IconoAlineacion({ valor }) {
   return (
     <svg width="16" height="12" viewBox="0 0 16 12" aria-hidden="true">
       {anchos.map((w, i) => <rect key={i} x={x(w)} y={i * 4.5} width={w} height="2" rx="1" fill="currentColor" />)}
+    </svg>
+  );
+}
+
+// Iconito de alineación vertical: una barra dentro de un marco, arriba/medio/abajo.
+function IconoAlineacionV({ valor }) {
+  const y = valor === 'arriba' ? 2 : valor === 'abajo' ? 8 : 5;
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+      <rect x="0.5" y="0.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" strokeOpacity="0.5" />
+      <rect x="3" y={y} width="6" height="2" rx="1" fill="currentColor" />
     </svg>
   );
 }
@@ -250,6 +269,7 @@ export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
   const contornos = contornosDeZona(zona);
   const espaciado = Number(zona.espaciadoMil) || 0;
   const alineacion = zona.alineacion || 'centro';
+  const alineacionV = zona.alineacionV || 'centro';
   // Se guarda siempre la lista; el `contorno` único de antes queda sin efecto.
   const guardarContornos = (lista) => onActualizar({ contornos: lista, contorno: null });
   const cambiarContorno = (i, cambios) => guardarContornos(contornos.map((c, j) => (j === i ? { ...c, ...cambios } : c)));
@@ -278,7 +298,7 @@ export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
       <Seccion
         titulo="Alineación"
         ayuda={'Desde dónde arranca el texto dentro de su zona: pegado al borde izquierdo, centrado, o pegado al borde derecho.' +
-          (esNumero ? ' Si el número es más ancho que la zona, se sale solo por el lado contrario.' : '')}
+          (esNumero ? ' Si el número es más ancho que la zona, se sale solo por el lado contrario.' : ' Abajo: arriba, al medio o abajo de la zona -- cuando un nombre largo sale más chico, así no queda flotando y todos arrancan a la misma altura.')}
       >
         <div className="grid grid-cols-3 gap-1">
           {ALINEACIONES.map((a) => (
@@ -293,6 +313,21 @@ export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
             </button>
           ))}
         </div>
+        {!esNumero && (
+          <div className="grid grid-cols-3 gap-1" role="group" aria-label="Alineación vertical en la zona">
+            {ALINEACIONES_V.map((a) => (
+              <button
+                key={a.valor} type="button" onClick={() => onActualizar({ alineacionV: a.valor })}
+                aria-pressed={alineacionV === a.valor} title={'Texto pegado ' + (a.valor === 'centro' ? 'al medio' : a.valor === 'arriba' ? 'arriba' : 'abajo') + ' de su zona'}
+                className={'flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] transition-colors ' +
+                  (alineacionV === a.valor ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary/50')}
+              >
+                <IconoAlineacionV valor={a.valor} />
+                {a.etiqueta}
+              </button>
+            ))}
+          </div>
+        )}
       </Seccion>
 
       <Seccion

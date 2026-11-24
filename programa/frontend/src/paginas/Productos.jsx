@@ -1292,6 +1292,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       escalaMolde: esTallaZ ? escalaDentroDelMolde({ cx: z.cx, cy: z.cy, ancho: z.ancho, alto: z.alto, rotacionGrados: cruda?.rotacion || 0 }, geoActiva?.vertices) : 1,
       espaciadoMil: esTallaZ ? 0 : Number(cruda?.espaciadoMil) || 0,
       alineacion: cruda?.alineacion || 'centro',
+      alineacionV: esTallaZ ? 'centro' : cruda?.alineacionV || 'centro',
       contornos: esTallaZ ? [] : contornosDeZona(cruda),
       interlineado: Number.isFinite(Number(cruda?.interlineado)) && cruda?.interlineado != null && cruda?.interlineado !== '' ? Number(cruda.interlineado) : undefined,
     };
@@ -1919,6 +1920,60 @@ function PanelAncla({ ancla, onCerrar, onRenombrar, onRecolocar, onCambiarEje, o
   );
 }
 
+// Ancho y alto de una zona, con candado de proporción (como en Illustrator):
+// cerrado, cambiar uno cambia el otro en la misma proporción. Y "Escalar":
+// agranda o achica la zona entera (las dos medidas) en un porcentaje.
+const redondear = (n, d = 4) => Math.round(n * 10 ** d) / 10 ** d;
+function MedidasConCandado({ zona, onActualizar }) {
+  const bloqueada = !!zona.proporcionBloqueada;
+  const [escala, setEscala] = useState(100);
+  const mismaUnidad = zona.ancho.modo === zona.alto.modo;
+  function cambiar(cual, m) {
+    const otro = cual === 'ancho' ? 'alto' : 'ancho';
+    const antes = zona[cual];
+    // Con candado y las dos en la misma unidad: el otro lado acompaña.
+    if (bloqueada && mismaUnidad && m.modo === antes.modo && antes.valor > 0 && m.valor > 0) {
+      const k = m.valor / antes.valor;
+      onActualizar({ [cual]: m, [otro]: { ...zona[otro], valor: redondear(zona[otro].valor * k) } });
+    } else onActualizar({ [cual]: m });
+  }
+  function escalar(pct) {
+    const k = pct / 100;
+    if (!(k > 0)) return;
+    onActualizar({ ancho: { ...zona.ancho, valor: redondear(zona.ancho.valor * k) }, alto: { ...zona.alto, valor: redondear(zona.alto.valor * k) } });
+    setEscala(100);
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <LineaMedida etiqueta="Ancho" valor={zona.ancho} onCambiar={(m) => cambiar('ancho', m)} />
+      <LineaMedida etiqueta="Alto" valor={zona.alto} onCambiar={(m) => cambiar('alto', m)} />
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-24 flex-none text-xs text-muted-foreground" title="Agranda o achica la zona entera, ancho y alto juntos">Escalar</span>
+        <div className="w-20 flex-none">
+          <InputNumero step={1} wheelStep={5} min={1} max={1000} value={escala} onChange={(n) => setEscala(n)} aria-label="Escalar la zona (%)" />
+        </div>
+        <span className="text-xs text-muted-foreground">%</span>
+        <button type="button" disabled={escala === 100} onClick={() => escalar(escala)}
+          className="rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:border-primary disabled:opacity-40">Aplicar</button>
+        {[90, 110].map((p) => (
+          <button key={p} type="button" onClick={() => escalar(p)} title={'Zona al ' + p + '%'}
+            className="rounded-full border border-border px-2 py-0.5 text-[10px] text-faint-foreground hover:border-primary">{p}%</button>
+        ))}
+      </div>
+      <button
+        type="button" onClick={() => onActualizar({ proporcionBloqueada: !bloqueada })}
+        aria-pressed={bloqueada} aria-label={bloqueada ? 'Desbloquear la proporción' : 'Bloquear la proporción'}
+        title={bloqueada ? 'Ancho y alto cambian juntos' + (mismaUnidad ? '' : ' (solo si los dos están en la misma unidad)') : 'Al cambiar el ancho, el alto acompaña (y al revés)'}
+        className={'flex items-center gap-1.5 self-start rounded-md border px-2 py-1 text-[11px] ' +
+          (bloqueada ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary')}
+      >
+        <span aria-hidden="true">{bloqueada ? '🔒' : '🔓'}</span>
+        {bloqueada ? 'Proporción bloqueada' : 'Bloquear proporción'}
+      </button>
+    </div>
+  );
+}
+
 function LineaMedida({ etiqueta, valor, onCambiar }) {
   const esProp = valor.modo === 'proporcional';
   return (
@@ -2177,11 +2232,11 @@ function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasR
         {zona.tipo === 'logo' && zona.cruz !== false ? (
           <LineaMedida etiqueta="Cabe en" valor={zona.lado} onCambiar={(m) => onActualizar({ lado: m })} />
         ) : (
-          <>
-            <LineaMedida etiqueta="Ancho" valor={zona.ancho} onCambiar={(m) => onActualizar({ ancho: m })} />
-            <LineaMedida etiqueta="Alto" valor={zona.alto} onCambiar={(m) => onActualizar({ alto: m })} />
-          </>
+          <MedidasConCandado zona={zona} onActualizar={onActualizar} />
         )}
+        <p className="text-[11px] text-faint-foreground">
+          En cm, la zona mide lo mismo en todas las tallas; en % de la pieza, crece y se achica con la talla.
+        </p>
       </div>
 
       <div className="flex flex-col gap-3 border-t border-border pt-3">

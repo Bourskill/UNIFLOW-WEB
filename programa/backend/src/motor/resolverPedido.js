@@ -191,6 +191,8 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             // la letra (contornosTexto.js), del pegado a la letra al de afuera.
             espaciadoMil: esTalla ? 0 : Number(cruda?.espaciadoMil) || 0,
             alineacion: !esTalla && ['izquierda', 'derecha'].includes(cruda?.alineacion) ? cruda.alineacion : 'centro',
+            // Arriba / centro / abajo dentro de la zona (un nombre largo, más chico, no queda flotando).
+            alineacionV: !esTalla && ['arriba', 'abajo'].includes(cruda?.alineacionV) ? cruda.alineacionV : 'centro',
             contornos: esTalla ? [] : contornosDeZona(cruda),
             // Texto en varios renglones (saltos de línea): espacio entre ellos,
             // en % del alto de la letra (ajusteTexto.js·INTERLINEADO).

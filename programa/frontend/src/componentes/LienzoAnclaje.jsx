@@ -305,6 +305,7 @@ function pedidoDeAjuste(z) {
     contornoCm: Math.min(grosorTotal(z.contornos || []), 6), // tope del backend (ajusteTexto.js·CONTORNO_MAX_CM)
     alineacion: esTalla ? 'centro' : z.alineacion || 'centro',
     ...(Number.isFinite(z.interlineado) ? { interlineado: z.interlineado } : {}),
+    alineacionV: esTalla ? 'centro' : z.alineacionV || 'centro',
   };
 }
 

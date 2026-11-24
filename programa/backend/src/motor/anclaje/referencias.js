@@ -145,13 +145,66 @@ function emparejarPorPosicion(lista, ref, queEs, nombrePieza) {
       (mejor >= 0 ? (" (el más cercano queda a " + Math.round(dMejor * 100) + "% de la pieza)") : "") + ".",
       "El contorno cambió de forma entre tallas. Mira esa pieza en la moldería.");
   }
-  if (lista.length > 1 && dSegundo >= 0 && dSegundo < dMejor * MARGEN_DUDA) {
+  if (lista.length > 1 && dSegundo >= 0 && dSegundo < dMejor * MARGEN_DUDA && !esElMismoRasgo(lista, ref, mejor)) {
     return fallo(
       "En esta talla hay dos " + queEs + "s casi igual de cerca de donde pusiste el ancla " +
       "sobre «" + nombrePieza + "». No elijo por ti.",
       "Usa un piquete, o mueve el ancla a un punto que no tenga otro al lado.");
   }
   return { ok: true, indice: mejor, distancia: dMejor };
+}
+
+// Visto en producción (pantaloneta, 2XL): el MISMO piquete dibujado dos veces
+// en el archivo, a medio centímetro -- "dos igual de cerca" que en realidad
+// son uno. Si todos los que compiten con el elegido están a menos de
+// JUNTOS_CM de él, no hay duda real: se usa el más cercano.
+var JUNTOS_CM = 1.5;
+function esElMismoRasgo(lista, ref, mejor) {
+  var m = lista[mejor];
+  if (!m || typeof m.x !== "number" || typeof m.y !== "number") return false;
+  var dMejor = distanciaRel(m, ref);
+  for (var i = 0; i < lista.length; i++) {
+    if (i === mejor) continue;
+    var o = lista[i];
+    if (distanciaRel(o, ref) >= dMejor * MARGEN_DUDA) continue; // no compite
+    if (typeof o.x !== "number" || Math.sqrt((o.x - m.x) * (o.x - m.x) + (o.y - m.y) * (o.y - m.y)) >= JUNTOS_CM) return false;
+  }
+  return true;
+}
+function distanciaRel(p, ref) {
+  var dx = (typeof p.rx === "number" ? p.rx : 0) - ref.rx, dy = (typeof p.ry === "number" ? p.ry : 0) - ref.ry;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// ÚLTIMO RECURSO, para que el diseño se vea en TODAS las tallas: si el rasgo
+// no se puede reencontrar (el archivo no trae ese piquete en esta talla, o
+// hay dos de verdad distintos igual de cerca), el ancla va al MISMO LUGAR
+// RELATIVO de la pieza -- el gradado es proporcional, así que es donde
+// estaría -- y, si ese lugar cae casi sobre el contorno (un piquete casi
+// siempre está en el borde), pegado al contorno. Nunca en silencio: avisa.
+function porPosicionRelativa(geo, ref, queEs, nombrePieza, motivo) {
+  if (!geo || !geo.pieza || typeof ref.rx !== "number" || typeof ref.ry !== "number") return null;
+  var W = geo.pieza.ancho_cm, H = geo.pieza.alto_cm;
+  var p = { x: ref.rx * W, y: ref.ry * H };
+  var cerca = puntoMasCercanoDelContorno(geo.vertices || [], p);
+  if (cerca && cerca.d <= 0.03 * Math.sqrt(W * W + H * H)) p = { x: cerca.x, y: cerca.y };
+  return logro(p, { x: p.x, y: p.y, ancho: 0, alto: 0 },
+    queEs + " de " + nombrePieza + " (por posición)",
+    motivo + " Se usó el mismo lugar de la pieza (" + Math.round(ref.rx * 100) + "% del ancho, " +
+    Math.round(ref.ry * 100) + "% del alto). Revisá esa talla en la moldería.");
+}
+
+function puntoMasCercanoDelContorno(vs, p) {
+  var mejor = null;
+  for (var i = 0; i < vs.length; i++) {
+    var a = vs[i], b = vs[(i + 1) % vs.length];
+    var ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey;
+    var t = l2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * ex + (p.y - a.y) * ey) / l2)) : 0;
+    var x = a.x + t * ex, y = a.y + t * ey;
+    var d = Math.sqrt((p.x - x) * (p.x - x) + (p.y - y) * (p.y - y));
+    if (!mejor || d < mejor.d) mejor = { x: x, y: y, d: d };
+  }
+  return mejor;
 }
 
 function avisoDeEmparejado(queEs, ref, indice, total, distancia) {
@@ -245,13 +298,15 @@ function resolverReferencia(ref, ctx) {
       if (!geo) return fallo("No tengo la geometría de la pieza «" + nombrePieza + "».");
       var sl = geo.salientes || [];
       if (!sl.length) {
+        var sinSl = porPosicionRelativa(geo, ref, "extremo", nombrePieza, "En esta talla «" + nombrePieza + "» no tiene extremos reconocibles.");
+        if (sinSl) return sinSl;
         return fallo("La pieza «" + nombrePieza + "» no tiene salientes reconocibles: su " +
                      "contorno no da la vuelta en ningún sitio marcado.");
       }
       var iSl = ref.indice, avisoSl = null;
       if (typeof ref.total === "number" && ref.total !== sl.length) {
         var emSl = emparejarPorPosicion(sl, ref, "extremo", nombrePieza);
-        if (!emSl.ok) return emSl;
+        if (!emSl.ok) return porPosicionRelativa(geo, ref, "extremo", nombrePieza, emSl.texto) || emSl;
         iSl = emSl.indice;
         avisoSl = avisoDeEmparejado("extremo", ref, iSl, sl.length, emSl.distancia);
       }
@@ -273,12 +328,14 @@ function resolverReferencia(ref, ctx) {
       if (!geo) return fallo("No tengo la geometría de la pieza «" + nombrePieza + "».");
       var ps = geo.piquetes || [];
       if (!ps.length) {
+        var sinPq = porPosicionRelativa(geo, ref, "piquete", nombrePieza, "En esta talla «" + nombrePieza + "» no tiene piquetes reconocibles.");
+        if (sinPq) return sinPq;
         return fallo("La pieza «" + nombrePieza + "» no tiene piquetes reconocibles en esta talla.");
       }
       var iPq = ref.indice, avisoPq = null;
       if (typeof ref.total === "number" && ref.total !== ps.length) {
         var emPq = emparejarPorPosicion(ps, ref, "piquete", nombrePieza);
-        if (!emPq.ok) return emPq;
+        if (!emPq.ok) return porPosicionRelativa(geo, ref, "piquete", nombrePieza, emPq.texto) || emPq;
         iPq = emPq.indice;
         avisoPq = avisoDeEmparejado("piquete", ref, iPq, ps.length, emPq.distancia);
       }

@@ -271,6 +271,7 @@ export function calibrarCuerpo({ medidor, candidatos, anchoCm, altoCm, reglas = 
 export function ajustarTexto({
   medidor, texto, anchoCm, altoCm, modo, cuerpoCalibradoCm = null, reglas = REGLAS_TEXTO,
   espaciadoMil = 0, contornoCm = 0, alineacion = 'centro', interlineado = INTERLINEADO.porDefecto,
+  alineacionV = 'centro',
 }) {
   // Estilo elegido en la zona (panel de Diseño): el espaciado entre letras
   // es el punto de partida del tracking, y el contorno de color ocupa
@@ -371,10 +372,16 @@ export function ajustarTexto({
   // abajo y su tope en el de arriba. Varios renglones: el bloque entero
   // centrado, cada renglón un paso más abajo que el anterior.
   const centroBanda = ((banda.minY + banda.maxY) / 2) * cuerpo;
+  // Alineación vertical (zona de nombre o texto): un nombre largo baja de
+  // cuerpo y, en vez de quedar centrado, se pega arriba o abajo de su zona --
+  // así todos los nombres arrancan a la misma altura. Un número va a alto
+  // completo: no tiene para dónde moverse.
+  const sobra = Math.max(altoCm - altoBloque * cuerpo, 0);
+  const corrimientoV = esNumero ? 0 : alineacionV === 'arriba' ? -sobra / 2 : alineacionV === 'abajo' ? sobra / 2 : 0;
   const lineas = renglones.map((r, i) => ({
     texto: r.texto,
     dxCm: dxDe(tinta.lineas[i]),
-    dyCm: centroBanda + (i - (n - 1) / 2) * paso * cuerpo,
+    dyCm: centroBanda + (i - (n - 1) / 2) * paso * cuerpo + corrimientoV,
     // Dónde empieza y termina su tinta, desde su origen (cm).
     tintaCm: { izq: tinta.lineas[i].izq, der: tinta.lineas[i].der },
   }));
@@ -462,6 +469,7 @@ export async function ajustarTextosDePiezas(piezas, obtenerMedidor, reglas = REG
         contornoCm: grosorTotal(contornosDeTexto(t)),
         alineacion: t.alineacion || 'centro',
         interlineado: t.interlineado,
+        alineacionV: t.alineacionV || 'centro',
       });
       // El texto que se escribe en el PDF es el mismo que se midió.
       return { ...t, texto: ajuste ? ajuste.texto : t.texto, fuenteUrl, ajuste };
