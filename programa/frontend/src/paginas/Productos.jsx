@@ -377,12 +377,6 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     const clave = piezaActiva;
     setSubiendoImagen(true);
     try {
-      const aBase64 = (blob) => new Promise((resolve, reject) => {
-        const lector = new FileReader();
-        lector.onload = () => resolve(String(lector.result).split(',')[1]);
-        lector.onerror = () => reject(new Error('No se pudo leer el archivo.'));
-        lector.readAsDataURL(blob);
-      });
       // Un PDF (vectorial) se guarda TAL CUAL -- es lo que va al PDF de
       // producción -- y además una vista en PNG para poder verlo acá.
       const esPdf = archivo.type === 'application/pdf';
@@ -392,10 +386,10 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
         let vista;
         try { vista = await vistaDePdf(archivo); }
         catch (e) { throw new Error('No se pudo leer el PDF (' + e.message + '). ¿Está protegido o dañado?'); }
-        urlVista = await subirArchivo(await aBase64(vista.blob), 'image/png', 'diseno-vista-' + clave);
+        urlVista = await subirArchivo(vista.blob, 'image/png', 'diseno-vista-' + clave);
         if (vista.paginas > 1) setErrorDiseno('El PDF tiene ' + vista.paginas + ' páginas: se usa solo la primera.');
       }
-      const url = await subirArchivo(await aBase64(archivo), archivo.type, 'diseno-' + clave);
+      const url = await subirArchivo(archivo, archivo.type, 'diseno-' + clave);
       const vistasNuevas = (vistas) => {
         const r = { ...(vistas || {}) };
         if (urlVista) r[clave] = urlVista; else delete r[clave];
@@ -1921,22 +1915,16 @@ function SelectorLogo({ url, vista, onElegir }) {
     setSubiendo(true);
     setError(null);
     try {
-      const base64 = (blob) => new Promise((resolve, reject) => {
-        const lector = new FileReader();
-        lector.onload = () => resolve(lector.result.slice(lector.result.indexOf(',') + 1));
-        lector.onerror = reject;
-        lector.readAsDataURL(blob);
-      });
       let urlVista = null;
       if (archivo.type === 'application/pdf') {
         const { vistaDePdf } = await import('../utilidades/vistaPdf.js');
         let v;
         try { v = await vistaDePdf(archivo, { ladoMaxPx: 1200 }); }
         catch (e) { throw new Error('No se pudo leer el PDF (' + e.message + '). ¿Está protegido o dañado?'); }
-        urlVista = await subirArchivo(await base64(v.blob), 'image/png', 'logo-vista');
+        urlVista = await subirArchivo(v.blob, 'image/png', 'logo-vista');
         if (v.paginas > 1) setError('El PDF tiene ' + v.paginas + ' páginas: se usa solo la primera.');
       }
-      const urlSubida = await subirArchivo(await base64(archivo), archivo.type, 'logo');
+      const urlSubida = await subirArchivo(archivo, archivo.type, 'logo');
       onElegir({ logoRuta: urlSubida, logoVista: urlVista });
     } catch (e) { setError(e.message); }
     finally { setSubiendo(false); }

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
-import { leerColeccion, leerRegistro, crearRegistro, actualizarRegistro, borrarRegistro, subirArchivo, registrarEvento, leerEventos } from '../dominio/almacen.js';
+import { leerColeccion, leerRegistro, crearRegistro, actualizarRegistro, borrarRegistro, subirArchivo, firmarSubida, registrarEvento, leerEventos } from '../dominio/almacen.js';
 import { resolverPiezasDeGrupo, resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
 import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting, generarPdfPaginas } from '../motor/exportarPdf.js';
@@ -54,6 +54,21 @@ const EXTENSION_POR_TIPO = {
 // cortara la escritura por timeout con un solo archivo de unos pocos MB.
 // El body sigue viajando en base64 (mismo límite de 50mb de server.js), lo
 // que cambia es dónde termina viviendo: Storage, no la columna jsonb.
+// Pide permiso para subir un archivo DIRECTO a Storage desde el navegador
+// (archivos pesados: PDF de diseño, prendas enteras). Devuelve adónde subirlo
+// y la URL pública con la que queda.
+router.post('/archivos/firma', async (req, res) => {
+  const { contentType, nombre } = req.body || {};
+  if (!contentType) return res.status(400).json({ error: 'Falta contentType' });
+  try {
+    const extension = EXTENSION_POR_TIPO[contentType] || '';
+    const ruta = String(nombre || 'archivo').replace(/[^a-z0-9_-]/gi, '_').slice(0, 80) + '-' + nanoid() + extension;
+    res.json(await firmarSubida(ruta));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 router.post('/archivos', async (req, res) => {
   const { base64, contentType, nombre } = req.body;
   if (!base64 || !contentType) return res.status(400).json({ error: 'Faltan base64 o contentType' });

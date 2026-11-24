@@ -131,10 +131,63 @@ export async function verificarSalud() {
 // Supabase Storage y devuelve su URL pública -- nunca se guarda el archivo
 // en sí adentro de un registro (ver almacen.js: eso es lo que causaba el
 // "statement timeout" al guardar).
-export function subirArchivo(base64, contentType, nombre) {
-  return pedirJson('/archivos', { method: 'POST', body: JSON.stringify({ base64, contentType, nombre }) }).then(
-    (r) => r.url
-  );
+//
+// El archivo va DIRECTO del navegador a Storage (el backend solo firma el
+// permiso): así no hay tope de tamaño del lado del servidor ni se le llena la
+// memoria con producciones grandes. `datos`: un Blob/File o el base64 de antes.
+export async function subirArchivo(datos, contentType, nombre) {
+  const blob = typeof datos === 'string' ? base64ABlob(datos, contentType) : datos;
+  const pedido = await pedir('/archivos/firma', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contentType, nombre }),
+  });
+  if (pedido.status === 404) {
+    // Un servidor sin la ruta nueva: la subida de siempre (base64 por el servidor).
+    const base64 = typeof datos === 'string' ? datos : await blobABase64(blob);
+    return (await pedirJson('/archivos', { method: 'POST', body: JSON.stringify({ base64, contentType, nombre }) })).url;
+  }
+  const firma = await pedido.json().catch(() => ({}));
+  if (!pedido.ok) throw new Error(firma.error || 'No se pudo preparar la subida (' + pedido.status + ')');
+  let respuesta;
+  try {
+    respuesta = await fetch(firma.urlSubida, {
+      method: 'PUT',
+      headers: { 'content-type': contentType, 'x-upsert': 'true', 'cache-control': 'max-age=3600' },
+      body: blob,
+    });
+  } catch {
+    throw new Error('Se cortó la conexión mientras se subía el archivo (' + megas(blob.size) + '). Probá de nuevo.');
+  }
+  if (!respuesta.ok) {
+    const detalle = await respuesta.text().catch(() => '');
+    if (respuesta.status === 413 || /exceeded the maximum|too large/i.test(detalle)) {
+      throw new Error('El archivo pesa ' + megas(blob.size) + ' y el almacenamiento no acepta archivos tan grandes ' +
+        '(el plan gratis de Supabase llega a 50 MB por archivo). Guardalo más liviano o subí el límite en Supabase.');
+    }
+    throw new Error('No se pudo subir el archivo (' + respuesta.status + '): ' + detalle.slice(0, 200));
+  }
+  return firma.url;
+}
+
+function megas(bytes) {
+  return (bytes / 1048576).toFixed(1).replace('.', ',') + ' MB';
+}
+
+function base64ABlob(base64, contentType) {
+  const binario = atob(base64);
+  const bytes = new Uint8Array(binario.length);
+  for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+  return new Blob([bytes], { type: contentType });
+}
+
+function blobABase64(blob) {
+  return new Promise((resolve, reject) => {
+    const lector = new FileReader();
+    lector.onload = () => resolve(String(lector.result).split(',')[1]);
+    lector.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+    lector.readAsDataURL(blob);
+  });
 }
 
 // --- Fuentes (catálogo de tipografías propias) ------------------------------

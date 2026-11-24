@@ -152,6 +152,24 @@ export async function subirArchivo(ruta, buffer, contentType) {
   return data.publicUrl;
 }
 
+// Subida DIRECTA desde el navegador: el backend solo firma un permiso de un
+// solo uso para esa ruta y el archivo va del navegador a Storage sin pasar por
+// acá -- sin el tope del JSON (50 MB) ni ocupar la memoria del servidor.
+export async function firmarSubida(ruta) {
+  if (!supabaseStorage) {
+    throw new Error('Falta SUPABASE_SERVICE_KEY en las variables de entorno (hace falta para subir archivos).');
+  }
+  const firmar = () => supabaseStorage.storage.from(NOMBRE_BUCKET).createSignedUploadUrl(ruta, { upsert: true });
+  let { data, error } = await firmar();
+  if (error && /bucket not found/i.test(error.message)) {
+    await crearBucket();
+    ({ data, error } = await firmar());
+  }
+  if (error) throw new Error('Supabase (firmar subida): ' + error.message);
+  const { data: publica } = supabaseStorage.storage.from(NOMBRE_BUCKET).getPublicUrl(ruta);
+  return { urlSubida: data.signedUrl, url: publica.publicUrl };
+}
+
 // --- Eventos (historial de auditoría) --------------------------------------
 // Registro append-only de qué se creó/actualizó/borró, cuándo y un resumen
 // breve -- para que una tabla vacía o un registro que desapareció se pueda

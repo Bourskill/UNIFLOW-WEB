@@ -79,12 +79,11 @@ export function FichaPieza({ archivo, onQuitar, onCambio, modoPrenda = false, ro
           formatoDetectado === 'pdf' ? await leerArchivoComoBase64(archivo) : await leerArchivoComoTexto(archivo);
         setArchivoTexto(texto);
         setFormato(formatoDetectado);
-        const base64ParaGuardar = formatoDetectado === 'pdf' ? texto : await leerArchivoComoBase64(archivo);
         const [url, r] = await Promise.all([
           // Guardar la copia del original sirve para "Reprocesar" más
           // adelante, pero no es imprescindible: si Storage falla, la pieza
           // se importa igual y se avisa (ver avisoArchivo).
-          subirArchivo(base64ParaGuardar, TIPO_MIME_POR_FORMATO[formatoDetectado], 'pieza').catch((e) => {
+          subirArchivo(archivo, TIPO_MIME_POR_FORMATO[formatoDetectado], 'pieza').catch((e) => {
             setAvisoArchivo(e.message);
             return null;
           }),

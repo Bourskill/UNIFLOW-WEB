@@ -44,7 +44,9 @@ app.get('/api/acceso', (req, res) => res.json({ ok: true }));
 // body -- ambos casos pueden pasar varios MB fácil. 10mb se quedaba corto
 // con una sola imagen de diseño en buena resolución ("request entity too
 // large"); 50mb da margen real sin abrir la puerta a payloads absurdos.
-app.use(express.json({ limit: '50mb' }));
+// Los archivos pesados ya no pasan por acá (se suben directo a Storage, ver
+// /archivos/firma); queda margen para los moldes que se analizan en el servidor.
+app.use(express.json({ limit: '100mb' }));
 app.use('/api', apiRouter);
 
 // Manejador de errores final: cualquier error de una ruta (ver el wrapper en

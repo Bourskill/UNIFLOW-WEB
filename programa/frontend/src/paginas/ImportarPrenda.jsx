@@ -85,7 +85,7 @@ export function ImportarPrenda({ archivo, onQuitar, onGuardado }) {
       const [url, r, biblioteca] = await Promise.all([
         // La copia del original no es imprescindible (estas piezas no se
         // "reprocesan"): si Storage falla, se importa igual y se avisa.
-        subirArchivo(base64, 'application/pdf', 'prenda').catch((e) => {
+        subirArchivo(nuevo, 'application/pdf', 'prenda').catch((e) => {
           setAvisoArchivo(e.message);
           return null;
         }),
