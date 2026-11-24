@@ -647,7 +647,10 @@ async function bajarArchivo(urlODataUrl) {
     const respuesta = await fetch(urlODataUrl, { redirect: 'error', signal: AbortSignal.timeout(30000) });
     if (!respuesta.ok) throw new Error('No se pudo bajar la imagen del diseño (' + respuesta.status + ')');
     contentType = respuesta.headers.get('content-type') || '';
-    bytes = await leerConTope(respuesta, 60 * 1024 * 1024); // arte de sublimación en alta: más margen que una fuente
+    // Arte de sublimación en alta: más margen que una fuente. En la app de
+    // escritorio la memoria es la de la PC: el tope solo frena algo absurdo.
+    const tope = (process.env.UNIFLOW_CARPETA ? 2048 : 60) * 1024 * 1024;
+    bytes = await leerConTope(respuesta, tope);
   }
   return { contentType, bytes };
 }

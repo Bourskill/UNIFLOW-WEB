@@ -51,6 +51,9 @@ function usado(mapa, clave) {
  * Lee SUPABASE_URL en el momento (no al importar) para poder probarse.
  */
 export function urlDeFuentePermitida(url) {
+  // App de escritorio: los archivos están en la carpeta de datos y se leen del
+  // disco (dominio/almacenLocal.js); el nombre ya no puede salir de ella.
+  if (process.env.UNIFLOW_CARPETA && typeof url === 'string' && /^\/api\/archivos-locales\/[a-z0-9_.-]+$/i.test(url)) return true;
   try {
     const origen = process.env.SUPABASE_URL;
     if (!origen) return false;

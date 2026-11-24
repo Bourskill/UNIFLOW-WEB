@@ -88,6 +88,29 @@ console.log('\n--- Archivos sin límite de tamaño ---');
   comprobar('no deja salir de la carpeta', malo.status === 400 || malo.status === 404, malo.status);
 }
 
+console.log('\n--- Exportar con el diseño guardado en la carpeta ---');
+{
+  // Un PDF de diseño de verdad, subido como lo sube la app.
+  const { PDFDocument, rgb } = await import('pdf-lib');
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 100]).drawRectangle({ x: 0, y: 0, width: 200, height: 100, color: rgb(0.4, 0.1, 0.8) });
+  const disenoBytes = await doc.save();
+  const firma = await json('/archivos/firma', { method: 'POST', body: JSON.stringify({ contentType: 'application/pdf', nombre: 'diseno-mesa' }) });
+  await fetch('http://127.0.0.1:' + puerto + firma.cuerpo.urlSubida, { method: 'PUT', body: disenoBytes, headers: { 'content-type': 'application/pdf' } });
+  const { generarPdfNesting } = await import('../src/motor/exportarPdf.js');
+  let error = null, bytes = null;
+  try {
+    bytes = await generarPdfNesting({
+      anchoLienzoCm: 30, altoLienzoCm: 20,
+      piezas: [{ piezaId: 'FRENTE', talla: 'm', posicion: { x: 0, y: 0 }, anchoCm: 20, altoCm: 10, imagenDataUrl: firma.cuerpo.url, textos: [], imagenes: [] }],
+    });
+  } catch (e) { error = e.message; }
+  comprobar('el PDF sale con el diseño de la carpeta (antes: "URL no permitida")', !error && bytes?.length > 500, error);
+  const { urlDeStoragePermitida } = await import('../src/motor/medidorFuentes.js');
+  comprobar('pero solo archivos de la carpeta, no cualquier dirección', !urlDeStoragePermitida('/api/archivos-locales/../secreto') &&
+    !urlDeStoragePermitida('http://127.0.0.1:9/x') && !urlDeStoragePermitida('/api/pedidos'));
+}
+
 console.log('\n--- Traerse los datos de la versión web ---');
 {
   // Una "versión web" de mentira: su respaldo por colección y su Storage.
