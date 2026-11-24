@@ -167,6 +167,45 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
 // hacia arriba). Las filas se arman para que el conjunto quede más o menos
 // cuadrado: así entra en el lienzo de Illustrator (16383 pt por lado), que
 // es el límite donde se puede dibujar.
+// Lo que entra en UN documento de Illustrator: el lienzo (16383 pt por lado,
+// con un margen) y hasta 1000 mesas de trabajo.
+const LIENZO_UTIL_PT = 16383 - 400;
+const MAX_MESAS_ILLUSTRATOR = 1000;
+const CM_A_PT = 72 / 2.54;
+
+/** ¿Entran estas mesas (en cm) en un solo documento de Illustrator? */
+export function entranEnIllustrator(mesasCm) {
+  if (mesasCm.length === 0) return true;
+  if (mesasCm.length > MAX_MESAS_ILLUSTRATOR) return false;
+  const lugar = acomodarMesas(mesasCm.map((m) => ({ ancho: m.anchoLienzoCm * CM_A_PT, alto: m.altoLienzoCm * CM_A_PT })));
+  const ancho = Math.max(...lugar.map((m) => m.der)) - Math.min(...lugar.map((m) => m.izq));
+  const alto = Math.max(...lugar.map((m) => m.arriba)) - Math.min(...lugar.map((m) => m.abajo));
+  return ancho <= LIENZO_UTIL_PT && alto <= LIENZO_UTIL_PT;
+}
+
+/**
+ * Parte una lista de mesas (en cm) en varios archivos cuando no entran en
+ * uno solo de Illustrator. `bloques`: grupos de mesas que conviene no
+ * separar (las piezas de un mismo jugador); un bloque que solo no entra se
+ * parte por mesa. Devuelve la lista de partes (cada una, sus mesas en orden).
+ */
+export function partirParaIllustrator(bloques) {
+  const partes = [];
+  let actual = [];
+  const cerrar = () => { if (actual.length) partes.push(actual); actual = []; };
+  for (const bloque of bloques) {
+    if (entranEnIllustrator([...actual, ...bloque])) { actual.push(...bloque); continue; }
+    cerrar();
+    if (entranEnIllustrator(bloque)) { actual = [...bloque]; continue; }
+    for (const mesa of bloque) {
+      if (!entranEnIllustrator([...actual, mesa])) cerrar();
+      actual.push(mesa);
+    }
+  }
+  cerrar();
+  return partes.length ? partes : [[]];
+}
+
 function acomodarMesas(paginas) {
   const ancho = (p) => p.ancho + SEPARACION_MESAS_PT;
   const area = paginas.reduce((t, p) => t + ancho(p) * (p.alto + SEPARACION_MESAS_PT), 0);

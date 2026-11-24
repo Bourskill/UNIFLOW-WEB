@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { exportarMesas, exportarMesasArchivo, guardarArchivo } from '../api.js';
+import { exportarMesas, exportarMesasArchivo, guardarArchivo, nombreDeParte } from '../api.js';
 import { armarZip } from '../utilidades/zip.js';
 import { obtener } from '../datos/index.js';
 import { TarjetaProduccion } from '../componentes/TarjetaProduccion.jsx';
@@ -132,17 +132,21 @@ function PanelExportar({ produccion, grupos, piezas, onCerrar }) {
         const archivos = [];
         for (let i = 0; i < tallas.length; i++) {
           setTrabajando('Talla ' + tallas[i] + ' (' + (i + 1) + ' de ' + tallas.length + ')…');
-          const pdf = await exportarMesasArchivo(produccion.id, { tallas: [tallas[i]], conEjemplo });
-          archivos.push({ nombre: nombreDeExportacion(produccion, [tallas[i]]), bytes: new Uint8Array(await pdf.arrayBuffer()) });
+          // Una talla que no entra en un solo documento de Illustrator viene en partes.
+          const partes = await exportarMesasArchivo(produccion.id, { tallas: [tallas[i]], conEjemplo });
+          for (let k = 0; k < partes.length; k++) {
+            archivos.push({ nombre: nombreDeParte(nombreDeExportacion(produccion, [tallas[i]]), k, partes.length), bytes: new Uint8Array(await partes[k].arrayBuffer()) });
+          }
         }
         setTrabajando('Armando el .zip…');
         guardarArchivo(new Blob([armarZip(archivos)], { type: 'application/zip' }), nombreDeExportacion(produccion, tallas).replace(/\.pdf$/, '.zip'));
-        setListo('ZIP descargado con ' + tallas.length + ' archivos, uno por talla.');
+        setListo('ZIP descargado con ' + archivos.length + ' archivos' + (archivos.length > tallas.length ? ' (alguna talla no entraba en un solo documento de Illustrator y va en partes).' : ', uno por talla.'));
       } else {
         // Una talla, o todas en un PDF (una mesa = una página).
         setTrabajando(porSeparado ? 'Talla ' + tallas[0] + '…' : 'Armando las mesas…');
-        await exportarMesas(produccion.id, { tallas, conEjemplo }, nombreDeExportacion(produccion, tallas));
-        setListo(porSeparado ? '1 archivo descargado.' : 'PDF descargado con ' + tallas.length + (tallas.length === 1 ? ' talla.' : ' tallas.'));
+        const n = await exportarMesas(produccion.id, { tallas, conEjemplo }, nombreDeExportacion(produccion, tallas));
+        setListo(n > 1 ? n + ' archivos descargados: no entraba todo en un solo documento de Illustrator.'
+          : porSeparado ? '1 archivo descargado.' : 'PDF descargado con ' + tallas.length + (tallas.length === 1 ? ' talla.' : ' tallas.'));
       }
     } catch (e) {
       setError(e.message);

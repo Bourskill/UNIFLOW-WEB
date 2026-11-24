@@ -447,7 +447,7 @@ export function anidarDesdePedido(pedidoId, anchoLienzoCm) {
 }
 
 // Pide un archivo al servidor (POST) y lo descarga en el navegador.
-async function bajar(ruta, cuerpo, mensajeError) {
+async function pedirArchivo(ruta, cuerpo, mensajeError) {
   const respuesta = await pedir(ruta, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -457,7 +457,33 @@ async function bajar(ruta, cuerpo, mensajeError) {
     const datos = await respuesta.json().catch(() => ({}));
     throw new Error(datos.error || mensajeError);
   }
-  return respuesta.blob();
+  return respuesta;
+}
+
+async function bajar(ruta, cuerpo, mensajeError) {
+  return (await pedirArchivo(ruta, cuerpo, mensajeError)).blob();
+}
+
+// Archivos que el servidor parte en varios cuando no entran en un solo
+// documento de Illustrator (su lienzo y sus mesas tienen límite): la primera
+// respuesta dice cuántas partes son (X-Uniflow-Partes) y se piden las demás.
+async function bajarEnPartes(ruta, cuerpo, mensajeError) {
+  const primera = await pedirArchivo(ruta, { ...cuerpo, parte: 1 }, mensajeError);
+  const total = Math.max(1, Number(primera.headers.get('X-Uniflow-Partes')) || 1);
+  const partes = [await primera.blob()];
+  for (let parte = 2; parte <= total; parte++) partes.push(await bajar(ruta, { ...cuerpo, parte }, mensajeError));
+  return partes;
+}
+
+/** "archivo.pdf" → "archivo_parte_2_de_3.pdf" (solo si hay más de una parte). */
+export function nombreDeParte(nombre, i, total) {
+  return total > 1 ? nombre.replace(/(\.pdf)?$/i, '_parte_' + (i + 1) + '_de_' + total + '.pdf') : nombre;
+}
+
+async function descargarEnPartes(ruta, cuerpo, nombreArchivo, mensajeError) {
+  const partes = await bajarEnPartes(ruta, cuerpo, mensajeError);
+  partes.forEach((blob, i) => guardarArchivo(blob, nombreDeParte(nombreArchivo, i, partes.length)));
+  return partes.length;
 }
 
 async function descargar(ruta, cuerpo, nombreArchivo, mensajeError) {
@@ -491,19 +517,19 @@ export function generarDxf(grupoId, lineas, anchoLienzoCm) {
 // Una producción por tallas: la prenda completa de cada talla, una mesa
 // (página del PDF) por pieza -- ver rutas/api.js·POST /exportar-mesas/:id.
 export function exportarMesas(produccionId, { tallas, conEjemplo }, nombreArchivo) {
-  return descargar('/exportar-mesas/' + encodeURIComponent(produccionId), { tallas, conEjemplo: !!conEjemplo },
+  return descargarEnPartes('/exportar-mesas/' + encodeURIComponent(produccionId), { tallas, conEjemplo: !!conEjemplo },
     nombreArchivo || 'produccion.pdf', 'No se pudo exportar la producción');
 }
 
-/** Lo mismo, pero devuelve el PDF (Blob) en vez de descargarlo: para juntar varias tallas en un .zip. */
+/** Lo mismo, pero devuelve los PDF (Blob[], uno por parte) en vez de descargarlos: para juntar varias tallas en un .zip. */
 export function exportarMesasArchivo(produccionId, { tallas, conEjemplo }) {
-  return bajar('/exportar-mesas/' + encodeURIComponent(produccionId), { tallas, conEjemplo: !!conEjemplo }, 'No se pudo exportar la producción');
+  return bajarEnPartes('/exportar-mesas/' + encodeURIComponent(produccionId), { tallas, conEjemplo: !!conEjemplo }, 'No se pudo exportar la producción');
 }
 
 // Una talla de un pedido, con los jugadores: cada uno con su prenda completa,
 // una mesa por pieza -- ver rutas/api.js·POST /exportar-pedido/:id.
 export function exportarTallaDePedido(pedidoId, talla, nombreArchivo, lineaId = null) {
-  return descargar('/exportar-pedido/' + encodeURIComponent(pedidoId), lineaId ? { talla, lineaId } : { talla },
+  return descargarEnPartes('/exportar-pedido/' + encodeURIComponent(pedidoId), lineaId ? { talla, lineaId } : { talla },
     nombreArchivo || 'talla-' + talla + '.pdf', 'No se pudo exportar la talla ' + talla);
 }
 

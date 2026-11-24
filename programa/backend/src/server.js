@@ -47,7 +47,7 @@ export async function crearApp() {
       .split(',')
       .map((o) => o.trim().replace(/\/+$/, ''))
       .filter(Boolean);
-    app.use(cors({ origin: origenesPermitidos }));
+    app.use(cors({ origin: origenesPermitidos, exposedHeaders: ['X-Uniflow-Partes'] }));
   }
 
   // Rutas abiertas: el health check (Render y EstadoServidor.jsx) y la fuente

@@ -6,7 +6,7 @@ import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting, generarPdfPaginas } from '../motor/exportarPdf.js';
 import { armarMesas, piezasSinRepetir } from '../motor/mesas.js';
 import { campoDeZona } from '../motor/campoDeZona.js';
-import { conDocumentoIllustrator } from '../motor/illustrator/documentoAi.js';
+import { conDocumentoIllustrator, entranEnIllustrator, partirParaIllustrator } from '../motor/illustrator/documentoAi.js';
 import { resolverPiezasDePedido, tallaRealDePieza } from '../motor/resolverPedido.js';
 import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
 import { geometriaDelGrupo, geometriaParaAnclaje } from '../motor/geometriaAnclaje.js';
@@ -1227,17 +1227,28 @@ router.post('/exportar-mesas/:id', async (req, res) => {
   }
   piezasDeMesas = await ajustarTextosDePiezas(piezasDeMesas, obtenerMedidor);
 
-  const mesas = armarMesas(piezasDeMesas);
+  const todasLasMesas = armarMesas(piezasDeMesas);
+  const variasTallas = new Set(todasLasMesas.map((m) => m.talla)).size > 1;
+  // Si no entran en un solo documento de Illustrator, en varios archivos
+  // (sin separar una talla); cada pedido trae UNA parte.
+  const porTalla = [];
+  for (const m of todasLasMesas) {
+    const ultimo = porTalla[porTalla.length - 1];
+    if (ultimo && ultimo[0].talla === m.talla) ultimo.push(m); else porTalla.push([m]);
+  }
+  const partes = partirParaIllustrator(porTalla);
+  const parte = Math.min(Math.max(Math.floor(Number(req.body?.parte) || 1), 1), partes.length);
+  const mesas = partes[parte - 1];
   // Los artes que traen su original de Illustrator (efectos vivos), página por página.
   const artesNativos = [];
   const cortesLaser = [];
   let pdfBytes = await generarPdfPaginas(mesas, { artesNativos, cortesLaser });
-  const titulo = (producto.nombre || 'produccion') + ' ' + pedido.lineas.map((l) => l.talla).join('-');
+  const titulo = (producto.nombre || 'produccion') + ' ' + [...new Set(mesas.map((m) => m.talla))].join('-') +
+    (partes.length > 1 ? ' parte ' + parte + ' de ' + partes.length : '');
   // Con el documento de Illustrator adentro: lo abre como suyo (RGB, una
   // mesa con nombre por pieza, sin importar). Si eso fallara, sale igual
   // el PDF común -- nunca se queda sin archivo.
-  const variasTallas = new Set(mesas.map((m) => m.talla)).size > 1;
-  try {
+  if (entranEnIllustrator(mesas)) try {
     pdfBytes = await conDocumentoIllustrator(pdfBytes, {
       titulo,
       artesNativos,
@@ -1250,6 +1261,7 @@ router.post('/exportar-mesas/:id', async (req, res) => {
   }
   const nombreArchivo = titulo
     .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 120);
+  res.setHeader('X-Uniflow-Partes', String(partes.length));
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', 'attachment; filename="' + nombreArchivo + '.pdf"');
   res.send(Buffer.from(pdfBytes));
@@ -1285,15 +1297,29 @@ router.post('/exportar-pedido/:id', async (req, res) => {
 
   // Una pieza igual para todos los jugadores va una sola vez (mesas.js).
   const { piezas: sinRepetir, iguales } = piezasSinRepetir(piezasDeMesas, lineas);
-  const mesas = armarMesas(sinRepetir);
+  const todasLasMesas = armarMesas(sinRepetir);
 
   // Cada mesa con el jugador adelante: "PÉREZ 10 · ESPALDA"; las de todos: "Todos (×9) · MANGA".
   const jugadorDe = new Map(lineas.map((l, i) => [l.id, [String(l.nombre || '').replace(/\s+/g, ' ').trim(), String(l.numero || '').trim()].filter(Boolean).join(' ') || 'Prenda ' + (i + 1)]));
-  const nombresDeMesas = mesas.map((m) => {
+  const nombreDe = new Map(todasLasMesas.map((m) => {
     const p = m.piezas[0] || {};
     const quien = iguales.has(p.piezaId) ? 'Todos (×' + iguales.get(p.piezaId) + ')' : jugadorDe.get(p.lineaPedidoId) || '';
-    return quien + ' · ' + (p.piezaId || m.nombre);
-  });
+    return [m, quien + ' · ' + (p.piezaId || m.nombre)];
+  }));
+
+  // Si no entran en un solo documento de Illustrator (su lienzo y sus 1000
+  // mesas tienen un límite), van en varios archivos: sin separar las piezas
+  // de un jugador. Cada pedido trae UNA parte (parte = 1, 2...).
+  const bloques = [];
+  for (const m of todasLasMesas) {
+    const clave = iguales.has(m.piezas[0]?.piezaId) ? m : m.piezas[0]?.lineaPedidoId;
+    const ultimo = bloques[bloques.length - 1];
+    if (ultimo && ultimo.clave === clave) ultimo.mesas.push(m); else bloques.push({ clave, mesas: [m] });
+  }
+  const partes = partirParaIllustrator(bloques.map((b) => b.mesas));
+  const parte = Math.min(Math.max(Math.floor(Number(req.body?.parte) || 1), 1), partes.length);
+  const mesas = partes[parte - 1];
+  const nombresDeMesas = mesas.map((m) => nombreDe.get(m));
 
   const artesNativos = [];
   const cortesLaser = [];
@@ -1307,15 +1333,16 @@ router.post('/exportar-pedido/:id', async (req, res) => {
   // La copia de Illustrator repite cada imagen del diseño en cada mesa: en la
   // app de escritorio no hay problema; en el servidor web (memoria chica),
   // solo con pocas prendas -- si no, sale el PDF solo (Illustrator lo abre igual).
-  if (process.env.UNIFLOW_CARPETA || lineas.length <= MAX_PRENDAS_CON_ILLUSTRATOR_WEB) {
+  if (entranEnIllustrator(mesas) && (process.env.UNIFLOW_CARPETA || lineas.length <= MAX_PRENDAS_CON_ILLUSTRATOR_WEB)) {
     try {
       pdfBytes = await conDocumentoIllustrator(pdfBytes, { titulo: (pedido.cliente || 'Pedido') + ' ' + talla, artesNativos, cortesLaser, nombresDeMesas });
     } catch (error) {
       console.error('No se pudo agregar el documento de Illustrator: ' + error.message);
     }
   }
-  const nombreArchivo = ((pedido.cliente || 'pedido') + ' talla ' + talla)
+  const nombreArchivo = ((pedido.cliente || 'pedido') + ' talla ' + talla + (partes.length > 1 ? ' parte ' + parte + ' de ' + partes.length : ''))
     .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 120);
+  res.setHeader('X-Uniflow-Partes', String(partes.length));
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', 'attachment; filename="' + nombreArchivo + '.pdf"');
   res.send(Buffer.from(pdfBytes));

@@ -124,5 +124,24 @@ console.log('\n--- Una talla con varios jugadores: lo que es igual va una vez --
   comprobar('con un solo jugador, sale todo como siempre', uno.piezas.length === 3 && uno.iguales.size === 0);
 }
 
+console.log('\n--- Muchos jugadores: en varios archivos si no entra en Illustrator ---');
+{
+  const { entranEnIllustrator, partirParaIllustrator } = await import('../src/motor/illustrator/documentoAi.js');
+  const mesa = (w, h, id) => ({ anchoLienzoCm: w, altoLienzoCm: h, id });
+  // Una prenda: 7 mesas de ~60x80 cm.
+  const prenda = (j) => Array.from({ length: 7 }, (_, k) => mesa(60, 80, j + '-' + k));
+  const pocas = Array.from({ length: 3 }, (_, j) => prenda(j));
+  comprobar('3 jugadores entran en un solo archivo', partirParaIllustrator(pocas).length === 1 && entranEnIllustrator(pocas.flat()));
+  const muchas = Array.from({ length: 120 }, (_, j) => prenda(j)); // 840 mesas: no entran en el lienzo (5,78 m)
+  const partes = partirParaIllustrator(muchas);
+  comprobar('120 jugadores van en varios archivos', partes.length > 1, partes.length);
+  comprobar('cada archivo entra en Illustrator', partes.every((p) => entranEnIllustrator(p)));
+  comprobar('no se pierde ni se repite ninguna mesa', partes.flat().length === 840 && new Set(partes.flat().map((m) => m.id)).size === 840);
+  comprobar('las piezas de un jugador quedan juntas', partes.every((p) => p.length % 7 === 0));
+  const chiquitas = Array.from({ length: 1500 }, (_, j) => [mesa(5, 5, j)]);
+  const porCantidad = partirParaIllustrator(chiquitas);
+  comprobar('más de 1000 mesas: se parte aunque entren en el lienzo', porCantidad.length >= 2 && porCantidad.every((p) => p.length <= 1000));
+}
+
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');
 process.exit(fallos ? 1 : 0);
