@@ -18,6 +18,7 @@ import { resolver as resolverAnclaje } from './anclaje/resolver.js';
 import { geometriaDelGrupo } from './geometriaAnclaje.js';
 import { resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
 import { fondoDePieza } from './fondoPieza.js';
+import { anclasDeCalce, conCalceResuelto } from './colocarArte.js';
 
 // Un Producto de un solo grupo sigue guardando `grupoId` (nunca se migró
 // data existente); uno multi-prenda ("kit") guarda `grupoIds`. Normalizar
@@ -100,6 +101,14 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
     // normalizar), buscando por id, en vez de intentar que el resolutor
     // los cargue -- así el puerto queda fiel, sin agregarle campos que no
     // son suyos.
+    // Puntos de calce del arte (colocarArte.js): sus destinos en el molde se
+    // resuelven como anclas, en esta talla. Aparte del anclaje de las zonas y
+    // sin frenar el pedido: un destino que no sale en esta talla solo se omite.
+    const anclasCalce = Object.entries(diseno?.ajusteArtePorPieza || {}).flatMap(([c, aj]) => anclasDeCalce(c, aj));
+    const anclasDelCalce = anclasCalce.length
+      ? resolverAnclaje({ ...(producto.anclaje || anclajeVacio), anclas: [...(producto.anclaje?.anclas || []), ...anclasCalce] }, geometria, { talla: linea.talla }).anclas
+      : {};
+
     const zonaCruda = {};
     for (const z of producto.anclaje?.zonas || []) zonaCruda[z.id] = z;
 
@@ -222,7 +231,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         // Escala/alineación/corrimiento del arte elegidos en Diseño (ver
         // colocarArte.js). Sin ajuste guardado, el arte se estira a la pieza
         // como siempre.
-        ajusteArte: diseno?.ajusteArtePorPieza?.[clave] || null,
+        ajusteArte: conCalceResuelto(clave, diseno?.ajusteArtePorPieza?.[clave] || null, anclasDelCalce),
         // Fondo de color del diseño (sólido o degradado), igual para todas
         // las piezas salvo las que tengan uno propio, debajo del arte. Ver fondoPieza.js.
         fondo: fondoDePieza(diseno, clave),

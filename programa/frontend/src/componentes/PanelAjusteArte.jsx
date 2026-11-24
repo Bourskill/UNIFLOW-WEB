@@ -10,9 +10,14 @@ const COLUMNAS = ['izquierda', 'centro', 'derecha'];
 const NOMBRE_V = { arriba: 'arriba', centro: 'al medio', abajo: 'abajo' };
 const NOMBRE_H = { izquierda: 'a la izquierda', centro: 'al centro', derecha: 'a la derecha' };
 
-export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando }) {
+export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando, calce }) {
   const a = normalizarAjusteArte(ajuste);
   const poner = (cambios) => onCambiar({ ...a, ...cambios });
+  // Con puntos de calce enganchados, ellos ubican el arte (y con dos o más,
+  // también lo escalan): lo que ya no se usa queda apagado.
+  const enganchados = (calce?.puntos || []).filter((p) => p.destino).length;
+  const posicionPorCalce = enganchados > 0;
+  const escalaPorCalce = enganchados > 1;
   const mover = (dx, dy) => poner({ dxCm: Math.round((a.dxCm + dx) * 100) / 100, dyCm: Math.round((a.dyCm + dy) * 100) / 100 });
   const tocado = !!ajuste;
 
@@ -21,7 +26,7 @@ export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando }) {
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold uppercase tracking-wide text-faint-foreground">Ajustar diseño</span>
         <label className="flex cursor-pointer items-center gap-1.5 text-foreground">
-          <input type="checkbox" className="h-4 w-4 rounded accent-primary" checked={editando} onChange={(e) => onEditando(e.target.checked)} />
+          <input type="checkbox" className="h-4 w-4 rounded accent-primary" checked={editando && !posicionPorCalce} disabled={posicionPorCalce} onChange={(e) => onEditando(e.target.checked)} />
           Mover con el mouse (ver la imagen entera)
         </label>
         {tocado && (
@@ -45,7 +50,7 @@ export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando }) {
           </div>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className={'flex flex-col gap-1.5 ' + (escalaPorCalce ? 'pointer-events-none opacity-40' : '')} aria-disabled={escalaPorCalce}>
           <span className="font-medium text-foreground">Escala</span>
           <div className="flex items-center gap-2">
             <input type="range" min={10} max={300} step={1} value={Math.min(Math.max(a.escala, 10), 300)}
@@ -57,7 +62,7 @@ export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando }) {
           </div>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className={'flex flex-col gap-1.5 ' + (posicionPorCalce ? 'pointer-events-none opacity-40' : '')} aria-disabled={posicionPorCalce}>
           <span className="font-medium text-foreground">Alinear con la pieza</span>
           <div className="grid w-fit grid-cols-3 gap-0.5">
             {FILAS.map((v) => COLUMNAS.map((h) => {
@@ -74,7 +79,7 @@ export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando }) {
           </div>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className={'flex flex-col gap-1.5 ' + (posicionPorCalce ? 'pointer-events-none opacity-40' : '')} aria-disabled={posicionPorCalce}>
           <span className="font-medium text-foreground">Correr (cm)</span>
           <div className="flex items-center gap-2">
             <span className="text-faint-foreground">X</span>
@@ -90,6 +95,7 @@ export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando }) {
           </div>
         </div>
       </div>
+      {calce && <SeccionCalce calce={calce} enganchados={enganchados} />}
       <p className="mt-2 text-faint-foreground">
         Lo que queda fuera del molde se recorta. Se usa igual en la vista previa y en el PDF de producción.
       </p>
@@ -97,3 +103,64 @@ export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando }) {
   );
 }
 
+
+// Puntos de calce: dónde el diseño tiene que tocar la costura para seguir en
+// la pieza de al lado. Cada uno se marca sobre el arte y se engancha a un
+// punto del molde; en cada talla el arte se acomoda para que caigan ahí.
+function SeccionCalce({ calce, enganchados }) {
+  const { puntos, espejo, onEspejo, marcando, enganchandoId, onMarcar, onEnganchar, onQuitar, onCancelar } = calce;
+  const ocupado = marcando || !!enganchandoId;
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold uppercase tracking-wide text-faint-foreground">Puntos de calce</span>
+        <span className="text-faint-foreground">para que el diseño siga en la pieza de al lado</span>
+      </div>
+      {puntos.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {puntos.map((p, i) => {
+            const activo = enganchandoId === p.id;
+            return (
+              <li key={p.id} className={'flex flex-wrap items-center gap-2 rounded-md border px-2 py-1 ' + (activo ? 'border-amber-500/60 bg-amber-500/10' : 'border-border')}>
+                <span className="font-semibold text-[#ff4d8d]">C{i + 1}</span>
+                <span className="text-muted-foreground">
+                  {activo ? 'Hacé clic en el molde…'
+                    : p.destino ? (<>en {p.descripcion}{!p.resuelto && <span className="text-danger"> · no se encuentra en esta talla</span>}</>)
+                    : <span className="text-danger">sin enganchar al molde</span>}
+                </span>
+                <span className="ml-auto flex gap-1">
+                  {!activo && (
+                    <button type="button" disabled={ocupado} onClick={() => onEnganchar(p.id)}
+                      className="rounded border border-border px-1.5 py-0.5 text-muted-foreground hover:border-primary hover:text-foreground disabled:opacity-40">
+                      {p.destino ? 'Cambiar punto del molde' : 'Enganchar'}
+                    </button>
+                  )}
+                  <button type="button" onClick={() => onQuitar(p.id)} aria-label={'Quitar el punto de calce ' + (i + 1)}
+                    className="rounded px-1.5 py-0.5 text-faint-foreground hover:bg-danger-soft hover:text-danger">×</button>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        {ocupado ? (
+          <Boton variante="fantasma" tamano="sm" type="button" onClick={onCancelar}>
+            {marcando ? 'Cancelar' : 'Terminar después'}
+          </Boton>
+        ) : (
+          <Boton tamano="sm" type="button" onClick={onMarcar} disabled={puntos.length >= 6}>+ Marcar punto en el diseño</Boton>
+        )}
+        <label className="flex cursor-pointer items-center gap-1.5 text-foreground">
+          <input type="checkbox" className="h-4 w-4 rounded accent-primary" checked={espejo} onChange={(e) => onEspejo(e.target.checked)} />
+          Con su espejo del otro lado
+        </label>
+      </div>
+      <p className="text-faint-foreground">
+        {enganchados === 0 && 'Marcá sobre el diseño el punto que toca la costura y después hacé clic en el punto del molde donde tiene que caer (mejor un piquete: está en todas las tallas).'}
+        {enganchados === 1 && 'Con un punto, el diseño queda fijo ahí en todas las tallas; la escala la elegís vos. Con dos, la escala también sale sola.'}
+        {enganchados > 1 && 'El diseño se ubica y se escala solo en cada talla para que estos puntos caigan en el molde (sin deformarse). Hacé lo mismo en la pieza de al lado, con los piquetes de la misma costura.'}
+      </p>
+    </div>
+  );
+}

@@ -522,12 +522,16 @@ export function LienzoAnclaje({
   // `editandoArte`, la imagen se ve entera (lo que queda fuera, en
   // transparencia) y arrastrarla la corre: onMoverArte(dxCm, dyCm) al soltar.
   ajusteArte = null, editandoArte = false, onMoverArte,
+  // Puntos de calce del arte (colocarArte.js): [{ id, u, v, enMolde: {x,y}|null, activo }].
+  // En modo 'calceArte', un clic sobre el diseño llama a onMarcarEnArte({ u, v, uEspejo }).
+  puntosCalce = [], onMarcarEnArte,
   // Fondo de color de todas las piezas del diseño (ver fondoPieza.js).
   fondo = null,
 }) {
   const fondoVivo = fondoActivo(fondo);
   const idDegradado = 'degradado-' + useId().replace(/[^a-zA-Z0-9]/g, '');
   const svgRef = useRef(null);
+  const rectArteActual = useRef(null); // dónde está el arte ahora (para marcar puntos de calce)
   const idRecorte = 'recorte-' + useId().replace(/[^a-zA-Z0-9]/g, '');
   const idCuadricula = 'cuadricula-' + useId().replace(/[^a-zA-Z0-9]/g, '');
   // Arrastrar una zona sobre el molde (además de "Mover X/Y" en el panel,
@@ -841,12 +845,24 @@ export function LienzoAnclaje({
     if (!modo || panearonRef.current) return;
     const p = puntoEnCm(ev);
     if (!p) return;
+    if (modo === 'calceArte') { marcarEnArte(p); return; }
     let mejor = null, mejorD = -1;
     for (const c of cands) {
       const d = Math.hypot(c.x - p.x, c.y - p.y);
       if (mejor === null || d < mejorD) { mejor = c; mejorD = d; }
     }
     if (mejor) onElegirCandidato(mejor, r1(mejorD));
+  }
+
+  // Un punto del lienzo (cm) como punto del arte (u, v en fracción de la
+  // imagen), más el de su espejo horizontal respecto del centro de la pieza.
+  function marcarEnArte(p) {
+    if (!onMarcarEnArte || !rectArteActual.current) return;
+    const ra = rectArteActual.current;
+    const u = (p.x - ra.x) / ra.ancho, v = (p.y - ra.y) / ra.alto;
+    if (u < 0 || u > 1 || v < 0 || v > 1) return; // fuera del diseño
+    const uEspejo = (geo.pieza.ancho_cm - p.x - ra.x) / ra.ancho;
+    onMarcarEnArte({ u: Math.min(Math.max(u, 0), 1), v, uEspejo: Math.min(Math.max(uEspejo, 0), 1) });
   }
 
   // ---- soltar una imagen encima del molde ---------------------------------
@@ -893,12 +909,14 @@ export function LienzoAnclaje({
 
   // Dónde va la imagen (mismo cálculo que el PDF). Hasta saber su tamaño
   // real, se ve como siempre: cubriendo la pieza, centrada.
-  const rectArte = imagenUrl && tamImagen
+  const rectArteCalculado = imagenUrl && tamImagen
     ? (() => {
         const r = colocarArte({ anchoCm: W, altoCm: H, anchoImagen: tamImagen.ancho, altoImagen: tamImagen.alto, ajuste: ajusteArte });
         return arrastreArte ? { ...r, x: r.x + arrastreArte.delta.x, y: r.y + arrastreArte.delta.y } : r;
       })()
     : null;
+  const rectArte = rectArteCalculado;
+  rectArteActual.current = rectArte;
 
   return (
     <div
@@ -1027,7 +1045,28 @@ export function LienzoAnclaje({
           );
         })}
 
-        <CandidatosCapa cands={cands} modo={modo} onElegirCandidato={onElegirCandidato} R={R} />
+        {rectArte && puntosCalce.length > 0 && (
+          <g pointerEvents="none">
+            {puntosCalce.map((p, i) => {
+              const ax = rectArte.x + p.u * rectArte.ancho, ay = rectArte.y + p.v * rectArte.alto;
+              const color = p.activo ? '#f5a623' : '#ff4d8d';
+              const rr = R * 2;
+              return (
+                <g key={p.id}>
+                  {p.enMolde && (Math.hypot(p.enMolde.x - ax, p.enMolde.y - ay) > 0.05) && (
+                    <line x1={ax} y1={ay} x2={p.enMolde.x} y2={p.enMolde.y} stroke={color} strokeWidth={R * 0.25} strokeDasharray={R + ' ' + R * 0.6} vectorEffect="non-scaling-stroke" />
+                  )}
+                  <circle cx={ax} cy={ay} r={rr} fill="none" stroke="#0d0f14" strokeWidth={R * 0.7} vectorEffect="non-scaling-stroke" />
+                  <circle cx={ax} cy={ay} r={rr} fill="none" stroke={color} strokeWidth={R * 0.35} vectorEffect="non-scaling-stroke" />
+                  <circle cx={ax} cy={ay} r={rr * 0.25} fill={color} />
+                  <text x={ax + rr * 1.3} y={ay - rr * 1.1} fontSize={F * 0.7} fill={color} stroke="#0d0f14" strokeWidth={F * 0.08} paintOrder="stroke">{'C' + (i + 1)}</text>
+                </g>
+              );
+            })}
+          </g>
+        )}
+        <CandidatosCapa cands={cands} modo={modo}
+          onElegirCandidato={modo === 'calceArte' ? (c) => marcarEnArte({ x: c.x, y: c.y }) : onElegirCandidato} R={R} />
         {/* Misma lógica que los candidatos de zona más arriba: las cruces de
             ancla son mecanismo interno de las zonas, no parte del diseño --
             el interruptor "zona" las oculta junto con el resto del "cuadrito". */}

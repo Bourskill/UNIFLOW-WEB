@@ -32,7 +32,7 @@ import { ordenarPorReciente } from '../utilidades/producciones.js';
 // Diseño muestra solo las producciones más recientes; todas están en
 // Producción → Producciones (Producciones.jsx).
 const RECIENTES = 6;
-import { normalizarAjusteArte } from '../utilidades/colocarArte.js';
+import { normalizarAjusteArte, anclasDeCalce, conCalceResuelto, idAnclaDeCalce } from '../utilidades/colocarArte.js';
 import {
   firmaEditor, haySinGuardar, puedeGuardarseSolo, guardarBorrador, leerBorrador, borrarBorrador, borradorParaOfrecer, haceCuanto,
 } from '../utilidades/borradorDiseno.js';
@@ -184,7 +184,11 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   const [bordeContraste, setBordeContraste] = useState(BORDE_POR_DEFECTO);
   const [leyenda, setLeyenda] = useState(LEYENDA_POR_DEFECTO);
   const [seleccion, setSeleccion] = useState(null); // { tipo: 'ancla'|'zona', id }
-  const [modo, setModo] = useState(null); // null | 'zona' | 'cruzar' | 'recolocar'
+  const [modo, setModo] = useState(null); // null | 'zona' | 'cruzar' | 'recolocar' | 'calceArte' | 'calceDestino'
+  // Puntos de calce del arte: cuál se está enganchando al molde, y si al marcar uno se crea su espejo.
+  const [calceDestinoId, setCalceDestinoId] = useState(null);
+  const [calceEspejo, setCalceEspejo] = useState(true);
+  const [calceResuelto, setCalceResuelto] = useState({}); // id de ancla de calce -> {x, y}
   const [cruzandoZonaId, setCruzandoZonaId] = useState(null);
   const [recolocarInfo, setRecolocarInfo] = useState(null); // { anclaId, eje }
   const [resuelto, setResuelto] = useState(null);
@@ -335,6 +339,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   }, [JSON.stringify(grupoIds), JSON.stringify(tallaTrabajoPorRol), JSON.stringify(anclaje), piezas.length,
     firmaPiezasDeGrupos]);
 
+
   // Elegir/sacar una prenda de la combinación reinicia el anclaje en curso
   // -- combinar otras prendas cambia qué claves existen (namespace incluido),
   // así que cualquier ancla/zona ya armada quedaría apuntando a algo que ya
@@ -484,6 +489,26 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   function ajusteArteDe(clave) {
     return clave in ajusteArteLocal ? ajusteArteLocal[clave] : disenoSeleccionado?.ajusteArtePorPieza?.[clave] || null;
   }
+  // Los destinos de los puntos de calce de la pieza que se mira, resueltos
+  // como anclas en su talla de trabajo (aparte: un destino que no sale no
+  // ensucia los errores de las zonas).
+  const anclasCalceActivas = piezaActiva ? anclasDeCalce(piezaActiva, ajusteArteDe(piezaActiva)) : [];
+  const firmaCalce = JSON.stringify(anclasCalceActivas);
+  useEffect(() => {
+    if (anclasCalceActivas.length === 0 || grupoIds.length === 0) { setCalceResuelto({}); return; }
+    const tallaPorRol = {};
+    for (const pd of piezasDisponibles) {
+      const t = tallaTrabajoDe(pd.clave);
+      if (t) tallaPorRol[pd.clave] = t;
+    }
+    let cancelado = false;
+    resolverAnclaje(grupoIds, tallaPorRol, { ...anclaje, anclas: [...anclaje.anclas, ...anclasCalceActivas] })
+      .then((r) => { if (!cancelado) setCalceResuelto(r.anclas || {}); })
+      .catch(() => { if (!cancelado) setCalceResuelto({}); });
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firmaCalce, JSON.stringify(grupoIds), JSON.stringify(tallaTrabajoPorRol), JSON.stringify(anclaje), firmaPiezasDeGrupos]);
+
   async function guardarAjustesArte() {
     clearTimeout(temporizadorArteRef.current);
     temporizadorArteRef.current = null;
@@ -613,6 +638,28 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     temporizadorFondoRef.current = setTimeout(() => guardarFondoRef.current(), 400);
   }
 
+  // ---- puntos de calce ------------------------------------------------------
+  function puntosCalceDe(clave) { return normalizarAjusteArte(ajusteArteDe(clave)).calce; }
+  function ponerPuntosCalce(clave, calce) {
+    cambiarAjusteArte(clave, { ...normalizarAjusteArte(ajusteArteDe(clave)), calce });
+  }
+  function empezarCalce() { setSeleccion(null); setCalceDestinoId(null); setModo('calceArte'); }
+  function marcarCalceEnArte({ u, v, uEspejo }) {
+    const actuales = puntosCalceDe(piezaActiva);
+    const idNuevo = () => { let n = 1; while (actuales.some((p) => p.id === 'c' + n) || nuevos.some((p) => p.id === 'c' + n)) n++; return 'c' + n; };
+    const nuevos = [];
+    nuevos.push({ id: idNuevo(), u, v, destino: null });
+    if (calceEspejo && Math.abs(uEspejo - u) > 0.01) nuevos.push({ id: idNuevo(), u: uEspejo, v, destino: null });
+    ponerPuntosCalce(piezaActiva, [...actuales, ...nuevos]);
+    setCalceDestinoId(nuevos[0].id);
+    setModo('calceDestino');
+  }
+  function engancharCalce(id) { setSeleccion(null); setCalceDestinoId(id); setModo('calceDestino'); }
+  function quitarCalce(id) {
+    ponerPuntosCalce(piezaActiva, puntosCalceDe(piezaActiva).filter((p) => p.id !== id));
+    if (calceDestinoId === id) { setCalceDestinoId(null); setModo(null); }
+  }
+
   function moverArte(clave, dx, dy) {
     const a = normalizarAjusteArte(ajusteArteDe(clave));
     cambiarAjusteArte(clave, { ...a, dxCm: Math.round((a.dxCm + dx) * 100) / 100, dyCm: Math.round((a.dyCm + dy) * 100) / 100 });
@@ -676,6 +723,16 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   }
 
   function elegirCandidato(cand) {
+    if (modo === 'calceDestino' && calceDestinoId) {
+      const destino = { x: { ref: cand.ref, modo: 'fijo', valor: 0 }, y: { ref: cand.ref, modo: 'fijo', valor: 0 } };
+      const lista = puntosCalceDe(piezaActiva).map((p) => (p.id === calceDestinoId ? { ...p, destino } : p));
+      ponerPuntosCalce(piezaActiva, lista);
+      // Sigue con el próximo punto sin enganchar (el espejo recién creado).
+      const siguiente = lista.find((p) => !p.destino);
+      if (siguiente) setCalceDestinoId(siguiente.id);
+      else { setCalceDestinoId(null); setModo(null); }
+      return;
+    }
     if (modo === 'recolocar' && recolocarInfo) {
       const { anclaId, eje } = recolocarInfo;
       setAnclaje((prev) => ({
@@ -1462,8 +1519,12 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 onSoltarImagen={ponerImagenEnPieza}
                 subiendoImagen={subiendoImagen}
                 idVista={piezaActiva}
-                ajusteArte={ajusteArteDe(piezaActiva)}
-                editandoArte={editandoArte && !!disenoSeleccionado?.imagenesPorPieza?.[piezaActiva]}
+                ajusteArte={conCalceResuelto(piezaActiva, ajusteArteDe(piezaActiva), calceResuelto)}
+                editandoArte={editandoArte && !!disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] && !puntosCalceDe(piezaActiva).some((p) => p.destino)}
+                puntosCalce={disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] ? puntosCalceDe(piezaActiva).map((p) => ({
+                  ...p, enMolde: p.destino ? calceResuelto[idAnclaDeCalce(piezaActiva, p)] || null : null, activo: p.id === calceDestinoId,
+                })) : []}
+                onMarcarEnArte={marcarCalceEnArte}
                 onMoverArte={(dx, dy) => moverArte(piezaActiva, dx, dy)}
                 fondo={fondoEfectivoDe(piezaActiva)}
               />
@@ -1473,6 +1534,17 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                   onCambiar={(a) => cambiarAjusteArte(piezaActiva, a)}
                   editando={editandoArte}
                   onEditando={setEditandoArte}
+                  calce={{
+                    puntos: puntosCalceDe(piezaActiva).map((p) => ({
+                      ...p,
+                      descripcion: p.destino ? describirReferencia(p.destino.x.ref) : null,
+                      resuelto: !!(p.destino && calceResuelto[idAnclaDeCalce(piezaActiva, p)]),
+                    })),
+                    espejo: calceEspejo, onEspejo: setCalceEspejo,
+                    marcando: modo === 'calceArte', enganchandoId: modo === 'calceDestino' ? calceDestinoId : null,
+                    onMarcar: empezarCalce, onEnganchar: engancharCalce, onQuitar: quitarCalce,
+                    onCancelar: () => { setModo(null); setCalceDestinoId(null); },
+                  }}
                 />
               )}
               <PanelFondo
@@ -1488,6 +1560,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 {modo === 'cruzar' && 'Hacé clic en el segundo punto: entre los dos vas a poder elegir la esquina del cruce, o el punto medio.'}
                 {modo === 'recolocar' && 'Hacé clic en el punto al que querés pegar ' + (recolocarInfo?.eje === 'x' ? 'la posición horizontal' : 'la posición vertical') + '.'}
                 {modo === 'importar' && 'Hacé clic en el punto de la pieza donde va a quedar «' + (conjuntoAImportar?.nombre || '') + '»: su primera zona se pega ahí y las demás la siguen.'}
+                {modo === 'calceArte' && 'Hacé clic sobre el diseño, en el punto que tiene que tocar la costura' + (calceEspejo ? ' (se crea también su espejo del otro lado).' : '.')}
+                {modo === 'calceDestino' && 'Hacé clic en el punto del molde (piquete, extremo o vértice) donde tiene que caer el punto de calce ' + (calceDestinoId || '').replace('c', '') + '.'}
                 {!modo && 'Elegí «+ Nueva zona» (panel de la derecha) y hacé clic sobre la pieza para crear una.'}
               </p>
 
