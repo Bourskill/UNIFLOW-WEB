@@ -19,6 +19,7 @@ import { conjuntoDeZona, importarConjunto } from '../utilidades/conjuntosZonas.j
 import { ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { InputNumero } from '../componentes/InputNumero.jsx';
+import { textoDeTalla, COLOR_TALLA } from '../utilidades/capsulaTalla.js';
 import { PanelDock } from '../componentes/PanelDock.jsx';
 import { PanelTexto } from '../componentes/PanelTexto.jsx';
 import { PanelAjusteArte } from '../componentes/PanelAjusteArte.jsx';
@@ -1161,6 +1162,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   const anclasResueltasDeEstaPieza = (resuelto?.lista.anclas || []).filter((a) => a.pieza === piezaActiva);
   const zonasDeEstaPiezaConDatos = zonasDeEstaPieza.map((z) => {
     const cruda = anclaje.zonas.find((zz) => zz.id === z.id);
+    const esTallaZ = z.tipo !== 'logo' && !!cruda && campoDeZona(cruda) === 'talla';
     return {
       ...z, etiqueta: cruda ? etiquetaZona(cruda) : z.id, campoPedido: cruda && z.tipo !== 'logo' ? campoDeZona(cruda) : cruda?.campoPedido, rotacion: cruda?.rotacion || 0,
       // El lienzo los necesita para poder mostrar el contenido real (no un
@@ -1169,14 +1171,15 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       // Lo que se escribe en la zona (el lienzo lo ajusta a su espacio) y la
       // tipografía elegida -- sin ninguna, el lienzo usa la de base.
       // La talla se ve con la talla que se está mirando en el lienzo.
-      contenidoTexto: z.tipo === 'logo' ? null : campoDeZona(cruda) === 'talla' ? (tallaTrabajo || 'M')
+      contenidoTexto: z.tipo === 'logo' ? null : campoDeZona(cruda) === 'talla' ? textoDeTalla(tallaTrabajo || 'M', cruda?.generoTalla)
         : ((campoDeZona(cruda) === 'fijo' ? cruda?.valorFijo : cruda?.valorEjemplo) || null),
       fuenteUrl: cruda?.fuenteId ? (fuentes.find((f) => f.id === cruda.fuenteId)?.archivoUrl || null) : null,
       // Estilo del texto, para verlo en el lienzo igual que en el PDF.
-      colorHex: cruda?.colorHex || '#ffffff',
-      espaciadoMil: Number(cruda?.espaciadoMil) || 0,
+      // La talla: siempre negra, sin espaciado ni borde (como en el PDF).
+      colorHex: esTallaZ ? COLOR_TALLA : cruda?.colorHex || '#ffffff',
+      espaciadoMil: esTallaZ ? 0 : Number(cruda?.espaciadoMil) || 0,
       alineacion: cruda?.alineacion || 'centro',
-      contorno: cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0 ? cruda.contorno : null,
+      contorno: !esTallaZ && cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0 ? cruda.contorno : null,
     };
   });
 
@@ -1982,10 +1985,24 @@ function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasR
         {zona.tipo === 'logo' ? (
           <SelectorLogo url={zona.logoRuta} vista={zona.logoVista} onElegir={(logo) => onActualizar(logo)} />
         ) : campoDeZona(zona) === 'talla' ? (
-          <p className="text-xs text-faint-foreground">
-            Se pone sola: la talla de cada prenda, en negro dentro de un círculo blanco (en las tallas largas, una
-            cápsula) que se lee sobre cualquier color. La zona es su tamaño máximo.
-          </p>
+          <>
+            <div className="flex gap-1" role="group" aria-label="Línea de la talla">
+              {[['masculino', 'Masculino', 'M'], ['femenino', 'Femenino', 'M-']].map(([valor, etiqueta, ej]) => {
+                const activa = (zona.generoTalla || 'masculino') === valor;
+                return (
+                  <button key={valor} type="button" aria-pressed={activa} onClick={() => onActualizar({ generoTalla: valor })}
+                    className={'flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium ' + (activa ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary/50')}>
+                    {etiqueta} <span className="ml-1 font-mono opacity-70">{ej}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-xs text-faint-foreground">
+              Se pone sola: la talla de cada prenda en mayúscula, negra dentro de su círculo blanco
+              {(zona.generoTalla || 'masculino') === 'femenino' ? ', con el guion de la línea femenina (XS-, S-, M-…)' : ''}.
+              La zona es su tamaño máximo.
+            </p>
+          </>
         ) : campoDeZona(zona) === 'fijo' ? (
           <Input placeholder="Texto fijo" value={zona.valorFijo || ''} onChange={(e) => onActualizar({ valorFijo: e.target.value })} />
         ) : (
@@ -1995,16 +2012,16 @@ function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasR
 
       {/* Fuente, color, espaciado, orientación y borde -- todo el estilo del
           texto junto, justo debajo de qué texto lleva la zona. */}
-      {zona.tipo !== 'logo' && <PanelTexto zona={zona} fuentes={fuentes} onActualizar={onActualizar} onFuenteAgregada={onFuenteAgregada} />}
+      {zona.tipo !== 'logo' && campoDeZona(zona) !== 'talla' && <PanelTexto zona={zona} fuentes={fuentes} onActualizar={onActualizar} onFuenteAgregada={onFuenteAgregada} />}
 
-      <div className="flex flex-col gap-2 border-t border-border pt-3">
+      {campoDeZona(zona) !== 'talla' && <div className="flex flex-col gap-2 border-t border-border pt-3">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-semibold text-faint-foreground">Repetir en otra zona</span>
           <Ayuda>Si dos zonas tienen el mismo grupo, el contenido de una se copia a la otra automáticamente (un escudo, número o nombre repetido en varias piezas). La posición y el tamaño siguen siendo de cada una.</Ayuda>
         </div>
         <Input placeholder="ej. SPONSOR_PRINCIPAL" value={zona.grupo || ''} onChange={(e) => onCambiarGrupo(e.target.value || null)} />
         {hermanas.length > 0 && <p className="text-xs text-faint-foreground">Vinculada con: {hermanas.map((h) => h.id).join(', ')}</p>}
-      </div>
+      </div>}
 
       <div className="flex flex-col gap-2 border-t border-border pt-3">
         <span className="text-xs font-semibold text-faint-foreground">Tamaño</span>

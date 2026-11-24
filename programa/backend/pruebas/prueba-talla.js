@@ -60,6 +60,18 @@ comprobar('con su cápsula blanca', textos.every((t) => t.capsula?.colorHex === 
 comprobar('la letra se ajusta a la zona menos el margen', cerca(textos[0].anchoCm, 3 - 0.2) && cerca(textos[0].altoCm, 1 - 0.2), textos[0].anchoCm + ' x ' + textos[0].altoCm);
 comprobar('calibrada (mismo alto en todas las tallas) y siempre centrada', textos.every((t) => t.modo === 'calibrado' && t.alineacion === 'centro'));
 
+{
+  // Línea femenina: guion al final; siempre en mayúscula; sin el estilo de otras zonas.
+  const fem = { ...producto, anclaje: { anclas: [ancla], zonas: [{ ...zona, generoTalla: 'femenino', colorHex: '#ff0000', espaciadoMil: 80, contorno: { activo: true, grosorCm: 0.2 } }] } };
+  const pzs = resolverPiezasDePedido({
+    pedido: { lineas: ['s', 'XXL'].map((talla, i) => ({ id: 'f' + i, productoId: 'pr1', talla, nombre: '', numero: '' })) },
+    productos: [fem], grupos: [grupo], piezas: [{ ...pieza, dimensionesPorTalla: { ...pieza.dimensionesPorTalla, s: pieza.dimensionesPorTalla.S }, geometriaPorTalla: { ...pieza.geometriaPorTalla, s: pieza.geometriaPorTalla.S } }], disenos: [], fuentes: [],
+  });
+  const tf = pzs.map((p) => p.textos[0]);
+  comprobar('femenina: en mayúscula y con guion (S-, XXL-)', tf.map((t) => t?.texto).join() === 'S-,XXL-', tf.map((t) => t?.texto).join());
+  comprobar('la talla siempre negra, sin borde ni espaciado', tf.every((t) => t.colorHex === '#000000' && !t.contorno && t.espaciadoMil === 0));
+}
+
 console.log('\n--- En el PDF ---');
 {
   const ajustadas = await ajustarTextosDePiezas(piezas, obtenerMedidor);

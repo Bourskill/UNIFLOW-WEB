@@ -12,6 +12,15 @@ export const MARGEN_CAPSULA_CM = 0.1;
 export const COLOR_CAPSULA = '#ffffff';
 export const COLOR_TALLA = '#000000';
 
+// Lo que se escribe en la cápsula: la talla siempre en mayúscula y, en la
+// línea femenina, con un guion al final (XS-, S-, M-…). genero sale de la zona
+// (generoTalla: 'masculino' | 'femenino'; sin elegir, masculino).
+export function textoDeTalla(talla, genero) {
+  const t = String(talla ?? '').trim().toUpperCase();
+  if (!t) return '';
+  return genero === 'femenino' && !t.endsWith('-') ? t + '-' : t;
+}
+
 /**
  * Medidas de la cápsula para un texto ya ajustado (ajusteTexto.js): ancho =
  * tinta + margen, alto = banda de mayúsculas + margen (así S y XL quedan del

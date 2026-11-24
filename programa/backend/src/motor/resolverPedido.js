@@ -12,7 +12,7 @@
 // duplicar el diseño para todo el equipo — se salta esa pieza solo para
 // esta línea, ninguna otra se entera.
 
-import { MARGEN_CAPSULA_CM, COLOR_CAPSULA } from './capsulaTalla.js';
+import { MARGEN_CAPSULA_CM, COLOR_CAPSULA, COLOR_TALLA, textoDeTalla } from './capsulaTalla.js';
 import { campoDeZona } from './campoDeZona.js';
 import { resolver as resolverAnclaje } from './anclaje/resolver.js';
 import { geometriaDelGrupo } from './geometriaAnclaje.js';
@@ -136,7 +136,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
           const valor =
             campo === 'nombre' ? delPedido(linea.nombre) :
             campo === 'numero' ? delPedido(linea.numero) :
-            campo === 'talla' ? linea.talla :
+            campo === 'talla' ? textoDeTalla(linea.talla, cruda?.generoTalla) :
             cruda?.valorFijo;
           if (!valor) return null;
 
@@ -167,14 +167,15 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
             // talla (la caja de la zona puede cambiar de talla a talla).
             modo: campo === 'numero' || esTalla ? 'calibrado' : 'llenar',
             zonaClave: (linea.productoId || '') + '|' + zona.id + '|' + linea.talla,
-            colorHex: cruda?.colorHex || '#000000',
+            // La talla no tiene estilo propio: siempre negra, sin borde ni espaciado.
+            colorHex: esTalla ? COLOR_TALLA : cruda?.colorHex || '#000000',
             rotacionGrados: cruda?.rotacion || 0,
             fuenteUrl: fuente?.archivoUrl || null,
             // Estilo de la zona (panel de Diseño): espaciado entre letras en
             // milésimas de em, y un contorno de color por fuera de la letra.
-            espaciadoMil: Number(cruda?.espaciadoMil) || 0,
+            espaciadoMil: esTalla ? 0 : Number(cruda?.espaciadoMil) || 0,
             alineacion: !esTalla && ['izquierda', 'derecha'].includes(cruda?.alineacion) ? cruda.alineacion : 'centro',
-            contorno: cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0
+            contorno: !esTalla && cruda?.contorno?.activo && Number(cruda.contorno.grosorCm) > 0
               ? { colorHex: cruda.contorno.colorHex || '#000000', grosorCm: Number(cruda.contorno.grosorCm) }
               : null,
           };
