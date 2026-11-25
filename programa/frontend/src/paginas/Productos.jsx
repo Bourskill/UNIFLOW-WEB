@@ -19,7 +19,7 @@ import { conjuntoDeZona, importarConjunto } from '../utilidades/conjuntosZonas.j
 import { ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, InputMultilinea, Select, Tarjeta, Chip, Aviso, Ayuda, ErrorCarga } from '../componentes/ui.jsx';
 import { InputNumero } from '../componentes/InputNumero.jsx';
-import { textoDeTalla, COLOR_TALLA, escalaDentroDelMolde } from '../utilidades/capsulaTalla.js';
+import { textoDeTalla, COLOR_TALLA } from '../utilidades/capsulaTalla.js';
 import { contornosDeZona } from '../utilidades/contornosTexto.js';
 import { traductorDeClaves, anclajeTraducido, disenoTraducido, porClaveTraducido } from '../utilidades/clavesDePiezas.js';
 import { PanelDock } from '../componentes/PanelDock.jsx';
@@ -34,7 +34,7 @@ import { ordenarPorReciente } from '../utilidades/producciones.js';
 // Diseño muestra solo las producciones más recientes; todas están en
 // Producción → Producciones (Producciones.jsx).
 const RECIENTES = 6;
-import { normalizarAjusteArte, anclasDeCalce, conCalceResuelto, idAnclaDeCalce } from '../utilidades/colocarArte.js';
+import { normalizarAjusteArte, anclasDeCalce, ajusteConCalce, idAnclaDeCalce } from '../utilidades/colocarArte.js';
 import {
   firmaEditor, haySinGuardar, puedeGuardarseSolo, guardarBorrador, leerBorrador, borrarBorrador, borradorParaOfrecer, haceCuanto,
 } from '../utilidades/borradorDiseno.js';
@@ -522,7 +522,13 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // Los destinos de los puntos de calce de la pieza que se mira, resueltos
   // como anclas en su talla de trabajo (aparte: un destino que no sale no
   // ensucia los errores de las zonas).
-  const anclasCalceActivas = piezaActiva ? anclasDeCalce(piezaActiva, ajusteArteDe(piezaActiva)) : [];
+  // (Con "misma escala que" otra pieza, también los de esa: de ellos sale el tamaño.)
+  const refEscala = piezaActiva ? ajusteArteDe(piezaActiva)?.mismaEscalaQue : null;
+  const anclasCalceActivas = piezaActiva
+    ? [...anclasDeCalce(piezaActiva, ajusteArteDe(piezaActiva)), ...(refEscala ? anclasDeCalce(refEscala, ajusteArteDe(refEscala)) : [])]
+    : [];
+  // Los ajustes de todas las piezas (lo guardado, con lo que se está editando encima).
+  const ajustesPorClave = { ...(disenoSeleccionado?.ajusteArtePorPieza || {}), ...ajusteArteLocal };
   const firmaCalce = JSON.stringify(anclasCalceActivas);
   useEffect(() => {
     if (anclasCalceActivas.length === 0 || grupoIds.length === 0) { setCalceResuelto({}); return; }
@@ -776,6 +782,33 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       campoPedido: 'nombre', valorFijo: '', valorEjemplo: '', colorHex: '#ffffff', grupo: null };
     setAnclaje((prev) => ({ ...prev, zonas: [...prev.zonas, nueva] }));
     return id;
+  }
+
+  // La talla en cada pieza que no la tenga, donde siempre va: abajo al centro
+  // (anclada al punto más bajo del contorno, apoyada ahí; al ajustarla se
+  // corre hacia adentro lo justo para entrar -- capsulaTalla.js). Todas del
+  // mismo tamaño que la primera que ya haya (o 0,5 cm, como se usa).
+  function ponerTallaEnTodas() {
+    setAnclaje((prev) => {
+      const anclas = [...prev.anclas], zonas = [...prev.zonas];
+      const modelo = zonas.find((z) => z.campoPedido === 'talla');
+      let agregadas = 0;
+      for (const pd of piezasDisponibles) {
+        if (zonas.some((z) => z.pieza === pd.clave && z.campoPedido === 'talla')) continue;
+        const ref = { tipo: 'extremo', parte: 'abajo' };
+        const aId = idLibre('A', anclas);
+        anclas.push({ id: aId, nombre: aId, pieza: pd.clave, x: { ref, modo: 'fijo', valor: 0 }, y: { ref, modo: 'fijo', valor: 0 } });
+        const zId = idLibre('ZONA_', zonas);
+        zonas.push({ id: zId, nombre: 'TALLA ' + pd.rol, pieza: pd.clave, tipo: 'texto', anclaX: aId, anclaY: aId,
+          origen: 'centroAbajo', modoCruce: 'esquina',
+          ancho: modelo?.ancho || medida(0.5), alto: modelo?.alto || medida(0.5), lado: medida(8), cruz: false, logoRuta: null,
+          offset: { x: medida(0), y: medida(0) }, rotacion: 0,
+          campoPedido: 'talla', valorFijo: '', valorEjemplo: '', colorHex: '#000000', grupo: null,
+          ...(modelo?.generoTalla ? { generoTalla: modelo.generoTalla } : {}) });
+        agregadas++;
+      }
+      return agregadas ? { ...prev, anclas, zonas } : prev;
+    });
   }
 
   // El nodo del molde que queda en el lugar simétrico de `cand` (reflejado
@@ -1316,7 +1349,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       // La talla: siempre negra, sin espaciado ni borde (como en el PDF).
       colorHex: esTallaZ ? COLOR_TALLA : cruda?.colorHex || '#ffffff',
       // La talla no se sale del molde (igual que en el PDF): cuánto se achica.
-      escalaMolde: esTallaZ ? escalaDentroDelMolde({ cx: z.cx, cy: z.cy, ancho: z.ancho, alto: z.alto, rotacionGrados: cruda?.rotacion || 0 }, geoActiva?.vertices) : 1,
+      // La talla no se achica: se corre hacia adentro del molde (capsulaTalla.js), igual que en el PDF.
+      contornoPieza: esTallaZ ? geoActiva?.vertices || null : null,
       espaciadoMil: esTallaZ ? 0 : Number(cruda?.espaciadoMil) || 0,
       alineacion: cruda?.alineacion || 'centro',
       alineacionV: esTallaZ ? 'centro' : cruda?.alineacionV || 'centro',
@@ -1604,7 +1638,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 onSoltarImagen={ponerImagenEnPieza}
                 subiendoImagen={subiendoImagen}
                 idVista={piezaActiva}
-                ajusteArte={conCalceResuelto(piezaActiva, ajusteArteDe(piezaActiva), calceResuelto)}
+                ajusteArte={ajusteConCalce(piezaActiva, ajustesPorClave, calceResuelto)}
                 editandoArte={editandoArte && !!disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] && !puntosCalceDe(piezaActiva).some((p) => p.destino)}
                 puntosCalce={disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] ? puntosCalceDe(piezaActiva).map((p) => ({
                   ...p, enMolde: p.destino ? calceResuelto[idAnclaDeCalce(piezaActiva, p)] || null : null, activo: p.id === calceDestinoId,
@@ -1616,6 +1650,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
               {disenoSeleccionado?.imagenesPorPieza?.[piezaActiva] && (
                 <PanelAjusteArte
                   ajuste={ajusteArteDe(piezaActiva)}
+                  // Para "misma escala que": las otras piezas con diseño.
+                  otrasPiezas={piezasDisponibles.filter((pd) => pd.clave !== piezaActiva && disenoSeleccionado?.imagenesPorPieza?.[pd.clave])
+                    .map((pd) => ({ clave: pd.clave, nombre: pd.rol + (gruposSeleccionados.length > 1 ? ' · ' + pd.grupoNombre : '') }))}
                   onCambiar={(a) => cambiarAjusteArte(piezaActiva, a)}
                   editando={editandoArte}
                   onEditando={setEditandoArte}
@@ -1791,6 +1828,12 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
               >
                 <span className="text-base leading-none">+</span> Nueva zona
               </Boton>
+              {piezasDisponibles.some((pd) => !anclaje.zonas.some((z) => z.pieza === pd.clave && z.campoPedido === 'talla')) && (
+                <Boton type="button" variante="secundario" className="w-full justify-center text-xs" onClick={ponerTallaEnTodas}
+                  title="Abajo al centro de cada pieza que todavía no tiene talla (en su punto más bajo, corrida hacia adentro lo justo para entrar), todas del mismo tamaño">
+                  Poner la talla en todas las piezas
+                </Boton>
+              )}
 
               {/* Conjuntos de zonas: guardados desde una zona encadenada,
                   se pegan en esta pieza eligiendo el punto en el lienzo. */}

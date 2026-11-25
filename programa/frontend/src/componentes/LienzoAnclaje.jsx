@@ -4,7 +4,7 @@ import { ajustarTextos, URL_FUENTE_BASE } from '../api.js';
 import { useFuentesWeb } from './useFuentesWeb.js';
 import { colocarArte } from '../utilidades/colocarArte.js';
 import { fondoActivo, ejeDegradado } from '../utilidades/fondoPieza.js';
-import { medidasDeCapsula, caminoDeCapsula, MARGEN_CAPSULA_CM } from '../utilidades/capsulaTalla.js';
+import { medidasDeCapsula, caminoDeCapsula, MARGEN_CAPSULA_CM, corrimientoDentroDelMolde } from '../utilidades/capsulaTalla.js';
 import { grosorTotal, pasadasDeContornos, fraccionDeLaLetra, contornosResueltos } from '../utilidades/contornosTexto.js';
 
 // Puerto FIEL del lienzo de Anclajes del panel de Illustrator
@@ -249,7 +249,14 @@ function medidaLogoAjustada({ cruz, lado, ancho, alto, natural }) {
 // escala horizontal ya resueltos por el backend con las medidas reales de la
 // fuente. Se dibuja por su línea de base, sin kerning (pdf-lib tampoco lo
 // aplica) para que el ancho coincida con el impreso.
-function TextoAjustado({ z, ajuste, familia }) {
+function TextoAjustado({ z: zona, ajuste, familia }) {
+  // La talla: corrida hacia adentro lo justo para que su cápsula entre entera en el molde.
+  let z = zona;
+  if (zona.campoPedido === 'talla' && zona.contornoPieza) {
+    const m = medidasDeCapsula(ajuste, MARGEN_CAPSULA_CM);
+    const { dx, dy } = corrimientoDentroDelMolde({ cx: zona.cx, cy: zona.cy, ancho: m.anchoCm, alto: m.altoCm, rotacionGrados: zona.rotacion || 0 }, zona.contornoPieza);
+    if (dx || dy) z = { ...zona, cx: zona.cx + dx, cy: zona.cy + dy };
+  }
   const h = ajuste.escalaH / 100;
   // Tal cual sale en el PDF: el color real y, SOLO si la zona los tiene, sus
   // contornos -- por DEBAJO, del de más afuera al pegado a la letra, cada uno
@@ -871,7 +878,9 @@ export function LienzoAnclaje({
     if (!onMarcarEnArte || !rectArteActual.current) return;
     const ra = rectArteActual.current;
     // Sobre el arte como se ve (con espejo, ya volteado: colocarArte.js).
-    const u = (p.x - ra.x) / ra.ancho, v = (p.y - ra.y) / ra.alto;
+    const uVisto = (p.x - ra.x) / ra.ancho, v = (p.y - ra.y) / ra.alto;
+    // Volteado por un calce cruzado: el punto va a su lugar del arte sin voltear.
+    const u = ra.avisoCalce === 'cruzado' ? 1 - uVisto : uVisto;
     if (u < 0 || u > 1 || v < 0 || v > 1) return; // fuera del diseño
     onMarcarEnArte({ u, v, uEspejo: 1 - u });
   }
@@ -1070,7 +1079,9 @@ export function LienzoAnclaje({
         {rectArte && puntosCalce.length > 0 && (
           <g pointerEvents="none">
             {puntosCalce.map((p, i) => {
-              const ax = rectArte.x + p.u * rectArte.ancho, ay = rectArte.y + p.v * rectArte.alto;
+              // Con el calce cruzado el arte va volteado: el punto sigue a su lugar del arte.
+              const uVisto = rectArte.avisoCalce === 'cruzado' ? 1 - p.u : p.u;
+              const ax = rectArte.x + uVisto * rectArte.ancho, ay = rectArte.y + p.v * rectArte.alto;
               const color = p.activo ? '#f5a623' : '#ff4d8d';
               const rr = R * 2;
               return (
@@ -1111,6 +1122,15 @@ export function LienzoAnclaje({
       >
         Rueda: zoom · arrastrar el fondo: mover{aceptaImagen ? ' · soltá una imagen PNG/JPG o un PDF para ponerlo de diseño' : ''}
       </div>
+
+      {/* Lo que el calce tuvo que hacer para calzar (colocarArte.js). */}
+      {rectArte?.avisoCalce && (
+        <div role="status" className="absolute left-3 right-3 top-3 rounded-md border border-amber-500/50 bg-amber-500/15 px-3 py-1.5 text-[11px] text-amber-200">
+          {rectArte.avisoCalce === 'cruzado'
+            ? 'Los puntos de calce están cruzados (el de la derecha del diseño va a la izquierda del molde): para que calcen, el diseño va VOLTEADO. Si no lo querés volteado, enganchá cada punto al lado que le corresponde.'
+            : 'Los puntos de calce están en el mismo lugar del diseño: no hay distancia entre ellos para sacar el tamaño. Separalos (por ejemplo, uno en cada borde).'}
+        </div>
+      )}
 
       {(archivoEncima || subiendoImagen) && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/60">

@@ -263,7 +263,11 @@ export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
   // Un texto con Enter va en varios renglones (ajusteTexto.js·normalizarLineas).
   const renglones = String(textoZona).split('\n').map((l) => l.trim()).filter(Boolean);
   const muestra = renglones.join(' ') || textoZona;
-  const variosRenglones = !esNumero && renglones.length > 1;
+  // Todos los renglones, con los vacíos del medio (dos Enter seguidos dejan uno de aire).
+  const todos = String(textoZona).split('\n').map((l) => l.trim());
+  while (todos.length && !todos[0]) todos.shift();
+  while (todos.length && !todos[todos.length - 1]) todos.pop();
+  const variosRenglones = !esNumero && todos.length > 1;
   const interlineado = Number.isFinite(Number(zona.interlineado)) && zona.interlineado != null && zona.interlineado !== ''
     ? Number(zona.interlineado) : INTERLINEADO.porDefecto;
   // Contornos: cada uno guarda su grosor en cm Y en % de la letra; según
@@ -272,7 +276,7 @@ export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
   // alto de la zona (en un nombre o número, casi el alto de la letra).
   const enlazados = zona.contornosEnlazados === true;
   // Con varios renglones, la letra es una parte del alto (con el interlineado).
-  const nRenglones = variosRenglones ? renglones.length : 1;
+  const nRenglones = variosRenglones ? todos.length : 1;
   const altoRef = (zona.alto?.modo === 'fijo' && zona.alto.valor > 0 ? zona.alto.valor : 8) / (nRenglones + (nRenglones - 1) * (interlineado / 100));
   const redondear1 = (n) => Math.round(n * 10) / 10;
   const contornos = (Array.isArray(zona.contornos) ? zona.contornos : contornosDeZona(zona)).map((c) => ({

@@ -103,6 +103,50 @@ function cajaAdentro(cx, cy, ancho, alto, grados, poli) {
 }
 
 /**
+ * Cuánto CORRER la cápsula de la talla (cm) para que entre entera en el molde
+ * sin achicarla: la talla mide lo mismo en todas las piezas y tallas. Se corre
+ * hacia el centro de la pieza lo justo (la talla va abajo: sube un poco). Si
+ * ni corriéndola hasta el centro entra (pieza muy angosta), se queda donde
+ * mejor entra. contorno: vértices de la pieza en cm ([x, y] o {x, y}).
+ * @returns {{dx:number, dy:number}}
+ */
+// Aire mínimo entre la cápsula y el borde de corte.
+export const AIRE_AL_BORDE_CM = 0.2;
+
+export function corrimientoDentroDelMolde({ cx, cy, ancho: anchoCaja, alto: altoCaja, rotacionGrados = 0 }, contorno) {
+  const nada = { dx: 0, dy: 0 };
+  // Con su aire al borde: la cápsula no toca la línea de corte.
+  const ancho = anchoCaja + 2 * AIRE_AL_BORDE_CM, alto = altoCaja + 2 * AIRE_AL_BORDE_CM;
+  if (!Array.isArray(contorno) || contorno.length < 3 || !(ancho > 0) || !(alto > 0)) return nada;
+  const poli = contorno.map((p) => (Array.isArray(p) ? p : [p.x, p.y]));
+  if (cajaAdentro(cx, cy, ancho, alto, rotacionGrados, poli)) return nada;
+  const xs = poli.map((p) => p[0]), ys = poli.map((p) => p[1]);
+  const centro = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+  // El primer punto del camino hacia el centro donde entra entera...
+  const N = 60;
+  let hasta = null;
+  for (let i = 1; i <= N; i++) {
+    const t = i / N;
+    if (cajaAdentro(cx + (centro[0] - cx) * t, cy + (centro[1] - cy) * t, ancho, alto, rotacionGrados, poli)) { hasta = t; break; }
+  }
+  if (hasta === null) {
+    // ...o, si no entra en ningún lado, el más cerca del borde con el centro adentro.
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      if (dentroDelPoligono([cx + (centro[0] - cx) * t, cy + (centro[1] - cy) * t], poli)) return { dx: (centro[0] - cx) * t, dy: (centro[1] - cy) * t };
+    }
+    return nada;
+  }
+  // ...afinado: lo justo, sin correrla de más.
+  let afuera = hasta - 1 / N, adentro = hasta;
+  for (let i = 0; i < 20; i++) {
+    const m = (afuera + adentro) / 2;
+    if (cajaAdentro(cx + (centro[0] - cx) * m, cy + (centro[1] - cy) * m, ancho, alto, rotacionGrados, poli)) adentro = m; else afuera = m;
+  }
+  return { dx: (centro[0] - cx) * adentro, dy: (centro[1] - cy) * adentro };
+}
+
+/**
  * Cuánto achicar la caja de la talla (1 = nada) para que entre en el molde.
  * contorno: los vértices de la pieza en cm ([x, y] o {x, y}), mismas
  * coordenadas que la zona.

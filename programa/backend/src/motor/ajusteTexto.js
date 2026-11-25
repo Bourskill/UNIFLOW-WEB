@@ -42,6 +42,7 @@ const CUERPO_MAXIMO_CM = 1296 / 28.3465;
 const DESBORDE_NUMERO_AVISO = 0.25;
 
 import { contornosDeTexto, grosorTotal, fraccionDeLaLetra, contornosResueltos } from './contornosTexto.js';
+import { medidasDeCapsula, corrimientoDentroDelMolde } from './capsulaTalla.js';
 
 export const REGLAS_TEXTO = {
   trackingMinimo: -30, // milésimas de em, como el "tracking" de Illustrator
@@ -74,7 +75,10 @@ export function normalizarLineas(texto) {
     .replace(/\r\n?|[\u2028\u2029\u0085\u000B\u000C]/g, '\n')
     .split('\n')
     .map(normalizarTexto)
-    .filter((l) => l !== '');
+    // Los renglones vacíos del medio CUENTAN (dos Enter seguidos dejan un
+    // renglón de aire, como en Illustrator); los de las puntas, no.
+    .reduce((acc, l) => (acc.length === 0 && l === '' ? acc : [...acc, l]), [])
+    .reduceRight((acc, l) => (acc.length === 0 && l === '' ? acc : [l, ...acc]), []);
 }
 
 // Espacio entre renglones, en % del alto de la letra (la banda de
@@ -210,12 +214,13 @@ function medirTinta(glifos, cuerpo, trackingMil, escalaH) {
 // renglón más ancho; el alto, de la tinta de arriba del primero a la de abajo
 // del último (paso = distancia entre líneas de base, en em).
 function medirBloque(glifosPorLinea, cuerpo, trackingMil, escalaH, paso) {
-  const lineas = glifosPorLinea.map((g) => medirTinta(g, cuerpo, trackingMil, escalaH));
+  const lineas = glifosPorLinea.map((g) => (g.length ? medirTinta(g, cuerpo, trackingMil, escalaH) : null));
   if (lineas.length === 1) return { ...lineas[0], lineas };
+  const conTinta = lineas.filter(Boolean);
   return {
     lineas,
-    ancho: Math.max(...lineas.map((l) => l.ancho)),
-    alto: (lineas.length - 1) * paso * cuerpo + Math.max(...lineas.map((l) => l.alto)),
+    ancho: Math.max(...conTinta.map((l) => l.ancho)),
+    alto: (lineas.length - 1) * paso * cuerpo + Math.max(...conTinta.map((l) => l.alto)),
   };
 }
 
@@ -306,10 +311,27 @@ function ajustarTextoNucleo({
   const esNumero = modo === 'calibrado';
   // Un nombre o texto puede ir en varios renglones (uno encima del otro); un
   // número o una talla, siempre en uno.
-  const renglones = (esNumero ? [normalizarTexto(texto)] : normalizarLineas(texto))
-    .map((l) => ({ texto: l, glifos: medidor.glifos(l) }))
-    .filter((r) => r.texto !== '' && r.glifos.length > 0);
-  if (renglones.length === 0 || !(anchoCm > 0) || !(altoCm > 0)) return null;
+  // Letras que la fuente no trae (Ñ, tildes…): van sin el acento (N, A…) en
+  // vez de salir como un cuadrito, y quedan anotadas para corregir a mano.
+  const sustituciones = [];
+  const sinLoQueFalta = (linea) => {
+    const faltan = new Set(medidor.sinGlifo(linea));
+    if (!faltan.size) return linea;
+    let salida = '';
+    for (const letra of linea) {
+      const base = faltan.has(letra) ? letra.normalize('NFD').replace(/\p{M}/gu, '') : letra;
+      if (base !== letra && base && medidor.sinGlifo(base).length === 0) {
+        salida += base;
+        if (!sustituciones.some((s) => s.de === letra)) sustituciones.push({ de: letra, a: base });
+      } else salida += letra;
+    }
+    return salida;
+  };
+  const textoOriginal = esNumero ? normalizarTexto(texto) : normalizarLineas(texto).join('\n');
+  const renglones = (esNumero ? [normalizarTexto(texto)] : normalizarLineas(texto)).map(sinLoQueFalta)
+    .map((l) => ({ texto: l, glifos: l === '' ? [] : medidor.glifos(l) }));
+  // Un renglón sin tinta (vacío) ocupa su lugar pero no se dibuja.
+  if (!renglones.some((r) => r.glifos.length > 0) || !(anchoCm > 0) || !(altoCm > 0)) return null;
   const valor = renglones.map((r) => r.texto).join('\n');
   const glifosPorLinea = renglones.map((r) => r.glifos);
   const n = renglones.length;
@@ -397,18 +419,20 @@ function ajustarTextoNucleo({
   // completo: no tiene para dónde moverse.
   const sobra = Math.max(altoCm - altoBloque * cuerpo, 0);
   const corrimientoV = esNumero ? 0 : alineacionV === 'arriba' ? -sobra / 2 : alineacionV === 'abajo' ? sobra / 2 : 0;
-  const lineas = renglones.map((r, i) => ({
+  const lineas = renglones.map((r, i) => (tinta.lineas[i] ? {
     texto: r.texto,
     dxCm: dxDe(tinta.lineas[i]),
     dyCm: centroBanda + (i - (n - 1) / 2) * paso * cuerpo + corrimientoV,
     // Dónde empieza y termina su tinta, desde su origen (cm).
     tintaCm: { izq: tinta.lineas[i].izq, der: tinta.lineas[i].der },
-  }));
+  } : null)).filter(Boolean); // los vacíos ya dejaron su lugar
   return {
     texto: valor, // el texto normalizado que se midió: es EL que hay que dibujar (renglones separados por \n)
     // Cada renglón con su origen respecto del centro de la zona (como dxCm/dyCm).
     lineas,
     sinGlifo: medidor.sinGlifo(valor),
+    // Lo que se cambió porque la fuente no lo trae (Ñ→N...), y cómo era.
+    ...(sustituciones.length ? { sustituciones, textoOriginal } : {}),
     cuerpoCm: cuerpo,
     trackingMil: tracking,
     escalaH,
@@ -495,7 +519,16 @@ export async function ajustarTextosDePiezas(piezas, obtenerMedidor, reglas = REG
       // contornos enlazados, ya con su grosor para el tamaño final de la letra.
       const contornos = ajuste && fraccionDeLaLetra(contornosDeTexto(t)) > 0
         ? contornosResueltos(contornosDeTexto(t), ajuste.altoBandaCm) : t.contornos;
-      return { ...t, texto: ajuste ? ajuste.texto : t.texto, fuenteUrl, ajuste, ...(contornos ? { contornos } : {}) };
+      // La talla: su cápsula (ya con su medida real) se corre hacia adentro lo
+      // justo para entrar entera en el molde -- nunca se achica, así mide lo
+      // mismo en todas las piezas y tallas (capsulaTalla.js).
+      let corrido = {};
+      if (t.capsula && ajuste && Array.isArray(pieza.contornoCm)) {
+        const m = medidasDeCapsula(ajuste, t.capsula.margenCm);
+        const { dx, dy } = corrimientoDentroDelMolde({ cx: t.cxCm, cy: t.cyCm, ancho: m.anchoCm, alto: m.altoCm, rotacionGrados: t.rotacionGrados || 0 }, pieza.contornoCm);
+        if (dx || dy) corrido = { cxCm: t.cxCm + dx, cyCm: t.cyCm + dy };
+      }
+      return { ...t, ...corrido, texto: ajuste ? ajuste.texto : t.texto, fuenteUrl, ajuste, ...(contornos ? { contornos } : {}) };
     }),
   }));
 }
@@ -520,6 +553,9 @@ export function advertenciasDeTextos(piezas) {
       if (!a) {
         avisos.push({ tipo: 'sin-tinta', pieza: donde, texto: String(t.texto ?? ''), mensaje: donde + ': el texto «' + String(t.texto ?? '') + '» no tiene nada que dibujar y se omite.' });
         continue;
+      }
+      if (a.sustituciones?.length) {
+        avisos.push({ tipo: 'sin-tilde', pieza: donde, texto: a.texto, mensaje: donde + ': «' + a.textoOriginal + '» salió como «' + a.texto + '» porque la fuente no trae ' + a.sustituciones.map((s) => s.de).join(' ') + ' -- corregilo a mano en Illustrator (está anotado en el nombre de la mesa).' });
       }
       if (a.sinGlifo.length) {
         avisos.push({ tipo: 'sin-glifo', pieza: donde, texto: a.texto, mensaje: donde + ': «' + a.texto + '» lleva ' + a.sinGlifo.join(' ') + ', que la fuente no trae -- saldría como un cuadrito vacío.' });

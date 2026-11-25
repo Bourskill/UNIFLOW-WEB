@@ -88,6 +88,34 @@ function medidaDeEstirar(m) {
   return { modo, valor: Math.min(Math.max(numero(m?.valor, modo === 'cm' ? 30 : 100), 0.1), modo === 'cm' ? 1000 : 1000) };
 }
 
+/**
+ * El ancho del arte (cm) que sale de los puntos de calce de una pieza: cuánto
+ * molde cubre cada fracción del arte (horizontal). null con menos de 2 puntos.
+ */
+export function anchoArteDeCalce(calceCm) {
+  if (!Array.isArray(calceCm) || calceCm.length < 2) return null;
+  const mu = calceCm.reduce((s, c) => s + c.u, 0) / calceCm.length;
+  const mx = calceCm.reduce((s, c) => s + c.x, 0) / calceCm.length;
+  let num = 0, den = 0;
+  for (const c of calceCm) { num += (c.u - mu) * (c.x - mx); den += (c.u - mu) ** 2; }
+  return den > 1e-9 && Math.abs(num / den) > 1e-3 ? Math.abs(num / den) : null;
+}
+
+/**
+ * El ajuste de una pieza con su calce resuelto y, si usa "misma escala que"
+ * otra pieza (mismaEscalaQue: su clave), el ancho del arte de esa otra: así el
+ * frente y la espalda llevan el estampado al MISMO tamaño aunque midan
+ * distinto, y el diseño sigue igual en la costura.
+ */
+export function ajusteConCalce(clave, ajustePorClave, anclasResueltas) {
+  const propio = conCalceResuelto(clave, ajustePorClave?.[clave] || null, anclasResueltas);
+  const ref = ajustePorClave?.[clave]?.mismaEscalaQue;
+  if (!propio || !ref || ref === clave) return propio;
+  const deRef = conCalceResuelto(ref, ajustePorClave?.[ref] || null, anclasResueltas);
+  const ancho = anchoArteDeCalce(deRef?.calceCm);
+  return ancho ? { ...propio, anchoArteCm: ancho } : propio;
+}
+
 export function normalizarAjusteArte(ajuste) {
   const a = ajuste || {};
   return {
@@ -102,6 +130,7 @@ export function normalizarAjusteArte(ajuste) {
     calce: normalizarCalce(a.calce),
     espejoH: a.espejoH === true,
     espejoV: a.espejoV === true,
+    ...(typeof a.mismaEscalaQue === 'string' && a.mismaEscalaQue ? { mismaEscalaQue: a.mismaEscalaQue } : {}),
   };
 }
 
@@ -126,6 +155,9 @@ export function colocarArte({ anchoCm, altoCm, anchoImagen, altoImagen, ajuste }
     ancho *= a.escala / 100;
     alto *= a.escala / 100;
   }
+  // Misma escala que otra pieza: el ancho del arte viene de ella (ajusteConCalce).
+  const anchoFijo = !estirar && Number(ajuste?.anchoArteCm) > 0 ? Number(ajuste.anchoArteCm) : null;
+  if (anchoFijo) { ancho = anchoFijo; alto = ancho / proporcion; }
 
   // Con puntos de calce resueltos, ellos mandan (la alineación y el
   // corrimiento no se usan).
@@ -138,22 +170,47 @@ export function colocarArte({ anchoCm, altoCm, anchoImagen, altoImagen, ajuste }
     const ts = calce.map((c) => [c.x, c.y]);
     const media = (l) => [l.reduce((s, q) => s + q[0], 0) / l.length, l.reduce((s, q) => s + q[1], 0) / l.length];
     const pm = media(ps), tm = media(ts);
-    // Estirado, el tamaño es el elegido: el calce solo ubica el arte.
-    if (estirar) {
-      const mu = calce.reduce((s, c) => s + c.u, 0) / calce.length, mv = calce.reduce((s, c) => s + c.v, 0) / calce.length;
-      return { x: tm[0] - ancho * mu, y: tm[1] - alto * mv, ancho, alto, espejoH: a.espejoH, espejoV: a.espejoV };
+    // Estirado, o con la escala de otra pieza: el tamaño ya está, el calce
+    // solo ubica el arte (si los puntos van cruzados, volteado).
+    if (estirar || anchoFijo) {
+      let mu = calce.reduce((s, c) => s + c.u, 0) / calce.length;
+      const mv = calce.reduce((s, c) => s + c.v, 0) / calce.length;
+      const mx = tm[0];
+      const signo = calce.reduce((s, c) => s + (c.u - mu) * (c.x - mx), 0);
+      const cruzado = calce.length > 1 && signo < 0;
+      if (cruzado) mu = 1 - mu;
+      return { x: tm[0] - ancho * mu, y: tm[1] - alto * mv, ancho, alto, espejoH: cruzado ? !a.espejoH : a.espejoH, espejoV: a.espejoV, ...(cruzado ? { avisoCalce: 'cruzado' } : {}) };
     }
+    let espejoH = a.espejoH, aviso = null;
     if (calce.length > 1) {
       // Escala uniforme por mínimos cuadrados (exacta con dos puntos alineados).
-      let num = 0, den = 0;
-      ps.forEach((q, i) => {
-        const dx = q[0] - pm[0], dy = q[1] - pm[1];
-        num += dx * (ts[i][0] - tm[0]) + dy * (ts[i][1] - tm[1]);
-        den += dx * dx + dy * dy;
-      });
-      if (den > 1e-9 && num / den > 1e-3) { ancho = num / den; alto = ancho / proporcion; }
+      const ajustar = (lista) => {
+        const m = media(lista);
+        let num = 0, den = 0;
+        lista.forEach((q, i) => {
+          const dx = q[0] - m[0], dy = q[1] - m[1];
+          num += dx * (ts[i][0] - tm[0]) + dy * (ts[i][1] - tm[1]);
+          den += dx * dx + dy * dy;
+        });
+        return { m, num, den };
+      };
+      let f = ajustar(ps);
+      // Puntos CRUZADOS: el que está a la derecha del arte va a la izquierda
+      // del molde (pasa en la espalda: la MISMA costura que el frente queda
+      // del otro lado). Solo calza con el arte volteado: se voltea solo.
+      const espejado = ps.map((q) => [1 - q[0], q[1]]);
+      const g = ajustar(espejado);
+      if (f.den > 1e-9 && f.num < 0 && g.num > f.num) {
+        f = g;
+        ps.splice(0, ps.length, ...espejado);
+        espejoH = !a.espejoH;
+        aviso = 'cruzado';
+      }
+      pm[0] = f.m[0]; pm[1] = f.m[1];
+      if (f.den > 1e-9 && f.num / f.den > 1e-3) { ancho = f.num / f.den; alto = ancho / proporcion; }
+      else aviso = 'sinEscala'; // los puntos del arte en el mismo lugar: no hay de dónde sacar el tamaño
     }
-    return { x: tm[0] - ancho * pm[0], y: tm[1] - ancho * pm[1], ancho, alto, espejoH: a.espejoH, espejoV: a.espejoV };
+    return { x: tm[0] - ancho * pm[0], y: tm[1] - ancho * pm[1], ancho, alto, espejoH, espejoV: a.espejoV, ...(aviso ? { avisoCalce: aviso } : {}) };
   }
 
   const x = a.alineacionH === 'izquierda' ? 0 : a.alineacionH === 'derecha' ? anchoCm - ancho : (anchoCm - ancho) / 2;

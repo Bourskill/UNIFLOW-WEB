@@ -91,7 +91,8 @@ console.log('\n--- La talla no se sale del molde ---');
     pedido: { lineas: [{ id: 'b', productoId: 'pr1', talla: 'S', nombre: '', numero: '' }] },
     productos: [alBorde], grupos: [grupo], piezas: [pieza], disenos: [], fuentes: [],
   }).map((p) => p.textos[0]);
-  comprobar('en el pedido la letra se ajusta a la caja achicada', cerca(t.anchoCm, 3 * (2 / 3) - 0.2, 1e-3), t.anchoCm);
+  // Ya no se achica (mismo tamaño en todas las piezas): se corre hacia adentro al ajustarla.
+  comprobar('en el pedido la letra NO se achica: usa toda su zona', cerca(t.anchoCm, 3 - 0.2, 1e-3), t.anchoCm);
 }
 
 console.log('\n--- En el PDF ---');
@@ -108,6 +109,31 @@ console.log('\n--- En el PDF ---');
   comprobar('con las puntas redondas (curvas)', curva >= 0);
   const negro = ops.fnArray.slice(0, texto).lastIndexOf(pdfjs.OPS.setFillRGBColor);
   comprobar('la letra en negro', ops.argsArray[negro][0] === '#000000', ops.argsArray[negro][0]);
+}
+
+console.log('\n--- La talla mide lo mismo siempre: se corre adentro, no se achica ---');
+{
+  const { corrimientoDentroDelMolde } = await import('../src/motor/capsulaTalla.js');
+  // Una manga con el borde de abajo curvo (más bajo al centro), como el puño.
+  const contorno = [];
+  for (let i = 0; i <= 20; i++) contorno.push({ x: i * 2, y: 20 + 1.5 * Math.sin((Math.PI * i) / 20) });
+  contorno.push({ x: 40, y: 0 }, { x: 0, y: 0 });
+  // Apoyada en el punto más bajo (20, 21.5), como se pone la talla: la caja se sale.
+  const caja = { cx: 20, cy: 21.25, ancho: 1.2, alto: 0.5 };
+  const { dx, dy } = corrimientoDentroDelMolde(caja, contorno);
+  comprobar('sube lo justo para entrar (sin moverse de costado)', Math.abs(dx) < 0.05 && dy < 0 && dy > -0.6, dx + ',' + dy);
+  comprobar('adentro no se mueve', JSON.stringify(corrimientoDentroDelMolde({ ...caja, cy: 10 }, contorno)) === '{"dx":0,"dy":0}');
+
+  // En el PDF: S y 5XL- con la letra del MISMO alto, ambas adentro del molde.
+  const pieza = (texto) => ({ id: 'p', piezaId: 'MANGA', talla: 'm', anchoCm: 40, altoCm: 21.5, contornoCm: contorno, imagenes: [],
+    textos: [{ texto, cxCm: 20, cyCm: 21.25, anchoCm: 0.3, altoCm: 0.3, xCm: 0, yCm: 0, modo: 'calibrado', zonaClave: 't|' + texto,
+      colorHex: '#000000', rotacionGrados: 0, fuenteUrl: null, capsula: { colorHex: '#ffffff', margenCm: MARGEN_CAPSULA_CM } }] });
+  const [chica, larga] = await ajustarTextosDePiezas([pieza('S'), pieza('5XL-')], obtenerMedidor);
+  const tc = chica.textos[0], tl = larga.textos[0];
+  comprobar('la letra mide lo mismo con "S" que con "5XL-"', Math.abs(tc.ajuste.altoBandaCm - tl.ajuste.altoBandaCm) < 1e-9);
+  const mL = medidasDeCapsula(tl.ajuste, MARGEN_CAPSULA_CM);
+  comprobar('la cápsula larga envuelve todo el texto (píldora)', mL.anchoCm > mL.altoCm * 1.5 && mL.anchoCm >= tl.ajuste.tintaCm.ancho, JSON.stringify(mL));
+  comprobar('y se corrió hacia adentro para entrar entera', tl.cyCm < 21.25 && escalaDentroDelMolde({ cx: tl.cxCm, cy: tl.cyCm, ancho: mL.anchoCm, alto: mL.altoCm }, contorno) === 1, tl.cyCm);
 }
 
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');

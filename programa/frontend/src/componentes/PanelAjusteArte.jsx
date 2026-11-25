@@ -10,14 +10,14 @@ const COLUMNAS = ['izquierda', 'centro', 'derecha'];
 const NOMBRE_V = { arriba: 'arriba', centro: 'al medio', abajo: 'abajo' };
 const NOMBRE_H = { izquierda: 'a la izquierda', centro: 'al centro', derecha: 'a la derecha' };
 
-export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando, calce }) {
+export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando, calce, otrasPiezas = [] }) {
   const a = normalizarAjusteArte(ajuste);
   const poner = (cambios) => onCambiar({ ...a, ...cambios });
   // Con puntos de calce enganchados, ellos ubican el arte (y con dos o más,
   // también lo escalan): lo que ya no se usa queda apagado.
   const enganchados = (calce?.puntos || []).filter((p) => p.destino).length;
   const posicionPorCalce = enganchados > 0;
-  const escalaPorCalce = enganchados > 1;
+  const escalaPorCalce = enganchados > 1 || !!a.mismaEscalaQue;
   const mover = (dx, dy) => poner({ dxCm: Math.round((a.dxCm + dx) * 100) / 100, dyCm: Math.round((a.dyCm + dy) * 100) / 100 });
   const tocado = !!ajuste;
 
@@ -131,6 +131,20 @@ export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando, calce
           </div>
         </div>
       </div>
+      {otrasPiezas.length > 0 && a.base !== 'estirar' && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="font-medium text-foreground">Misma escala que</span>
+          <select value={a.mismaEscalaQue || ''} aria-label="Misma escala que otra pieza"
+            onChange={(ev) => { const { mismaEscalaQue: _q, ...resto } = a; onCambiar(ev.target.value ? { ...resto, mismaEscalaQue: ev.target.value } : resto); }}
+            className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-foreground">
+            <option value="">— su propia escala —</option>
+            {otrasPiezas.map((p) => <option key={p.clave} value={p.clave}>{p.nombre}</option>)}
+          </select>
+          <span className="text-faint-foreground">
+            El estampado va al mismo tamaño que en esa pieza (sale de sus puntos de calce), aunque esta mida distinto; los puntos de acá solo lo ubican. Así sigue igual en la costura.
+          </span>
+        </div>
+      )}
       {calce && <SeccionCalce calce={calce} enganchados={enganchados} />}
       <p className="mt-2 text-faint-foreground">
         Lo que queda fuera del molde se recorta. Se usa igual en la vista previa y en el PDF de producción.

@@ -76,6 +76,43 @@ console.log('\n--- En el pedido, talla por talla ---');
   comprobar('sin calce, el ajuste sigue igual', conCalceResuelto('Frente', null, {}) === null);
 }
 
+console.log('\n--- Puntos cruzados (la espalda: la misma costura queda del otro lado) ---');
+{
+  // Caso real: espalda 57,6 cm, C1 (98% del arte) a la sisa IZQUIERDA y C2 (2%) a la derecha.
+  const img = { anchoImagen: 1000, altoImagen: 1000 };
+  const calceCm = [{ u: 0.98, v: 0.336, x: 0, y: 26 }, { u: 0.02, v: 0.336, x: 57.6, y: 26 }];
+  const r = colocarArte({ anchoCm: 57.6, altoCm: 77.6, ...img, ajuste: { calceCm } });
+  const cae = (u, v) => [r.x + (r.espejoH ? 1 - u : u) * r.ancho, r.y + v * r.alto];
+  const [a, b] = [cae(0.98, 0.336), cae(0.02, 0.336)];
+  comprobar('calza: cada punto en su sisa (antes quedaban afuera de la pieza)', cerca(a[0], 0) && cerca(a[1], 26) && cerca(b[0], 57.6) && cerca(b[1], 26), JSON.stringify([a, b]));
+  comprobar('con el diseño volteado, y avisado', r.espejoH === true && r.avisoCalce === 'cruzado');
+  comprobar('mismo tamaño que tendría sin cruzar', cerca(r.ancho, 57.6 / 0.96));
+  const derecho = colocarArte({ anchoCm: 57.6, altoCm: 77.6, ...img, ajuste: { calceCm: [{ ...calceCm[0], x: 57.6 }, { ...calceCm[1], x: 0 }] } });
+  comprobar('sin cruzar: no se voltea ni se avisa', derecho.espejoH === false && !derecho.avisoCalce);
+  const juntos = colocarArte({ anchoCm: 57.8, altoCm: 74, ...img, ajuste: { calceCm: [{ u: 0.5, v: 0.336, x: 57.8, y: 21.4 }, { u: 0.5, v: 0.336, x: 0, y: 21.4 }] } });
+  comprobar('los dos puntos en el mismo lugar del arte: se avisa que no hay de dónde sacar el tamaño', juntos.avisoCalce === 'sinEscala');
+}
+
+console.log('\n--- Misma escala que otra pieza (frente y espalda de anchos distintos) ---');
+{
+  const { ajusteConCalce } = await import('../src/motor/colocarArte.js');
+  const img = { anchoImagen: 1000, altoImagen: 1000 };
+  const punto = (id, u, v) => ({ id, u, v, destino: { x: { ref: { tipo: 'contorno' } }, y: { ref: { tipo: 'contorno' } } } });
+  const ajustes = {
+    FRENTE: { calce: [punto('c1', 0.98, 0.3), punto('c2', 0.02, 0.3)] },
+    ESPALDA: { mismaEscalaQue: 'FRENTE', calce: [punto('c1', 0.98, 0.3), punto('c2', 0.02, 0.3)] },
+  };
+  // Frente de 60 cm entre sisas; espalda de 50 cm (más angosta). Espalda cruzada.
+  const anclas = { 'calce·FRENTE·c1': { x: 60, y: 20 }, 'calce·FRENTE·c2': { x: 0, y: 20 }, 'calce·ESPALDA·c1': { x: 0, y: 24 }, 'calce·ESPALDA·c2': { x: 50, y: 24 } };
+  const frente = colocarArte({ anchoCm: 60, altoCm: 70, ...img, ajuste: ajusteConCalce('FRENTE', ajustes, anclas) });
+  const espalda = colocarArte({ anchoCm: 50, altoCm: 72, ...img, ajuste: ajusteConCalce('ESPALDA', ajustes, anclas) });
+  comprobar('la espalda lleva el estampado al mismo tamaño que el frente', cerca(espalda.ancho, frente.ancho) && cerca(frente.ancho, 62.5), frente.ancho + ' / ' + espalda.ancho);
+  comprobar('centrada entre sus sisas, a la altura de su sisa', cerca(espalda.x + espalda.ancho / 2, 25) && cerca(espalda.y + 0.3 * espalda.alto, 24), JSON.stringify(espalda));
+  comprobar('cruzada: volteada y avisada', espalda.espejoH === true && espalda.avisoCalce === 'cruzado');
+  const sola = colocarArte({ anchoCm: 50, altoCm: 72, ...img, ajuste: ajusteConCalce('ESPALDA', { ...ajustes, ESPALDA: { calce: ajustes.ESPALDA.calce } }, anclas) });
+  comprobar('sin la opción, cada una con su escala (distinta)', !cerca(sola.ancho, frente.ancho) && cerca(sola.ancho, 50 / 0.96));
+}
+
 console.log('\n--- Estirar el diseño ---');
 {
   const img = { anchoImagen: 2000, altoImagen: 1000 }; // 2:1, la pieza 38x50

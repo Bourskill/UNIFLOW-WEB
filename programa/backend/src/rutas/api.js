@@ -1256,7 +1256,7 @@ router.post('/exportar-mesas/:id', async (req, res) => {
       artesNativos,
       cortesLaser,
       // Solo la pieza: Illustrator ya les pone su número adelante ("01 - ...").
-      nombresDeMesas: mesas.map((m) => (variasTallas ? m.talla + ' · ' : '') + (m.piezas[0]?.piezaId || m.nombre)),
+      nombresDeMesas: mesas.map((m) => (variasTallas ? m.talla + ' · ' : '') + (m.piezas[0]?.piezaId || m.nombre) + notaDeMesa(m)),
     });
   } catch (error) {
     console.error('No se pudo agregar el documento de Illustrator: ' + error.message);
@@ -1275,6 +1275,16 @@ router.post('/exportar-mesas/:id', async (req, res) => {
 // archivo "por talla" para producir sin pasar por el rollo de impresión.
 // No guarda registro en `generaciones`.
 const MAX_PRENDAS_CON_ILLUSTRATOR_WEB = 3;
+
+// La nota en el nombre de la mesa (se ve en Illustrator, no se imprime) cuando
+// un texto salió sin la letra que su fuente no trae: "⚠ revisar PENA→PEÑA".
+function notaDeMesa(mesa) {
+  const cambios = (mesa.piezas || []).flatMap((p) => (p.textos || []))
+    .filter((t) => t.ajuste?.sustituciones?.length)
+    .map((t) => String(t.ajuste.texto).split(String.fromCharCode(10)).join(' ') + '→' + String(t.ajuste.textoOriginal).split(String.fromCharCode(10)).join(' '));
+  return cambios.length ? ' · ⚠ revisar ' + [...new Set(cambios)].join(', ') : '';
+}
+
 router.post('/exportar-pedido/:id', async (req, res) => {
   const { talla } = req.body || {};
   if (typeof talla !== 'string' || !talla) return res.status(400).json({ error: 'Falta la talla' });
@@ -1306,7 +1316,7 @@ router.post('/exportar-pedido/:id', async (req, res) => {
   const nombreDe = new Map(todasLasMesas.map((m) => {
     const p = m.piezas[0] || {};
     const quien = iguales.has(p.piezaId) ? 'Todos (×' + iguales.get(p.piezaId) + ')' : jugadorDe.get(p.lineaPedidoId) || '';
-    return [m, quien + ' · ' + (p.piezaId || m.nombre)];
+    return [m, quien + ' · ' + (p.piezaId || m.nombre) + notaDeMesa(m)];
   }));
 
   // Si no entran en un solo documento de Illustrator (su lienzo y sus 1000

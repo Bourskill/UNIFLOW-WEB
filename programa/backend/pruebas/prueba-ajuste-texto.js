@@ -214,8 +214,8 @@ console.log('\n--- Varios contornos, uno por fuera del otro ---');
 console.log('\n--- Texto en varios renglones (saltos de línea) ---');
 {
   const { normalizarLineas } = await import('../src/motor/ajusteTexto.js');
-  comprobar('se parte por los saltos de línea, sin renglones vacíos',
-    JSON.stringify(normalizarLineas('MEDIOS Y\r\n\n  CONTENIDO ')) === '["MEDIOS Y","CONTENIDO"]');
+  comprobar('se parte por los saltos de línea (también los de Windows), y el renglón vacío del medio queda',
+    JSON.stringify(normalizarLineas('MEDIOS Y\r\n\n  CONTENIDO ')) === '["MEDIOS Y","","CONTENIDO"]');
   const a = ajustarTexto({ medidor, texto: 'MEDIOS Y\nCONTENIDO', anchoCm: 30, altoCm: 8, modo: 'llenar' });
   comprobar('dos renglones', a.lineas.length === 2 && a.texto === 'MEDIOS Y\nCONTENIDO');
   const banda = a.altoBandaCm;
@@ -232,6 +232,13 @@ console.log('\n--- Texto en varios renglones (saltos de línea) ---');
   comprobar('con interlineado 0, cada renglón llena la mitad del alto', cerca(pegado.altoBandaCm, 4, 1e-6), pegado.altoBandaCm);
   const uno = ajustarTexto({ medidor, texto: 'GIL', anchoCm: 30, altoCm: 8, modo: 'llenar' });
   comprobar('un solo renglón sigue igual que antes', uno.lineas.length === 1 && cerca(uno.lineas[0].dyCm, uno.dyCm) && cerca(uno.altoBandaCm, 8, 1e-6));
+  // Dos Enter seguidos: un renglón vacío que ocupa su lugar (no se dibuja).
+  comprobar('los renglones vacíos del medio cuentan; los de las puntas no',
+    JSON.stringify(normalizarLineas('\n\nA\n\n\nB\n\n')) === '["A","","","B"]');
+  const conAire = ajustarTexto({ medidor, texto: 'A\n\nB', anchoCm: 30, altoCm: 8, modo: 'llenar', interlineado: 0 });
+  comprobar('con un renglón vacío en el medio: se dibujan 2, con el lugar de 3', conAire.lineas.length === 2 &&
+    cerca(conAire.altoBandaCm, 8 / 3, 1e-6) && cerca(conAire.lineas[1].dyCm - conAire.lineas[0].dyCm, 2 * conAire.altoBandaCm, 1e-6),
+    JSON.stringify(conAire.lineas.map((l) => l.dyCm)));
   const num = ajustarTexto({ medidor, texto: '1\n0', anchoCm: 10, altoCm: 8, modo: 'calibrado' });
   comprobar('un número va siempre en un renglón', num.lineas.length === 1 && num.texto === '1 0');
 
@@ -268,6 +275,19 @@ console.log('\n--- Contornos que escalan con la letra ---');
   const nombre = ajustarTexto({ medidor, texto: 'GIL', anchoCm: 30, altoCm: 8, modo: 'llenar', contornoRelativo: 0.08 });
   const c = nombre.contornoEnlazadoCm;
   comprobar('un nombre deja lugar para su contorno proporcional, y entra justo', cerca(c, 0.08 * nombre.altoBandaCm, 1e-4) && cerca(nombre.altoBandaCm + 2 * c, 8, 1e-3), nombre.altoBandaCm + ' + 2×' + c);
+}
+
+console.log('\n--- Fuente sin Ñ ni tildes: va sin el acento, y queda anotado ---');
+{
+  // La misma fuente, pero como si no trajera Ñ ni Á.
+  const sinTildes = { ...medidor, sinGlifo: (t) => [...new Set([...t].filter((c) => 'ÑÁñá'.includes(c)))] };
+  const a = ajustarTexto({ medidor: sinTildes, texto: 'PEÑA ÁLVAREZ', anchoCm: 30, altoCm: 5, modo: 'llenar' });
+  comprobar('Ñ→N y Á→A en vez de cuadritos', a.texto === 'PENA ALVAREZ' && a.sinGlifo.length === 0, a.texto);
+  comprobar('y se guarda qué cambió y cómo era', a.textoOriginal === 'PEÑA ÁLVAREZ' && a.sustituciones.map((s) => s.de + s.a).join() === 'ÑN,ÁA');
+  const avisos = advertenciasDeTextos([{ piezaId: 'ESPALDA', talla: 'm', textos: [{ modo: 'llenar', anchoCm: 30, ajuste: a }] }]);
+  comprobar('aviso para corregirlo a mano', avisos.some((v) => v.tipo === 'sin-tilde' && /PEÑA ÁLVAREZ/.test(v.mensaje) && /a mano/.test(v.mensaje)), JSON.stringify(avisos));
+  const conTodo = ajustarTexto({ medidor, texto: 'PEÑA', anchoCm: 30, altoCm: 5, modo: 'llenar' });
+  comprobar('con una fuente que sí la trae, no se toca', conTodo.texto === 'PEÑA' && !conTodo.sustituciones);
 }
 
 console.log('\n--- Alineación vertical en la zona ---');

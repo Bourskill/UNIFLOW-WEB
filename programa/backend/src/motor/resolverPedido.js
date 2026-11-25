@@ -12,14 +12,14 @@
 // duplicar el diseño para todo el equipo — se salta esa pieza solo para
 // esta línea, ninguna otra se entera.
 
-import { MARGEN_CAPSULA_CM, COLOR_CAPSULA, COLOR_TALLA, textoDeTalla, escalaDentroDelMolde } from './capsulaTalla.js';
+import { MARGEN_CAPSULA_CM, COLOR_CAPSULA, COLOR_TALLA, textoDeTalla } from './capsulaTalla.js';
 import { campoDeZona } from './campoDeZona.js';
 import { contornosDeZona } from './contornosTexto.js';
 import { resolver as resolverAnclaje } from './anclaje/resolver.js';
 import { geometriaDelGrupo } from './geometriaAnclaje.js';
 import { resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
 import { fondoDePieza } from './fondoPieza.js';
-import { anclasDeCalce, conCalceResuelto } from './colocarArte.js';
+import { anclasDeCalce, ajusteConCalce } from './colocarArte.js';
 
 // Un Producto de un solo grupo sigue guardando `grupoId` (nunca se migró
 // data existente); uno multi-prenda ("kit") guarda `grupoIds`. Normalizar
@@ -161,11 +161,9 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
           // ajusta a la zona MENOS el margen de la cápsula, siempre centrada.
           const esTalla = campo === 'talla';
           const margen = esTalla ? MARGEN_CAPSULA_CM : 0;
-          // La talla no se sale del molde: si su caja se sale, se achica desde el centro.
-          const escalaMolde = esTalla
-            ? escalaDentroDelMolde({ cx: zona.cx, cy: zona.cy, ancho: zona.ancho, alto: zona.alto, rotacionGrados: cruda?.rotacion || 0 },
-              geometria[pieza.nombre]?.vertices)
-            : 1;
+          // La talla ya no se achica para entrar en el molde: se corre hacia
+          // adentro al ajustarla (ajusteTexto.js), así mide lo mismo siempre.
+          const escalaMolde = 1;
           return {
             texto: String(valor),
             xCm: zona.x,
@@ -241,7 +239,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
         // Escala/alineación/corrimiento del arte elegidos en Diseño (ver
         // colocarArte.js). Sin ajuste guardado, el arte se estira a la pieza
         // como siempre.
-        ajusteArte: conCalceResuelto(clave, diseno?.ajusteArtePorPieza?.[clave] || null, anclasDelCalce),
+        ajusteArte: ajusteConCalce(clave, diseno?.ajusteArtePorPieza, anclasDelCalce),
         // Fondo de color del diseño (sólido o degradado), igual para todas
         // las piezas salvo las que tengan uno propio, debajo del arte. Ver fondoPieza.js.
         fondo: fondoDePieza(diseno, clave),
