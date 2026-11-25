@@ -1,4 +1,5 @@
 import { InputNumero } from './InputNumero.jsx';
+import { SelectorColor } from './SelectorColor.jsx';
 import { normalizarFondo } from '../utilidades/fondoPieza.js';
 
 // Fondo de color para TODAS las piezas del diseño, de una sola vez: sólido o
@@ -10,17 +11,10 @@ const DIRECCIONES = [[0, '→', 'izquierda a derecha'], [90, '↓', 'arriba haci
 
 function ColorCampo({ etiqueta, valor, onCambiar }) {
   return (
-    <label className="flex items-center gap-1.5">
-      <span className="text-faint-foreground">{etiqueta}</span>
-      <input type="color" value={valor} onChange={(e) => onCambiar(e.target.value)}
-        className="h-7 w-9 cursor-pointer rounded border border-border bg-transparent p-0.5" aria-label={etiqueta} />
-      {/* Sin controlar: se puede escribir a medias ("#12"); se aplica recién
-          cuando es un color completo. `key` lo reinicia si cambia desde afuera. */}
-      <input type="text" key={valor} defaultValue={valor} maxLength={7} spellCheck={false}
-        onChange={(e) => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v) && v.toLowerCase() !== valor) onCambiar(v.toLowerCase()); }}
-        className="w-[76px] rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs text-foreground outline-none focus:border-primary"
-        aria-label={etiqueta + ' (hex)'} />
-    </label>
+    <div className="flex items-start gap-1.5">
+      <span className="pt-1.5 text-faint-foreground">{etiqueta}</span>
+      <SelectorColor valor={valor} onCambiar={onCambiar} etiqueta={etiqueta} />
+    </div>
   );
 }
 

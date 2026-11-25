@@ -6,6 +6,7 @@ import { NOMBRE_PESO, urlDeMuestra } from '../utilidades/bancoFuentes.js';
 import { useFuentesWeb, cssDeFamilia } from './useFuentesWeb.js';
 import { InputNumero } from './InputNumero.jsx';
 import { Ayuda } from './ui.jsx';
+import { SelectorColor } from './SelectorColor.jsx';
 import { contornosDeZona, CONTORNOS_MAX, CONTORNO_ANILLO_MAX_CM, CONTORNO_PCT_MAX } from '../utilidades/contornosTexto.js';
 
 // Estilo del texto de una zona (nombre, número o texto fijo): fuente, color,
@@ -19,7 +20,6 @@ const ESPACIADO = { min: -200, max: 500 };
 const INTERLINEADO = { min: -50, max: 200, porDefecto: 30 };
 
 // Colores de uso más común en camisetas, para no abrir el selector cada vez.
-const COLORES_RAPIDOS = ['#ffffff', '#000000', '#d32f2f', '#1565c0', '#fbc02d', '#2e7d32', '#ef6c00', '#6a1b9a', '#9e9e9e', '#c9a227'];
 
 // Dónde queda el texto en el alto de su zona cuando le sobra lugar (un nombre
 // largo baja de cuerpo): pegado arriba, al medio o abajo.
@@ -51,27 +51,6 @@ function Seccion({ titulo, ayuda, children, derecha }) {
         {derecha && <div className="ml-auto">{derecha}</div>}
       </div>
       {children}
-    </div>
-  );
-}
-
-function SelectorColor({ valor, onCambiar, etiqueta }) {
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {COLORES_RAPIDOS.map((c) => (
-        <button
-          key={c} type="button" onClick={() => onCambiar(c)} title={c}
-          aria-label={etiqueta + ' ' + c}
-          className={'h-6 w-6 rounded-md border transition-transform hover:scale-110 ' +
-            ((valor || '').toLowerCase() === c ? 'border-primary ring-2 ring-primary/50' : 'border-border')}
-          style={{ background: c }}
-        />
-      ))}
-      <label className="relative h-6 w-6 cursor-pointer overflow-hidden rounded-md border border-dashed border-border" title="Otro color">
-        <input type="color" value={valor || '#000000'} onChange={(e) => onCambiar(e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label={etiqueta + ': otro color'} />
-        <span className="flex h-full w-full items-center justify-center text-[11px] text-faint-foreground">+</span>
-      </label>
-      <span className="font-mono text-[11px] uppercase text-faint-foreground">{valor}</span>
     </div>
   );
 }

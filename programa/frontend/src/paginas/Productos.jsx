@@ -41,6 +41,7 @@ import {
 } from '../utilidades/borradorDiseno.js';
 import { LienzoAnclaje, COLOR, candidatosDe } from '../componentes/LienzoAnclaje.jsx';
 import { PanelConjuntos } from '../componentes/PanelConjuntos.jsx';
+import { SelectorColor } from '../componentes/SelectorColor.jsx';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
 
 const BORDE_POR_DEFECTO = { activo: false, colorHex: '#000000', grosorCm: 0.03, desplazamientoCm: 0 };
@@ -1780,11 +1781,11 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
               </div>
               {bordeContraste.activo && (
                 <div className="flex flex-wrap items-center gap-5 border-t border-border/60 pt-3">
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <input type="color" className="h-9 w-9 cursor-pointer rounded-lg border border-border bg-transparent p-0.5" value={bordeContraste.colorHex}
-                      onChange={(e) => setBordeContraste((prev) => ({ ...prev, colorHex: e.target.value }))} />
-                    <span className="text-xs text-muted-foreground">Color</span>
-                  </label>
+                  <div className="flex items-start gap-2">
+                    <span className="pt-1.5 text-xs text-muted-foreground">Color</span>
+                    <SelectorColor valor={bordeContraste.colorHex} etiqueta="Color del contorno"
+                      onCambiar={(c) => setBordeContraste((prev) => ({ ...prev, colorHex: c }))} />
+                  </div>
                   <Campo etiqueta="Desplazamiento (cm)" className="w-32">
                     <InputNumero step={0.1} min={0} value={bordeContraste.desplazamientoCm ?? 0}
                       onChange={(n) => setBordeContraste((prev) => ({ ...prev, desplazamientoCm: n }))} />
@@ -1811,16 +1812,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 className={'rounded-md border px-2.5 py-1 text-xs ' + (!bordeContraste.colorPiquetes ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary')}>
                 Automático
               </button>
-              {['#000000', '#ffffff', '#ff00ff', '#00ff00'].map((c) => (
-                <button key={c} type="button" title={c} aria-label={'Piquetes de color ' + c} aria-pressed={bordeContraste.colorPiquetes === c}
-                  onClick={() => setBordeContraste((prev) => ({ ...prev, colorPiquetes: c }))}
-                  className={'h-6 w-6 rounded-md border ' + (bordeContraste.colorPiquetes === c ? 'border-primary ring-2 ring-primary/50' : 'border-border')}
-                  style={{ background: c }} />
-              ))}
-              <input type="color" aria-label="Otro color de piquetes" title="Otro color"
-                className="h-7 w-7 cursor-pointer rounded-md border border-border bg-transparent p-0.5"
-                value={bordeContraste.colorPiquetes || '#000000'}
-                onChange={(e) => setBordeContraste((prev) => ({ ...prev, colorPiquetes: e.target.value }))} />
+              <SelectorColor valor={bordeContraste.colorPiquetes || '#000000'} etiqueta="Color de piquetes"
+                onCambiar={(c) => setBordeContraste((prev) => ({ ...prev, colorPiquetes: c }))} />
             </div>
           </div>
 
