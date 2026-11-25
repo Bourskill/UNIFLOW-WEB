@@ -76,8 +76,8 @@ function MiniPieza({ geo, imagen, fondo }) {
   );
 }
 
-// onExportar y onEliminar son opcionales: Producción exporta, Diseño elimina.
-export function TarjetaProduccion({ produccion, grupos, piezas, disenos, editando, onEditar, onEliminar, onExportar, exportando }) {
+// onExportar, onDuplicar y onEliminar son opcionales: Producción exporta, Diseño elimina.
+export function TarjetaProduccion({ produccion, grupos, piezas, disenos, editando, onEditar, onEliminar, onExportar, exportando, onDuplicar, duplicando }) {
   const piezasDibujo = piezasDeProduccion(produccion, grupos, piezas, disenos);
   const ids = produccion.grupoIds || (produccion.grupoId ? [produccion.grupoId] : []);
   const nombresPrendas = ids.map((id) => grupos.find((g) => g.id === id)?.nombre).filter(Boolean);
@@ -143,6 +143,12 @@ export function TarjetaProduccion({ produccion, grupos, piezas, disenos, editand
           <Boton type="button" variante={exportando ? 'acento' : 'fantasma'} tamano="sm" onClick={onExportar}
             title="Cada talla como la prenda completa: una mesa por pieza, con su contorno láser">
             {exportando ? 'Cerrar' : 'Exportar'}
+          </Boton>
+        )}
+        {onDuplicar && (
+          <Boton type="button" variante="fantasma" tamano="sm" onClick={onDuplicar} disabled={duplicando}
+            title="Una copia independiente (con su propio diseño) para hacerle cambios sin tocar esta">
+            {duplicando ? 'Duplicando…' : 'Duplicar'}
           </Boton>
         )}
         {onEliminar && <Boton type="button" variante="fantasma" tamano="sm" className="ml-auto text-danger" onClick={onEliminar}>Eliminar</Boton>}

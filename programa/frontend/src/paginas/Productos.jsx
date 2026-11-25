@@ -8,6 +8,7 @@ import {
   crearProducto,
   editarProducto,
   eliminarProducto,
+  duplicarProducto,
   crearPlantilla,
   eliminarPlantilla,
   resolverAnclaje,
@@ -1266,6 +1267,28 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  // Duplicar: una copia independiente (con su propio diseño) que se abre en
+  // el editor, para hacerle los cambios chicos que la vuelven otra.
+  const [duplicandoId, setDuplicandoId] = useState(null);
+  async function duplicar(p) {
+    // Lo pendiente del editor se guarda antes: la copia sale con lo último (o no se duplica).
+    if (!(await dejarProductoActual())) return;
+    const nombre = window.prompt('Nombre de la copia:', p.nombre + ' (copia)');
+    if (nombre === null) return;
+    setError(null);
+    setDuplicandoId(p.id);
+    try {
+      const copia = await duplicarProducto(p.id, nombre.trim());
+      await recargar();
+      onCambio?.();
+      await editarDesdeTarjeta(copia);
+    } catch (e) {
+      setError('No se pudo duplicar: ' + e.message);
+    } finally {
+      setDuplicandoId(null);
+    }
+  }
+
   async function borrar(id) {
     const p = productos.find((x) => x.id === id);
     if (!window.confirm('¿Eliminar la producción «' + (p?.nombre || '') + '»? Se borran sus zonas; el diseño y las prendas no se tocan.')) return;
@@ -1405,6 +1428,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 disenos={disenos}
                 editando={p.id === editandoId}
                 onEditar={() => editarDesdeTarjeta(p)}
+                onDuplicar={() => duplicar(p)}
+                duplicando={duplicandoId === p.id}
                 onEliminar={() => borrar(p.id)}
               />
             ))}

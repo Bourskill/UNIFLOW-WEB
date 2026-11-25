@@ -83,6 +83,8 @@ function cambiaDatos(ruta, metodo) {
 const COLECCIONES = ['piezas', 'grupos', 'disenos', 'productos', 'plantillas', 'pedidos', 'fuentes'];
 function coleccionDe(ruta) {
   const primera = ruta.split('/')[1];
+  // Duplicar una producción crea también la copia de su diseño: se invalidan las dos.
+  if (primera === 'productos' && ruta.endsWith('/duplicar')) return null;
   if (COLECCIONES.includes(primera)) return primera;
   if (primera === 'nesting') return 'generaciones';
   return null;
@@ -405,6 +407,12 @@ export function eliminarProducto(id) {
 
 export function editarProducto(id, cambios) {
   return pedirJson('/productos/' + id, { method: 'PUT', body: JSON.stringify(cambios) });
+}
+
+// Copia independiente de una producción (con su propio diseño): ver
+// rutas/api.js·POST /productos/:id/duplicar. Devuelve la copia.
+export function duplicarProducto(id, nombre) {
+  return pedirJson('/productos/' + encodeURIComponent(id) + '/duplicar', { method: 'POST', body: JSON.stringify({ nombre }) });
 }
 
 // --- Plantillas (zonas sin contenido, para no rearmar el anclaje cada vez) ---

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { exportarMesas, exportarMesasArchivo, guardarArchivo, nombreDeParte } from '../api.js';
+import { exportarMesas, exportarMesasArchivo, guardarArchivo, nombreDeParte, duplicarProducto } from '../api.js';
 import { armarZip } from '../utilidades/zip.js';
 import { obtener } from '../datos/index.js';
 import { TarjetaProduccion } from '../componentes/TarjetaProduccion.jsx';
@@ -46,6 +46,25 @@ export function Producciones({ recargarSenal, onEditar }) {
     });
   }, [datos, busqueda]);
 
+  // Duplicar: la copia (con su propio diseño) se abre en Diseño para cambiarla.
+  const [duplicandoId, setDuplicandoId] = useState(null);
+  const [errorDuplicar, setErrorDuplicar] = useState(null);
+  async function duplicar(p) {
+    const nombre = window.prompt('Nombre de la copia:', p.nombre + ' (copia)');
+    if (nombre === null) return;
+    setErrorDuplicar(null);
+    setDuplicandoId(p.id);
+    try {
+      const copia = await duplicarProducto(p.id, nombre.trim());
+      await recargar();
+      onEditar?.(copia);
+    } catch (e) {
+      setErrorDuplicar('No se pudo duplicar: ' + e.message);
+    } finally {
+      setDuplicandoId(null);
+    }
+  }
+
   const exportando = datos.productos.find((p) => p.id === exportandoId) || null;
   function alternarExportar(p) {
     setExportandoId((id) => (id === p.id ? null : p.id));
@@ -64,6 +83,8 @@ export function Producciones({ recargarSenal, onEditar }) {
           su diseño y su contorno láser, a la medida justa más 1 cm de margen — listo para abrir en Illustrator.
         </p>
       </div>
+
+      {errorDuplicar && <Aviso tono="error">{errorDuplicar}</Aviso>}
 
       {exportando && (
         <div ref={panelRef} className="scroll-mt-4">
@@ -94,6 +115,8 @@ export function Producciones({ recargarSenal, onEditar }) {
                 exportando={p.id === exportandoId}
                 onEditar={() => onEditar?.(p)}
                 onExportar={() => alternarExportar(p)}
+                onDuplicar={() => duplicar(p)}
+                duplicando={duplicandoId === p.id}
               />
             ))}
           </div>

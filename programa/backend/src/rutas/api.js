@@ -394,6 +394,37 @@ crudSimple('productos');
 crudSimple('pedidos');
 crudSimple('plantillas');
 
+// Duplica una producción para hacerle cambios chicos y que después sean dos
+// distintas. Se copia también su DISEÑO (el arte se edita en el mismo
+// registro, así que compartirlo haría que tocar la copia cambie la
+// original); las prendas (moldería) sí se comparten, como en cualquier
+// producción. Las imágenes del Storage se reusan tal cual: cambiar un arte
+// sube un archivo nuevo, nunca pisa el que usa la otra.
+router.post('/productos/:id/duplicar', async (req, res) => {
+  try {
+    const original = await leerRegistro('productos', req.params.id);
+    if (!original) return res.status(404).json({ error: 'Producción no encontrada' });
+    const ahora = new Date().toISOString();
+    const nombre = String(req.body?.nombre || '').trim() || original.nombre + ' (copia)';
+
+    let disenoId = original.disenoId;
+    const diseno = disenoId ? await leerRegistro('disenos', disenoId) : null;
+    if (diseno) {
+      const copiaDiseno = { ...structuredClone(diseno), id: nanoid(), nombre: (diseno.nombre || 'Diseño') + ' (copia de ' + nombre + ')', creadoEn: ahora, actualizadoEn: ahora };
+      await crearRegistro('disenos', copiaDiseno);
+      await registrarEvento('disenos', 'crear', copiaDiseno.id, resumenDe(copiaDiseno));
+      disenoId = copiaDiseno.id;
+    }
+
+    const copia = { ...structuredClone(original), id: nanoid(), nombre, disenoId, duplicadoDe: original.id, creadoEn: ahora, actualizadoEn: ahora };
+    await crearRegistro('productos', copia);
+    await registrarEvento('productos', 'crear', copia.id, resumenDe(copia));
+    res.status(201).json(copia);
+  } catch (error) {
+    responderError(res, error);
+  }
+});
+
 // Historial de auditoría: qué se creó/actualizó/borró en cualquier colección,
 // más nuevo primero -- antes de tratar una tabla vacía o un registro que
 // desapareció como una posible pérdida de datos, revisar acá primero.
