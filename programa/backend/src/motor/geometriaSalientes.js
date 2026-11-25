@@ -126,6 +126,9 @@ export function piquetesPegadosDe(puntos) {
       xMm: tx, yMm: ty,
       anchoMm: Math.hypot(ex - sx, ey - sy),
       altoMm: fondoAguja,
+      // Los nodos que forman el piquete (la punta y la vuelta): sin ellos, el
+      // contorno pasa derecho (contorno láser, trazado.js·sinPiquetesPegados).
+      nodos: [iPunta, iSalida], tipo: 'aguja',
     });
   }
 
@@ -166,7 +169,8 @@ export function piquetesPegadosDe(puntos) {
       if (!haciaDentro) continue;
 
       for (let t = 0; t < tramo; t++) tomados.add((i + t) % n);
-      salida.push({ xMm: fx, yMm: fy, anchoMm: cuerda, altoMm: peorDist });
+      salida.push({ xMm: fx, yMm: fy, anchoMm: cuerda, altoMm: peorDist,
+        nodos: Array.from({ length: tramo }, (_, t) => (i + t) % n), tipo: 'muesca' });
     }
   }
 

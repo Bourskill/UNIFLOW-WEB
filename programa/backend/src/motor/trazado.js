@@ -17,6 +17,8 @@
 // (sería un nodo repetido). Si el cierre es una curva, el último segmento
 // 'C' termina exactamente en el primer nodo, como lo escribe Illustrator.
 
+import { piquetesPegadosDe } from './geometriaSalientes.js';
+
 const EPS = 1e-6;
 
 const finDe = (s) => (s[0] === 'C' ? [s[5], s[6]] : [s[1], s[2]]);
@@ -226,6 +228,46 @@ export function desplazarTrazado(t, d) {
     return { tipo: 'C', a, c1, c2, b };
   });
   return trazadoDeAristas(nuevas);
+}
+
+/**
+ * El contorno sin sus piquetes PEGADOS (muescas y agujas recortadas en el
+ * propio contorno, geometriaSalientes.js): el láser solo rodea la pieza, los
+ * piquetes no se cortan. Cada piquete se saltea: el contorno pasa derecho
+ * del nodo de antes al de después. Solo si las paredes del piquete son
+ * rectas (los piquetes lo son; una curva del molde no se toca). Unidades:
+ * las del trazado (cm).
+ */
+export function sinPiquetesPegados(t) {
+  if (!t) return t;
+  const aristas = aristasDe(t);
+  const n = aristas.length;
+  if (n < 4) return t;
+  const piquetes = piquetesPegadosDe(aristas.map((e) => [e.a[0] * 10, e.a[1] * 10]));
+  const quitar = new Set();
+  for (const p of piquetes) {
+    if (!p.nodos?.length) continue;
+    const primero = p.nodos[0], ultimo = p.nodos[p.nodos.length - 1];
+    // Aristas del piquete: de la que entra al primer nodo a la que sale del
+    // último (en la aguja, esa última ya es el molde y puede ser curva).
+    const paredes = [(primero - 1 + n) % n, ...p.nodos.map((k) => k)];
+    if (p.tipo === 'aguja') paredes.pop();
+    if (paredes.some((k) => aristas[k].tipo !== 'L')) continue;
+    for (const k of p.nodos) quitar.add(k);
+  }
+  if (!quitar.size || quitar.size > n - 3) return t;
+  const inicio = [...Array(n).keys()].find((k) => !quitar.has(k));
+  const nuevas = [];
+  let k = inicio;
+  do {
+    let j = (k + 1) % n;
+    while (quitar.has(j)) j = (j + 1) % n;
+    const sale = aristas[(j - 1 + n) % n]; // la que llega a j
+    nuevas.push(j === (k + 1) % n ? aristas[k]
+      : sale.tipo === 'C' ? { tipo: 'C', a: aristas[k].a, c1: sale.c1, c2: sale.c2, b: sale.b } : { tipo: 'L', a: aristas[k].a, b: sale.b });
+    k = j;
+  } while (k !== inicio);
+  return trazadoDeAristas(nuevas) || t;
 }
 
 // ---- recuperar los nodos de un polígono ya tesselado ---------------------

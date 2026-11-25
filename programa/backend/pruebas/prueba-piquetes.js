@@ -114,5 +114,26 @@ console.log('\n--- Una línea de referencia larga y angosta NO le gana al contor
   comprobar('La línea (100cm, muy por encima del umbral) no se cuenta como piquete', r.piquetesMm.length === 0, 'piquetes=' + r.piquetesMm.length);
 }
 
+console.log('\n--- Contorno láser: solo rodea la pieza, sin los piquetes pegados ---');
+{
+  const { sinPiquetesPegados, nodosDeTrazado } = await import('../src/motor/trazado.js');
+  const { trazadoDeCorte } = await import('../src/motor/exportarPdf.js');
+  // Pieza 40x60 cm con una muesca en V (0,6 cm de ancho, 0,5 de fondo) arriba,
+  // una en U a la derecha y una aguja abajo; un lado izquierdo curvo.
+  const t = [['M', 0, 0], ['L', 19.7, 0], ['L', 20, 0.5], ['L', 20.3, 0], ['L', 40, 0],
+    ['L', 40, 29.7], ['L', 39.5, 29.8], ['L', 39.5, 30.2], ['L', 40, 30.3], ['L', 40, 60],
+    ['L', 20.05, 60], ['L', 20, 59.4], ['L', 19.95, 60], ['L', 0, 60],
+    ['C', -3, 40, -3, 20, 0, 0]];
+  const s = sinPiquetesPegados(t);
+  const nodos = s.map((x) => (x[0] === 'C' ? [x[5], x[6]] : [x[1], x[2]]));
+  comprobar('quita los nodos de los 3 piquetes', nodosDeTrazado(s) === nodosDeTrazado(t) - 5, nodosDeTrazado(t) + ' → ' + nodosDeTrazado(s));
+  comprobar('ningún nodo queda adentro del borde', nodos.every(([x, y]) => x <= 0.001 || x >= 39.999 || y <= 0.001 || y >= 59.999));
+  comprobar('la curva del molde queda igual', s.some((x) => x[0] === 'C' && x[1] === -3));
+  const rect = [['M', 0, 0], ['L', 40, 0], ['L', 40, 60], ['L', 0, 60]];
+  comprobar('una pieza sin piquetes no cambia', JSON.stringify(sinPiquetesPegados(rect)) === JSON.stringify(rect));
+  const corte = trazadoDeCorte({ trazadoCm: t }, 0.1);
+  comprobar('el corte láser sale sin piquetes', nodosDeTrazado(corte) === nodosDeTrazado(s), nodosDeTrazado(corte));
+}
+
 console.log('\n' + pasadas + ' pasadas · ' + fallos + ' fallidas\n');
 if (fallos > 0) process.exit(1);

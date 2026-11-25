@@ -24,7 +24,7 @@ import { leerPng } from './png.js';
 import { fondoActivo, ejeDegradado, colorEn } from './fondoPieza.js';
 import { medidasDeCapsula, caminoDeCapsula, COLOR_CAPSULA } from './capsulaTalla.js';
 import { leerDocumentoAi, arteNativoDe } from './illustrator/arteNativo.js';
-import { normalizarTrazado, mapearTrazado, desplazarTrazado, aplanarTrazado, recuperarTrazado } from './trazado.js';
+import { normalizarTrazado, mapearTrazado, desplazarTrazado, aplanarTrazado, recuperarTrazado, sinPiquetesPegados } from './trazado.js';
 
 const CM_A_PUNTOS = 28.3465;
 
@@ -136,7 +136,7 @@ export function trazadoDePieza(pieza) {
 // nodo: los mismos nodos que el molde (ver trazado.js·desplazarTrazado).
 export function trazadoDeCorte(pieza, distancia) {
   const t = trazadoDePieza(pieza);
-  return t ? desplazarTrazado(t, distancia) : null;
+  return t ? desplazarTrazado(sinPiquetesPegados(t), distancia) : null;
 }
 
 // Operadores PDF de un trazado ya en puntos de la página (sin el cierre).
