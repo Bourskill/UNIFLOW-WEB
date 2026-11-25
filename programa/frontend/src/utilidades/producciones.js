@@ -1,4 +1,5 @@
 import { ordenarTallasNatural } from '../constantes.js';
+import { conjuntosDe, tallasDeGrupos } from './conjuntos.js';
 
 // Utilidades de las producciones (antes "productos"), compartidas por Diseño
 // (las más recientes) y Producción (todas, para exportar por tallas).
@@ -21,6 +22,12 @@ export function ordenarPorReciente(producciones) {
 // sus piezas (una de talla única sirve para cualquiera). Mismo criterio que
 // Pedidos.jsx·tallasDelProducto.
 export function tallasDeProduccion(produccion, grupos, piezas) {
+  // Con conjuntos (dama / caballero...): las tallas de cualquiera de ellos
+  // (cada talla sale con los conjuntos que la tienen).
+  const deConjuntos = conjuntosDe(produccion);
+  if (deConjuntos.length) {
+    return ordenarTallasNatural([...new Set(deConjuntos.flatMap((c) => tallasDeGrupos(c.grupoIds, grupos, piezas)))]);
+  }
   const ids = produccion?.grupoIds || (produccion?.grupoId ? [produccion.grupoId] : []);
   const conjuntos = ids
     .map((id) => grupos.find((g) => g.id === id))

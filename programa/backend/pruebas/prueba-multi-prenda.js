@@ -126,5 +126,47 @@ console.log('\n--- Un producto que combina prendas donde una ya no existe: falla
   comprobar('El mensaje menciona el producto', mensaje.indexOf('Kit roto') !== -1, mensaje);
 })();
 
+console.log('\n--- Conjuntos (dama / caballero) en UNA producción: cada jugador lleva solo las prendas de su conjunto ---');
+(function () {
+  // Camiseta de dama solo en S; short de caballero solo en XL -- cada
+  // conjunto sale en SUS tallas, sin que el otro lo frene.
+  var piezaDama = { id: 'pz-dama', nombre: 'Frente dama', angulosPermitidos: [0], tela: null,
+    dimensionesPorTalla: { S: { anchoCm: 38, altoCm: 50 } }, geometriaPorTalla: { S: poligono(380, 500) } };
+  var piezaCaballero = { id: 'pz-cab', nombre: 'Frente caballero', angulosPermitidos: [0], tela: null,
+    dimensionesPorTalla: { XL: { anchoCm: 50, altoCm: 60 } }, geometriaPorTalla: { XL: poligono(500, 600) } };
+  var gDama = { id: 'g-dama', nombre: 'Camiseta dama', piezas: [{ piezaId: 'pz-dama', rol: 'Frente' }] };
+  var gCab = { id: 'g-cab', nombre: 'Camiseta caballero', piezas: [{ piezaId: 'pz-cab', rol: 'Frente' }] };
+  // Una zona en cada prenda (clave grupoId::rol): la del otro conjunto no tiene que estorbar.
+  var anclaje = {
+    anclas: [
+      { id: 'A1', pieza: 'g-dama::Frente', x: { ref: { tipo: 'contorno', parte: 'centro' }, modo: 'fijo', valor: 0 }, y: { ref: { tipo: 'contorno', parte: 'centro' }, modo: 'fijo', valor: 0 } },
+      { id: 'A2', pieza: 'g-cab::Frente', x: { ref: { tipo: 'contorno', parte: 'centro' }, modo: 'fijo', valor: 0 }, y: { ref: { tipo: 'contorno', parte: 'centro' }, modo: 'fijo', valor: 0 } },
+    ],
+    zonas: [
+      { id: 'Z1', pieza: 'g-dama::Frente', tipo: 'texto', anclaX: 'A1', anclaY: 'A1', origen: 'centro', ancho: { modo: 'fijo', valor: 20 }, alto: { modo: 'fijo', valor: 5 }, campoPedido: 'nombre' },
+      { id: 'Z2', pieza: 'g-cab::Frente', tipo: 'texto', anclaX: 'A2', anclaY: 'A2', origen: 'centro', ancho: { modo: 'fijo', valor: 20 }, alto: { modo: 'fijo', valor: 5 }, campoPedido: 'nombre' },
+    ],
+  };
+  var producto = { id: 'p-mixta', nombre: 'Mixta', grupoIds: ['g-dama', 'g-cab'], disenoId: null, anclaje: anclaje, bordeContraste: null,
+    conjuntos: [{ id: 'cd', nombre: 'Dama', grupoIds: ['g-dama'] }, { id: 'cc', nombre: 'Caballero', grupoIds: ['g-cab'] }] };
+  var pedido = { lineas: [
+    { id: 'l1', productoId: 'p-mixta', conjuntoId: 'cd', talla: 'S', nombre: 'ANA', numero: '1' },
+    { id: 'l2', productoId: 'p-mixta', conjuntoId: 'cc', talla: 'XL', nombre: 'LUIS', numero: '2' },
+  ] };
+  var r, error = null;
+  try { r = resolverPiezasDePedido({ pedido, productos: [producto], grupos: [gDama, gCab], piezas: [piezaDama, piezaCaballero], disenos: [] }); }
+  catch (e) { error = e.message; }
+  comprobar('Cada jugador sale en su talla aunque el otro conjunto no la tenga', !error, error);
+  if (error) return;
+  var deAna = r.filter(function (p) { return p.lineaPedidoId === 'l1'; });
+  var deLuis = r.filter(function (p) { return p.lineaPedidoId === 'l2'; });
+  comprobar('La de dama lleva solo la camiseta de dama', deAna.length === 1 && deAna[0].anchoCm === 38, JSON.stringify(deAna.map(function (p) { return p.piezaId; })));
+  comprobar('El de caballero lleva solo la de caballero', deLuis.length === 1 && deLuis[0].anchoCm === 50, JSON.stringify(deLuis.map(function (p) { return p.piezaId; })));
+  comprobar('Las piezas se siguen llamando con su prenda', /Camiseta dama/.test(deAna[0].piezaId), deAna[0].piezaId);
+  var sinConjunto = resolverPiezasDePedido({ pedido: { lineas: [{ id: 'l3', productoId: 'p-mixta', talla: 'S', nombre: 'X', numero: '' }] },
+    productos: [producto], grupos: [gDama, gCab], piezas: [piezaDama, piezaCaballero], disenos: [] });
+  comprobar('Una línea sin conjunto elegido usa el primero', sinConjunto.length === 1 && sinConjunto[0].anchoCm === 38);
+})();
+
 console.log('\n' + pasadas + ' pasadas · ' + fallos + ' fallidas');
 if (fallos > 0) process.exit(1);

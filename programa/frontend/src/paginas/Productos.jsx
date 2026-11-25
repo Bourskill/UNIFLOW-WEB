@@ -40,6 +40,7 @@ import {
   firmaEditor, haySinGuardar, puedeGuardarseSolo, guardarBorrador, leerBorrador, borrarBorrador, borradorParaOfrecer, haceCuanto,
 } from '../utilidades/borradorDiseno.js';
 import { LienzoAnclaje, COLOR, candidatosDe } from '../componentes/LienzoAnclaje.jsx';
+import { PanelConjuntos } from '../componentes/PanelConjuntos.jsx';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
 
 const BORDE_POR_DEFECTO = { activo: false, colorHex: '#000000', grosorCm: 0.03, desplazamientoCm: 0 };
@@ -53,6 +54,7 @@ function estadoDeProducto(p) {
     anclaje: p.anclaje || { anclas: [], zonas: [] },
     bordeContraste: p.bordeContraste || BORDE_POR_DEFECTO,
     ladosPropios: p.ladosPropios || {},
+    conjuntos: p.conjuntos || [],
   };
 }
 const LEYENDA_POR_DEFECTO = { piquetes: true, extremos: true, bordes: true, vertices: false, zonas: true };
@@ -190,6 +192,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // propio en esta producción: clave del rol -> true. Sin marca, el otro
   // lado lleva lo mismo que su par. Ver PanelLadoPar.
   const [ladosPropios, setLadosPropios] = useState({});
+  // Conjuntos (dama / caballero...) de las prendas: ver PanelConjuntos.
+  const [conjuntosPrendas, setConjuntosPrendas] = useState([]);
   const [piezaActiva, setPiezaActiva] = useState(null);
   const [tallaTrabajoPorRol, setTallaTrabajoPorRol] = useState({});
   const [bordeContraste, setBordeContraste] = useState(BORDE_POR_DEFECTO);
@@ -277,6 +281,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setGrupoIds(plantillaParaUsar.grupoIds || (plantillaParaUsar.grupoId ? [plantillaParaUsar.grupoId] : []));
     setAnclaje(plantillaParaUsar.anclaje || { anclas: [], zonas: [] });
     setLadosPropios(plantillaParaUsar.ladosPropios || {});
+    setConjuntosPrendas([]);
     if (plantillaParaUsar.bordeContraste) setBordeContraste(plantillaParaUsar.bordeContraste);
     setDisenoId('');
     setSeleccion(null);
@@ -1087,7 +1092,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   //  - todo lo que no está en el servidor queda además como borrador en
   //    este navegador, y al volver se ofrece recuperarlo;
   //  - guardar NO vacía el editor: se sigue con el mismo producto.
-  const estadoEditor = { nombre, grupoIds, disenoId, anclaje, bordeContraste, ladosPropios };
+  const estadoEditor = { nombre, grupoIds, disenoId, anclaje, bordeContraste, ladosPropios, conjuntos: conjuntosPrendas };
   const firmaActual = firmaEditor(estadoEditor);
   const sinGuardar = haySinGuardar(estadoEditor, firmaGuardada);
   const autoguardable = puedeGuardarseSolo(estadoEditor, !editandoId);
@@ -1104,6 +1109,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       const datos = {
         nombre: datosAhora.nombre, grupoIds: datosAhora.grupoIds, disenoId: datosAhora.disenoId || null,
         anclaje: datosAhora.anclaje, bordeContraste: datosAhora.bordeContraste, ladosPropios: datosAhora.ladosPropios,
+        conjuntos: datosAhora.conjuntos || [],
       };
       const r = idAhora ? await editarProducto(idAhora, datos) : await crearProducto(datos);
       confirmarGuardado('productos', r);
@@ -1166,6 +1172,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setDisenoId(b.disenoId || '');
     setAnclaje(b.anclaje);
     setLadosPropios(b.ladosPropios || {});
+    setConjuntosPrendas(b.conjuntos || []);
     setBordeContraste(b.bordeContraste || BORDE_POR_DEFECTO);
     setSeleccion(null);
     setModo(null);
@@ -1214,6 +1221,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setDisenoId(producto.disenoId || '');
     setAnclaje(producto.anclaje || { anclas: [], zonas: [] });
     setLadosPropios(producto.ladosPropios || {});
+    setConjuntosPrendas(producto.conjuntos || []);
     setBordeContraste(producto.bordeContraste || BORDE_POR_DEFECTO);
     setSeleccion(null);
     setModo(null);
@@ -1235,6 +1243,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setNombre('');
     setAnclaje({ anclas: [], zonas: [] });
     setLadosPropios({});
+    setConjuntosPrendas([]);
     setSeleccion(null);
     setModo(null);
     setError(null);
@@ -1487,6 +1496,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 );
               })}
             </div>
+            <PanelConjuntos prendas={gruposSeleccionados} conjuntos={conjuntosPrendas} onCambiar={setConjuntosPrendas} />
           </div>
 
           <div className="max-w-3xl">

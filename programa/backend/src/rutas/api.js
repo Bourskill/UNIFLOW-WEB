@@ -6,6 +6,7 @@ import { anidarPiezas } from '../motor/nesting.js';
 import { generarPdfNesting, generarPdfPaginas } from '../motor/exportarPdf.js';
 import { armarMesas, piezasSinRepetir } from '../motor/mesas.js';
 import { campoDeZona } from '../motor/campoDeZona.js';
+import { conjuntosDe, tallasDeGrupos } from '../motor/conjuntos.js';
 import { conDocumentoIllustrator, entranEnIllustrator, partirParaIllustrator } from '../motor/illustrator/documentoAi.js';
 import { resolverPiezasDePedido, tallaRealDePieza } from '../motor/resolverPedido.js';
 import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
@@ -1247,9 +1248,17 @@ router.post('/exportar-mesas/:id', async (req, res) => {
     const zona = (producto.anclaje?.zonas || []).find((z) => campoDeZona(z) === campo && z.valorEjemplo);
     return zona ? String(zona.valorEjemplo) : '';
   };
+  // Con conjuntos (dama / caballero...), cada talla sale con cada conjunto
+  // que la tiene; sin conjuntos, la producción entera.
+  const conjuntos = conjuntosDe(producto);
+  const combinaciones = [...new Set(tallas)].flatMap((talla) => (conjuntos.length
+    ? conjuntos.filter((c) => tallasDeGrupos(c.grupoIds, grupos, piezas).includes(talla)).map((c) => ({ talla, conjuntoId: c.id }))
+    : [{ talla }]));
+  if (!combinaciones.length) return res.status(400).json({ error: 'Ningún conjunto de esta producción tiene esas tallas' });
   const pedido = {
-    lineas: [...new Set(tallas)].map((talla, i) => ({
-      id: 'mesa' + i, productoId: producto.id, talla, nombre: ejemplo('nombre'), numero: ejemplo('numero'), conEjemplo: !!conEjemplo,
+    lineas: combinaciones.map(({ talla, conjuntoId }, i) => ({
+      id: 'mesa' + i, productoId: producto.id, talla, ...(conjuntoId ? { conjuntoId } : {}),
+      nombre: ejemplo('nombre'), numero: ejemplo('numero'), conEjemplo: !!conEjemplo,
     })),
   };
   let piezasDeMesas;

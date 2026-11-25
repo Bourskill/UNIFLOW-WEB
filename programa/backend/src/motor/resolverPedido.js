@@ -20,6 +20,7 @@ import { geometriaDelGrupo } from './geometriaAnclaje.js';
 import { resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
 import { fondoDePieza } from './fondoPieza.js';
 import { anclasDeCalce, ajusteConCalce } from './colocarArte.js';
+import { conjuntoDeLinea, anclajeDePiezas } from './conjuntos.js';
 
 // Un Producto de un solo grupo sigue guardando `grupoId` (nunca se migró
 // data existente); uno multi-prenda ("kit") guarda `grupoIds`. Normalizar
@@ -75,7 +76,13 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
     // (ver rutas/api.js) -- es el ÚNICO camino que de verdad genera el
     // corte/PDF final, así que es el que tiene que ver exactamente lo que
     // el producto tenía cuando se guardó, no lo último que haya en Biblioteca.
-    const piezasDelGrupo = resolverPiezasDeGrupos(gruposDelProducto, piezas, producto.versionesPiezas);
+    // Con conjuntos (dama / caballero...), solo las prendas del de esta
+    // línea -- con las mismas claves que si fuera la producción entera.
+    const conjunto = conjuntoDeLinea(producto, linea);
+    const piezasDelGrupo = resolverPiezasDeGrupos(gruposDelProducto, piezas, producto.versionesPiezas)
+      .filter((p) => !conjunto || conjunto.grupoIds.includes(p.grupoId));
+    const clavesDelConjunto = new Set(piezasDelGrupo.map((p) => p.nombre));
+    const anclajeDeLinea = conjunto ? anclajeDePiezas(producto.anclaje, clavesDelConjunto) : producto.anclaje;
     const excluidas = new Set(linea.piezasExcluidas || []);
 
     // Todas las piezas del grupo a la MISMA talla de esta línea -- a
@@ -88,7 +95,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
     const geometria = geometriaDelGrupo(piezasDelGrupo, tallaPorRol);
 
     const anclajeVacio = { anclas: [], zonas: [] };
-    const resuelto = resolverAnclaje(producto.anclaje || anclajeVacio, geometria, { talla: linea.talla });
+    const resuelto = resolverAnclaje(anclajeDeLinea || anclajeVacio, geometria, { talla: linea.talla });
     if (resuelto.errores.length > 0) {
       throw new Error(
         'Producto "' + producto.nombre + '" en talla ' + linea.talla + ': ' + resuelto.errores.join(' | ')
@@ -107,11 +114,11 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
     // sin frenar el pedido: un destino que no sale en esta talla solo se omite.
     const anclasCalce = Object.entries(diseno?.ajusteArtePorPieza || {}).flatMap(([c, aj]) => anclasDeCalce(c, aj));
     const anclasDelCalce = anclasCalce.length
-      ? resolverAnclaje({ ...(producto.anclaje || anclajeVacio), anclas: [...(producto.anclaje?.anclas || []), ...anclasCalce] }, geometria, { talla: linea.talla }).anclas
+      ? resolverAnclaje({ ...(anclajeDeLinea || anclajeVacio), anclas: [...(anclajeDeLinea?.anclas || []), ...anclasCalce.filter((a) => !conjunto || clavesDelConjunto.has(a.pieza))] }, geometria, { talla: linea.talla }).anclas
       : {};
 
     const zonaCruda = {};
-    for (const z of producto.anclaje?.zonas || []) zonaCruda[z.id] = z;
+    for (const z of anclajeDeLinea?.zonas || []) zonaCruda[z.id] = z;
 
     for (const pieza of piezasDelGrupo) {
       if (excluidas.has(pieza.nombre) || (pieza.ladoDe && excluidas.has(pieza.ladoDe))) continue;

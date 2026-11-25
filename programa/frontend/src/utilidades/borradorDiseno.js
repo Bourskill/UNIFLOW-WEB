@@ -6,12 +6,14 @@
 const CLAVE = 'uniflow.borradorDiseno';
 
 /** Lo que define un producto en el editor (lo que se guarda en el servidor). */
-export function datosDelEditor({ nombre, grupoIds, disenoId, anclaje, bordeContraste, ladosPropios }) {
+export function datosDelEditor({ nombre, grupoIds, disenoId, anclaje, bordeContraste, ladosPropios, conjuntos }) {
   return {
     nombre: nombre || '', grupoIds: grupoIds || [], disenoId: disenoId || null,
     anclaje: anclaje || { anclas: [], zonas: [] }, bordeContraste: bordeContraste || null,
     // Qué piezas en par llevan diseño propio del otro lado (vacío = ninguna).
     ladosPropios: ladosPropios && Object.keys(ladosPropios).length ? ladosPropios : {},
+    // Conjuntos de prendas (dama / caballero...); sin ellos, ni aparece.
+    ...(conjuntos?.length ? { conjuntos } : {}),
   };
 }
 

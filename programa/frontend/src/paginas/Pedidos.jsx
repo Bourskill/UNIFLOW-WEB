@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { crearPedido, editarPedido, eliminarPedido, anidarDesdePedido, generarPdf, exportarTallaDePedido } from '../api.js';
 import { obtener } from '../datos/index.js';
 import { ordenarTallasNatural } from '../constantes.js';
+import { conjuntosDe, conjuntoDeLinea } from '../utilidades/conjuntos.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
 import { Boton, Campo, Input, InputMultilinea, Select, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 import { leerHoja, filasDeTexto, interpretarJugadores } from '../utilidades/hojaDeCalculo.js';
@@ -20,9 +21,12 @@ function gruposDelProducto(producto, grupos) {
 
 // Las tallas que tienen TODAS las piezas de la producción (las de talla única
 // sirven para cualquiera).
-function tallasDelProducto(productoId, productos, grupos, piezas) {
+function tallasDelProducto(productoId, productos, grupos, piezas, conjuntoId) {
   const producto = productos.find((p) => p.id === productoId);
+  // Con conjuntos (dama / caballero...), las del conjunto de la línea.
+  const conjunto = conjuntoDeLinea(producto, { conjuntoId });
   const conjuntos = gruposDelProducto(producto, grupos)
+    .filter((g) => !conjunto || conjunto.grupoIds.includes(g.id))
     .flatMap((g) => g.piezas)
     .map((x) => piezas.find((p) => p.id === x.piezaId))
     .filter((p) => p && !p.tallaUnica)
@@ -49,10 +53,12 @@ function diagnosticoSinTallaComun(productoId, productos, grupos, piezas) {
 }
 
 // Las piezas que se pueden sacar de una prenda puntual (clave = lo que espera resolverPedido.js).
-function rolesDelProducto(productoId, productos, grupos) {
-  const grupos2 = gruposDelProducto(productos.find((p) => p.id === productoId), grupos);
+function rolesDelProducto(productoId, productos, grupos, conjuntoId) {
+  const producto = productos.find((p) => p.id === productoId);
+  const grupos2 = gruposDelProducto(producto, grupos);
   const varias = grupos2.length > 1;
-  return grupos2.flatMap((g) => g.piezas.map((gp) => ({
+  const conjunto = conjuntoDeLinea(producto, { conjuntoId });
+  return grupos2.filter((g) => !conjunto || conjunto.grupoIds.includes(g.id)).flatMap((g) => g.piezas.map((gp) => ({
     clave: varias ? g.id + '::' + gp.rol : gp.rol,
     etiqueta: varias ? g.nombre + ' · ' + gp.rol : gp.rol,
   })));
@@ -241,7 +247,10 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
   const entradaArchivo = useRef(null);
   const tablaFinal = useRef(null);
 
-  const tallasDe = (id) => tallasDelProducto(id, productos, grupos, piezas);
+  const tallasDe = (id, conjuntoId) => tallasDelProducto(id, productos, grupos, piezas, conjuntoId);
+  const conjuntosDeProduccion = (id) => conjuntosDe(productos.find((p) => p.id === id));
+  const conConjuntos = lineas.some((l) => conjuntosDeProduccion(l.productoId).length > 1) || conjuntosDeProduccion(productoId).length > 1;
+  const columnas = 4 + (variosProductos ? 1 : 0) + (conConjuntos ? 1 : 0);
   const tallasPorDefecto = tallasDe(productoId);
   const variosProductos = productos.length > 1;
   const conPiezasExcluibles = lineas.some((l) => l.piezasExcluidas?.length);
@@ -249,7 +258,10 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
 
   const actualizar = (id, cambios) => setLineas((prev) => prev.map((l) => (l.id === id ? { ...l, ...cambios } : l)));
   function agregar() {
-    setLineas((prev) => [...prev, nuevaLinea(productoId, prev[prev.length - 1]?.talla || tallasPorDefecto[0] || '')]);
+    setLineas((prev) => {
+      const ultima = prev[prev.length - 1];
+      return [...prev, nuevaLinea(productoId, ultima?.talla || tallasPorDefecto[0] || '', ultima?.conjuntoId ? { conjuntoId: ultima.conjuntoId } : {})];
+    });
     setTimeout(() => tablaFinal.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30);
   }
   function cambiarProductoDelPedido(id) {
@@ -355,6 +367,7 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
               <tr>
                 <th className="w-10 px-3 py-2 font-medium">#</th>
                 {variosProductos && <th className="px-2 py-2 font-medium">Producción</th>}
+                {conConjuntos && <th className="w-32 px-2 py-2 font-medium">Conjunto</th>}
                 <th className="w-24 px-2 py-2 font-medium">Talla</th>
                 <th className="px-2 py-2 font-medium">Nombre</th>
                 <th className="w-24 px-2 py-2 font-medium">Número</th>
@@ -363,8 +376,10 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
             </thead>
             <tbody>
               {lineas.map((l, i) => {
-                const tallas = tallasDe(l.productoId);
-                const roles = verPiezas ? rolesDelProducto(l.productoId, productos, grupos) : [];
+                const tallas = tallasDe(l.productoId, l.conjuntoId);
+                const roles = verPiezas ? rolesDelProducto(l.productoId, productos, grupos, l.conjuntoId) : [];
+                const conjuntosLinea = conjuntosDeProduccion(l.productoId);
+                const conjuntoLinea = conjuntoDeLinea(productos.find((p) => p.id === l.productoId), l);
                 return [
                   <tr key={l.id} className="border-t border-border">
                     <td className="px-3 py-1.5 text-xs text-faint-foreground">{i + 1}</td>
@@ -376,6 +391,18 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
                         }}>
                           {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                         </Select>
+                      </td>
+                    )}
+                    {conConjuntos && (
+                      <td className="px-2 py-1.5">
+                        {conjuntosLinea.length > 1 ? (
+                          <Select className="h-8 text-xs" value={conjuntoLinea?.id || ''} onChange={(e) => {
+                            const nuevas = tallasDe(l.productoId, e.target.value);
+                            actualizar(l.id, { conjuntoId: e.target.value, piezasExcluidas: [], talla: nuevas.includes(l.talla) ? l.talla : '' });
+                          }}>
+                            {conjuntosLinea.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                          </Select>
+                        ) : <span className="text-xs text-faint-foreground">{conjuntosLinea[0]?.nombre || '—'}</span>}
                       </td>
                     )}
                     <td className="px-2 py-1.5">
@@ -400,7 +427,7 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
                   roles.length > 0 && (
                     <tr key={l.id + '-p'} className="bg-surface-muted/40">
                       <td />
-                      <td colSpan={variosProductos ? 5 : 4} className="px-2 pb-2">
+                      <td colSpan={columnas} className="px-2 pb-2">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="text-xs text-faint-foreground">No lleva:</span>
                           {roles.map(({ clave, etiqueta }) => {
