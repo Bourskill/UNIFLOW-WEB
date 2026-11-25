@@ -21,6 +21,7 @@ import { resolverPiezasDeGrupos } from '../dominio/resolverGrupo.js';
 import { fondoDePieza } from './fondoPieza.js';
 import { anclasDeCalce, ajusteConCalce } from './colocarArte.js';
 import { conjuntoDeLinea, anclajeDePiezas } from './conjuntos.js';
+import { gruposConMoldes } from '../dominio/moldesDeProduccion.js';
 
 // Un Producto de un solo grupo sigue guardando `grupoId` (nunca se migró
 // data existente); uno multi-prenda ("kit") guarda `grupoIds`. Normalizar
@@ -79,7 +80,8 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
     // Con conjuntos (dama / caballero...), solo las prendas del de esta
     // línea -- con las mismas claves que si fuera la producción entera.
     const conjunto = conjuntoDeLinea(producto, linea);
-    const piezasDelGrupo = resolverPiezasDeGrupos(gruposDelProducto, piezas, producto.versionesPiezas)
+    // Con moldes cambiados en esta producción (MANGA → MANGA LARGA), esos.
+    const piezasDelGrupo = resolverPiezasDeGrupos(gruposConMoldes(gruposDelProducto, producto.moldes), piezas, producto.versionesPiezas)
       .filter((p) => !conjunto || conjunto.grupoIds.includes(p.grupoId));
     const clavesDelConjunto = new Set(piezasDelGrupo.map((p) => p.nombre));
     const anclajeDeLinea = conjunto ? anclajeDePiezas(producto.anclaje, clavesDelConjunto) : producto.anclaje;

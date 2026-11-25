@@ -42,6 +42,7 @@ import {
 import { LienzoAnclaje, COLOR, candidatosDe } from '../componentes/LienzoAnclaje.jsx';
 import { PanelConjuntos } from '../componentes/PanelConjuntos.jsx';
 import { SelectorColor } from '../componentes/SelectorColor.jsx';
+import { gruposConMoldes } from '../utilidades/moldesDeProduccion.js';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
 
 const BORDE_POR_DEFECTO = { activo: false, colorHex: '#000000', grosorCm: 0.03, desplazamientoCm: 0 };
@@ -56,6 +57,7 @@ function estadoDeProducto(p) {
     bordeContraste: p.bordeContraste || BORDE_POR_DEFECTO,
     ladosPropios: p.ladosPropios || {},
     conjuntos: p.conjuntos || [],
+    moldes: p.moldes || {},
   };
 }
 const LEYENDA_POR_DEFECTO = { piquetes: true, extremos: true, bordes: true, vertices: false, zonas: true };
@@ -195,6 +197,9 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   const [ladosPropios, setLadosPropios] = useState({});
   // Conjuntos (dama / caballero...) de las prendas: ver PanelConjuntos.
   const [conjuntosPrendas, setConjuntosPrendas] = useState([]);
+  // Moldes cambiados en esta producción: clave de la pieza -> pieza de la
+  // Biblioteca que la reemplaza (utilidades/moldesDeProduccion.js).
+  const [moldes, setMoldes] = useState({});
   const [piezaActiva, setPiezaActiva] = useState(null);
   const [tallaTrabajoPorRol, setTallaTrabajoPorRol] = useState({});
   const [bordeContraste, setBordeContraste] = useState(BORDE_POR_DEFECTO);
@@ -283,6 +288,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setAnclaje(plantillaParaUsar.anclaje || { anclas: [], zonas: [] });
     setLadosPropios(plantillaParaUsar.ladosPropios || {});
     setConjuntosPrendas([]);
+    setMoldes({});
     if (plantillaParaUsar.bordeContraste) setBordeContraste(plantillaParaUsar.bordeContraste);
     setDisenoId('');
     setSeleccion(null);
@@ -292,7 +298,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plantillaParaUsar]);
 
-  const gruposSeleccionados = grupoIds.map((id) => grupos.find((g) => g.id === id)).filter(Boolean);
+  // Con los moldes cambiados en esta producción (MANGA → MANGA LARGA).
+  const gruposSeleccionados = gruposConMoldes(grupoIds.map((id) => grupos.find((g) => g.id === id)).filter(Boolean), moldes);
   // Namespacear la clave de pieza (grupoId::rol) SOLO con más de una prenda
   // combinada -- con una sola, la clave sigue siendo el rol crudo, igual
   // que siempre (mismo criterio que dominio/resolverGrupo.js·
@@ -348,7 +355,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     }
     if (Object.keys(tallaPorRol).length === 0) { setResuelto(null); return; }
     let cancelado = false;
-    resolverAnclaje(grupoIds, tallaPorRol, anclaje)
+    resolverAnclaje(grupoIds, tallaPorRol, anclaje, moldes)
       .then((r) => { if (!cancelado) setResuelto(r); })
       .catch((e) => { if (!cancelado) setResuelto({ errores: [e.message], avisos: [], sinResolver: [], lista: { anclas: [], zonas: [] } }); });
     return () => { cancelado = true; };
@@ -378,6 +385,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setGrupoIds(despues);
     setAnclaje((prev) => anclajeTraducido(prev, traducir));
     setLadosPropios((prev) => porClaveTraducido(prev, traducir));
+    setMoldes((prev) => porClaveTraducido(prev, traducir));
     setTallaTrabajoPorRol((prev) => porClaveTraducido(prev, traducir));
     setSeleccion(null);
     setModo(null);
@@ -545,7 +553,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
       if (t) tallaPorRol[pd.clave] = t;
     }
     let cancelado = false;
-    resolverAnclaje(grupoIds, tallaPorRol, { ...anclaje, anclas: [...anclaje.anclas, ...anclasCalceActivas] })
+    resolverAnclaje(grupoIds, tallaPorRol, { ...anclaje, anclas: [...anclaje.anclas, ...anclasCalceActivas] }, moldes)
       .then((r) => { if (!cancelado) setCalceResuelto(r.anclas || {}); })
       .catch(() => { if (!cancelado) setCalceResuelto({}); });
     return () => { cancelado = true; };
@@ -1093,7 +1101,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   //  - todo lo que no está en el servidor queda además como borrador en
   //    este navegador, y al volver se ofrece recuperarlo;
   //  - guardar NO vacía el editor: se sigue con el mismo producto.
-  const estadoEditor = { nombre, grupoIds, disenoId, anclaje, bordeContraste, ladosPropios, conjuntos: conjuntosPrendas };
+  const estadoEditor = { nombre, grupoIds, disenoId, anclaje, bordeContraste, ladosPropios, conjuntos: conjuntosPrendas, moldes };
   const firmaActual = firmaEditor(estadoEditor);
   const sinGuardar = haySinGuardar(estadoEditor, firmaGuardada);
   const autoguardable = puedeGuardarseSolo(estadoEditor, !editandoId);
@@ -1111,6 +1119,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
         nombre: datosAhora.nombre, grupoIds: datosAhora.grupoIds, disenoId: datosAhora.disenoId || null,
         anclaje: datosAhora.anclaje, bordeContraste: datosAhora.bordeContraste, ladosPropios: datosAhora.ladosPropios,
         conjuntos: datosAhora.conjuntos || [],
+        moldes: datosAhora.moldes || {},
       };
       const r = idAhora ? await editarProducto(idAhora, datos) : await crearProducto(datos);
       confirmarGuardado('productos', r);
@@ -1174,6 +1183,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setAnclaje(b.anclaje);
     setLadosPropios(b.ladosPropios || {});
     setConjuntosPrendas(b.conjuntos || []);
+    setMoldes(b.moldes || {});
     setBordeContraste(b.bordeContraste || BORDE_POR_DEFECTO);
     setSeleccion(null);
     setModo(null);
@@ -1223,6 +1233,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setAnclaje(producto.anclaje || { anclas: [], zonas: [] });
     setLadosPropios(producto.ladosPropios || {});
     setConjuntosPrendas(producto.conjuntos || []);
+    setMoldes(producto.moldes || {});
     setBordeContraste(producto.bordeContraste || BORDE_POR_DEFECTO);
     setSeleccion(null);
     setModo(null);
@@ -1245,6 +1256,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setAnclaje({ anclas: [], zonas: [] });
     setLadosPropios({});
     setConjuntosPrendas([]);
+    setMoldes({});
     setSeleccion(null);
     setModo(null);
     setError(null);
@@ -1613,6 +1625,45 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                   onChange={(e) => setTallaTrabajoPorRol((prev) => ({ ...prev, [piezaActiva]: e.target.value }))}>
                   {tallasDePieza.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
                 </Select>
+                {(() => {
+                  // Cambiar el molde de esta pieza SOLO en esta producción (p. ej.
+                  // MANGA → MANGA LARGA): diseño, zonas y calce siguen siendo suyos.
+                  const pd = piezasDisponibles.find((x) => x.clave === piezaActiva);
+                  if (!pd || pd.ladoDe) return null;
+                  const original = grupos.find((g) => g.id === pd.grupoId)?.piezas.find((gp) => gp.rol === pd.rol)?.piezaId;
+                  const cambiado = !!moldes[pd.clave] && moldes[pd.clave] !== original;
+                  const nombreDe = (id) => piezas.find((p) => p.id === id)?.nombre || '(pieza borrada)';
+                  return (
+                    <>
+                      <span className="text-xs text-faint-foreground">· molde:</span>
+                      <Select className={'max-w-[220px] ' + (cambiado ? 'border-primary text-primary' : '')} value={pd.piezaId}
+                        title="Cambiar el molde de esta pieza solo en esta producción: el diseño, las zonas y el calce se quedan; las anclas se recalculan sobre el molde nuevo."
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          // La talla de trabajo de la pieza vieja puede no existir en el molde nuevo.
+                          setTallaTrabajoPorRol((prev) => { const r = { ...prev }; delete r[pd.clave]; return r; });
+                          setMoldes((prev) => {
+                            const r = { ...prev };
+                            if (id === original) delete r[pd.clave]; else r[pd.clave] = id;
+                            return r;
+                          });
+                        }}>
+                        {original && <option value={original}>{nombreDe(original)} (de la prenda)</option>}
+                        {[...piezas].filter((p) => p.id !== original).sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))
+                          .map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                      </Select>
+                      {cambiado && (
+                        <Boton variante="fantasma" tamano="sm" type="button" title="Volver al molde de la prenda"
+                          onClick={() => {
+                            setMoldes((prev) => { const r = { ...prev }; delete r[pd.clave]; return r; });
+                            setTallaTrabajoPorRol((prev) => { const r = { ...prev }; delete r[pd.clave]; return r; });
+                          }}>
+                          Volver al original
+                        </Boton>
+                      )}
+                    </>
+                  );
+                })()}
                 <div className="ml-auto flex flex-wrap items-center gap-1">
                   {piezaObj && (
                     <Boton variante={espejando ? 'acento' : 'fantasma'} tamano="sm" type="button" onClick={() => setEspejando((v) => !v)}

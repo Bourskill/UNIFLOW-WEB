@@ -6,7 +6,7 @@
 const CLAVE = 'uniflow.borradorDiseno';
 
 /** Lo que define un producto en el editor (lo que se guarda en el servidor). */
-export function datosDelEditor({ nombre, grupoIds, disenoId, anclaje, bordeContraste, ladosPropios, conjuntos }) {
+export function datosDelEditor({ nombre, grupoIds, disenoId, anclaje, bordeContraste, ladosPropios, conjuntos, moldes }) {
   return {
     nombre: nombre || '', grupoIds: grupoIds || [], disenoId: disenoId || null,
     anclaje: anclaje || { anclas: [], zonas: [] }, bordeContraste: bordeContraste || null,
@@ -14,6 +14,8 @@ export function datosDelEditor({ nombre, grupoIds, disenoId, anclaje, bordeContr
     ladosPropios: ladosPropios && Object.keys(ladosPropios).length ? ladosPropios : {},
     // Conjuntos de prendas (dama / caballero...); sin ellos, ni aparece.
     ...(conjuntos?.length ? { conjuntos } : {}),
+    // Moldes cambiados en esta producción (MANGA → MANGA LARGA); sin ellos, ni aparece.
+    ...(moldes && Object.keys(moldes).length ? { moldes } : {}),
   };
 }
 

@@ -168,5 +168,29 @@ console.log('\n--- Conjuntos (dama / caballero) en UNA producción: cada jugador
   comprobar('Una línea sin conjunto elegido usa el primero', sinConjunto.length === 1 && sinConjunto[0].anchoCm === 38);
 })();
 
+console.log('\n--- Cambiar el molde de una pieza solo en una producción (MANGA → MANGA LARGA) ---');
+await (async function () {
+  var corta = { id: 'pz-corta', nombre: 'Manga corta', angulosPermitidos: [0], tela: null,
+    dimensionesPorTalla: { M: { anchoCm: 40, altoCm: 20 } }, geometriaPorTalla: { M: poligono(400, 200) } };
+  var larga = { id: 'pz-larga', nombre: 'Manga larga', angulosPermitidos: [0], tela: null,
+    dimensionesPorTalla: { M: { anchoCm: 40, altoCm: 60 } }, geometriaPorTalla: { M: poligono(400, 600) } };
+  var g = { id: 'g-cam', nombre: 'Camiseta', piezas: [{ piezaId: 'pz-corta', rol: 'Manga' }] };
+  var ref = { ref: { tipo: 'extremo', parte: 'abajo' }, modo: 'fijo', valor: 0 };
+  var anclaje = { anclas: [{ id: 'A1', pieza: 'Manga', x: { ref: { tipo: 'contorno', parte: 'centro' }, modo: 'fijo', valor: 0 }, y: ref }],
+    zonas: [{ id: 'Z1', pieza: 'Manga', tipo: 'texto', anclaX: 'A1', anclaY: 'A1', origen: 'centro', ancho: { modo: 'fijo', valor: 10 }, alto: { modo: 'fijo', valor: 4 }, campoPedido: 'numero' }] };
+  var original = { id: 'p1', nombre: 'Corta', grupoId: 'g-cam', anclaje: anclaje };
+  var copia = { id: 'p2', nombre: 'Larga', grupoId: 'g-cam', anclaje: anclaje, moldes: { Manga: 'pz-larga' } };
+  var lineas = [{ id: 'l1', productoId: 'p1', talla: 'M', nombre: '', numero: '7' }, { id: 'l2', productoId: 'p2', talla: 'M', nombre: '', numero: '7' }];
+  var r = resolverPiezasDePedido({ pedido: { lineas: lineas }, productos: [original, copia], grupos: [g], piezas: [corta, larga], disenos: [] });
+  var de = function (id) { return r.find(function (p) { return p.lineaPedidoId === id; }); };
+  comprobar('La producción con el molde cambiado saca la manga larga', de('l2').altoCm === 60, de('l2').altoCm);
+  comprobar('La otra producción (y la prenda) siguen con la corta', de('l1').altoCm === 20, de('l1').altoCm);
+  comprobar('La zona sigue en la pieza y se recalcula sobre el molde nuevo (abajo de la manga larga)',
+    de('l2').textos?.length === 1 && de('l2').textos[0].cyCm > 50, JSON.stringify(de('l2').textos?.map(function (t) { return t.cyCm; })));
+  var { gruposConMoldes } = await import('../src/dominio/moldesDeProduccion.js');
+  var dos = gruposConMoldes([g, { id: 'g-pant', nombre: 'Pant', piezas: [{ piezaId: 'x', rol: 'Manga' }] }], { 'g-cam::Manga': 'pz-larga' });
+  comprobar('Con varias prendas, cambia solo la pieza de esa prenda', dos[0].piezas[0].piezaId === 'pz-larga' && dos[1].piezas[0].piezaId === 'x');
+})();
+
 console.log('\n' + pasadas + ' pasadas · ' + fallos + ' fallidas');
 if (fallos > 0) process.exit(1);

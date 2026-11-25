@@ -359,10 +359,10 @@ export function eliminarGrupo(id) {
 // trabajo, para mostrar en vivo dónde cae cada ancla/zona (ver
 // motor/anclaje/resolver.js). grupoIds: array -- un solo elemento para un
 // producto de una prenda, varios para un kit multi-prenda.
-export function resolverAnclaje(grupoIds, tallaPorRol, anclaje) {
+export function resolverAnclaje(grupoIds, tallaPorRol, anclaje, moldes = null) {
   return pedirJson('/anclaje/resolver', {
     method: 'POST',
-    body: JSON.stringify({ grupoIds, tallaPorRol, anclaje }),
+    body: JSON.stringify({ grupoIds, tallaPorRol, anclaje, ...(moldes && Object.keys(moldes).length ? { moldes } : {}) }),
   });
 }
 

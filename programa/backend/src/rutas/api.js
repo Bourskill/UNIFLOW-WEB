@@ -7,6 +7,7 @@ import { generarPdfNesting, generarPdfPaginas } from '../motor/exportarPdf.js';
 import { armarMesas, piezasSinRepetir } from '../motor/mesas.js';
 import { campoDeZona } from '../motor/campoDeZona.js';
 import { conjuntosDe, tallasDeGrupos } from '../motor/conjuntos.js';
+import { gruposDeProduccion, gruposConMoldes } from '../dominio/moldesDeProduccion.js';
 import { conDocumentoIllustrator, entranEnIllustrator, partirParaIllustrator } from '../motor/illustrator/documentoAi.js';
 import { resolverPiezasDePedido, tallaRealDePieza } from '../motor/resolverPedido.js';
 import { resolver as resolverAnclaje } from '../motor/anclaje/resolver.js';
@@ -973,7 +974,7 @@ router.delete('/grupos/:id', async (req, res) => {
 // este endpoint SIEMPRE recibe el estado en vivo del formulario, nunca un
 // Producto ya persistido -- no hace falta aceptar el `grupoId` viejo acá.
 router.post('/anclaje/resolver', async (req, res) => {
-  const { grupoIds, tallaPorRol, anclaje } = req.body;
+  const { grupoIds, tallaPorRol, anclaje, moldes } = req.body;
   if (!Array.isArray(grupoIds) || grupoIds.length === 0 || !tallaPorRol || !anclaje) {
     return res.status(400).json({ error: 'Faltan grupoIds, tallaPorRol o anclaje' });
   }
@@ -983,7 +984,8 @@ router.post('/anclaje/resolver', async (req, res) => {
 
   let piezasDelGrupo;
   try {
-    piezasDelGrupo = resolverPiezasDeGrupos(gruposElegidos, piezas);
+    // Con los moldes cambiados de la producción que se está editando.
+    piezasDelGrupo = resolverPiezasDeGrupos(gruposConMoldes(gruposElegidos, moldes), piezas);
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
@@ -1252,7 +1254,7 @@ router.post('/exportar-mesas/:id', async (req, res) => {
   // que la tiene; sin conjuntos, la producción entera.
   const conjuntos = conjuntosDe(producto);
   const combinaciones = [...new Set(tallas)].flatMap((talla) => (conjuntos.length
-    ? conjuntos.filter((c) => tallasDeGrupos(c.grupoIds, grupos, piezas).includes(talla)).map((c) => ({ talla, conjuntoId: c.id }))
+    ? conjuntos.filter((c) => tallasDeGrupos(c.grupoIds, gruposDeProduccion(producto, grupos), piezas).includes(talla)).map((c) => ({ talla, conjuntoId: c.id }))
     : [{ talla }]));
   if (!combinaciones.length) return res.status(400).json({ error: 'Ningún conjunto de esta producción tiene esas tallas' });
   const pedido = {

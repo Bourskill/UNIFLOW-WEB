@@ -1,5 +1,6 @@
 import { ordenarTallasNatural } from '../constantes.js';
 import { conjuntosDe, tallasDeGrupos } from './conjuntos.js';
+import { gruposDeProduccion } from './moldesDeProduccion.js';
 
 // Utilidades de las producciones (antes "productos"), compartidas por Diseño
 // (las más recientes) y Producción (todas, para exportar por tallas).
@@ -24,14 +25,13 @@ export function ordenarPorReciente(producciones) {
 export function tallasDeProduccion(produccion, grupos, piezas) {
   // Con conjuntos (dama / caballero...): las tallas de cualquiera de ellos
   // (cada talla sale con los conjuntos que la tienen).
+  // Con sus moldes cambiados (MANGA → MANGA LARGA), las tallas de esos.
+  const propios = gruposDeProduccion(produccion, grupos);
   const deConjuntos = conjuntosDe(produccion);
   if (deConjuntos.length) {
-    return ordenarTallasNatural([...new Set(deConjuntos.flatMap((c) => tallasDeGrupos(c.grupoIds, grupos, piezas)))]);
+    return ordenarTallasNatural([...new Set(deConjuntos.flatMap((c) => tallasDeGrupos(c.grupoIds, propios, piezas)))]);
   }
-  const ids = produccion?.grupoIds || (produccion?.grupoId ? [produccion.grupoId] : []);
-  const conjuntos = ids
-    .map((id) => grupos.find((g) => g.id === id))
-    .filter(Boolean)
+  const conjuntos = propios
     .flatMap((g) => g.piezas)
     .map((gp) => piezas.find((p) => p.id === gp.piezaId))
     .filter((p) => p && !p.tallaUnica)

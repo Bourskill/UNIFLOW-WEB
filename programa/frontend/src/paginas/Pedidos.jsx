@@ -3,6 +3,7 @@ import { crearPedido, editarPedido, eliminarPedido, anidarDesdePedido, generarPd
 import { obtener } from '../datos/index.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { conjuntosDe, conjuntoDeLinea } from '../utilidades/conjuntos.js';
+import { gruposDeProduccion } from '../utilidades/moldesDeProduccion.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
 import { Boton, Campo, Input, InputMultilinea, Select, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 import { leerHoja, filasDeTexto, interpretarJugadores } from '../utilidades/hojaDeCalculo.js';
@@ -15,8 +16,8 @@ import { leerHoja, filasDeTexto, interpretarJugadores } from '../utilidades/hoja
 
 function gruposDelProducto(producto, grupos) {
   if (!producto) return [];
-  const ids = producto.grupoIds || (producto.grupoId ? [producto.grupoId] : []);
-  return ids.map((id) => grupos.find((g) => g.id === id)).filter(Boolean);
+  // Con los moldes que la producción cambió (MANGA → MANGA LARGA).
+  return gruposDeProduccion(producto, grupos);
 }
 
 // Las tallas que tienen TODAS las piezas de la producción (las de talla única
