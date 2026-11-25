@@ -251,9 +251,9 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
   const tallasDe = (id, conjuntoId) => tallasDelProducto(id, productos, grupos, piezas, conjuntoId);
   const conjuntosDeProduccion = (id) => conjuntosDe(productos.find((p) => p.id === id));
   const conConjuntos = lineas.some((l) => conjuntosDeProduccion(l.productoId).length > 1) || conjuntosDeProduccion(productoId).length > 1;
-  const columnas = 4 + (variosProductos ? 1 : 0) + (conConjuntos ? 1 : 0);
   const tallasPorDefecto = tallasDe(productoId);
   const variosProductos = productos.length > 1;
+  const columnas = 4 + (variosProductos ? 1 : 0) + (conConjuntos ? 1 : 0);
   const conPiezasExcluibles = lineas.some((l) => l.piezasExcluidas?.length);
   const [verPiezas, setVerPiezas] = useState(conPiezasExcluibles);
 

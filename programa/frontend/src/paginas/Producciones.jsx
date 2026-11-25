@@ -5,6 +5,7 @@ import { obtener } from '../datos/index.js';
 import { TarjetaProduccion } from '../componentes/TarjetaProduccion.jsx';
 import { Boton, Input, Tarjeta, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 import { ordenarPorReciente, tallasDeProduccion, nombreDeExportacion } from '../utilidades/producciones.js';
+import { pedirTexto } from '../componentes/pedirTexto.jsx';
 
 // Producción → Producciones: TODAS las producciones (Diseño muestra solo las
 // más recientes). Desde acá se exporta cada una por tallas: cada talla es
@@ -50,7 +51,7 @@ export function Producciones({ recargarSenal, onEditar }) {
   const [duplicandoId, setDuplicandoId] = useState(null);
   const [errorDuplicar, setErrorDuplicar] = useState(null);
   async function duplicar(p) {
-    const nombre = window.prompt('Nombre de la copia:', p.nombre + ' (copia)');
+    const nombre = await pedirTexto('Nombre de la copia:', p.nombre + ' (copia)');
     if (nombre === null) return;
     setErrorDuplicar(null);
     setDuplicandoId(p.id);

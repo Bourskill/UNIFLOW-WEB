@@ -42,6 +42,7 @@ import {
 import { LienzoAnclaje, COLOR, candidatosDe } from '../componentes/LienzoAnclaje.jsx';
 import { PanelConjuntos } from '../componentes/PanelConjuntos.jsx';
 import { SelectorColor } from '../componentes/SelectorColor.jsx';
+import { pedirTexto } from '../componentes/pedirTexto.jsx';
 import { gruposConMoldes } from '../utilidades/moldesDeProduccion.js';
 import { geometriaParaAnclaje, describirReferencia } from '../utilidades/geometriaAnclaje.js';
 
@@ -1295,7 +1296,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   async function duplicar(p) {
     // Lo pendiente del editor se guarda antes: la copia sale con lo último (o no se duplica).
     if (!(await dejarProductoActual())) return;
-    const nombre = window.prompt('Nombre de la copia:', p.nombre + ' (copia)');
+    const nombre = await pedirTexto('Nombre de la copia:', p.nombre + ' (copia)');
     if (nombre === null) return;
     setError(null);
     setDuplicandoId(p.id);
@@ -1327,7 +1328,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   async function guardarConjunto(zonaId) {
     const conjunto = conjuntoDeZona(anclaje, zonaId);
     if (!conjunto) return;
-    const nombreConjunto = window.prompt(
+    const nombreConjunto = await pedirTexto(
       'Nombre del conjunto (' + conjunto.zonas.length + ' zonas: ' + conjunto.zonas.map((z) => z.nombre || z.id).join(', ') + '):'
     );
     if (!nombreConjunto || !nombreConjunto.trim()) return;
@@ -1357,7 +1358,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
 
   async function guardarComoPlantilla() {
     setError(null);
-    const nombrePlantilla = window.prompt('¿Cómo se llama esta plantilla?');
+    const nombrePlantilla = await pedirTexto('¿Cómo se llama esta plantilla?');
     if (!nombrePlantilla || !nombrePlantilla.trim()) return;
     try {
       await crearPlantilla({
@@ -1509,7 +1510,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                 );
               })}
             </div>
-            <PanelConjuntos prendas={gruposSeleccionados} conjuntos={conjuntosPrendas} onCambiar={setConjuntosPrendas} />
+            <PanelConjuntos prendas={grupos} enProduccion={grupoIds} conjuntos={conjuntosPrendas} onCambiar={setConjuntosPrendas}
+              onAgregarPrenda={(id) => { if (!grupoIds.includes(id)) alternarGrupo(id); }} />
           </div>
 
           <div className="max-w-3xl">
@@ -1588,6 +1590,11 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                         )}
                         {pd.ladoDe && <span aria-hidden="true">⇋</span>}
                         {pd.rol}
+                        {moldes[pd.ladoDe || clave] && (
+                          <span className="rounded bg-primary/15 px-1 text-[10px] text-primary" title="Molde cambiado en esta producción">
+                            → {piezas.find((p) => p.id === moldes[pd.ladoDe || clave])?.nombre || 'otro molde'}
+                          </span>
+                        )}
                         {pd.par && !pd.ladoDe && (
                           <span className="rounded bg-surface-muted px-1 text-[10px] text-faint-foreground"
                             title={ladosPropios[clave] ? 'Va en par: el otro lado lleva su propio diseño' : 'Va en par: se corta x2 con el mismo diseño'}>

@@ -4,6 +4,7 @@ import { geometriaParaAnclaje } from '../utilidades/geometriaAnclaje.js';
 import { fondoDePieza, ejeDegradado } from '../utilidades/fondoPieza.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { espejarGeometriaPorTalla, claveDelOtroLado } from '../utilidades/espejoPieza.js';
+import { gruposDeProduccion } from '../utilidades/moldesDeProduccion.js';
 
 // Una producción (antes "producto") como tarjeta, igual que las de la
 // Biblioteca: miniatura con sus piezas -- la forma real, el fondo de color y
@@ -20,8 +21,8 @@ function tallaDeMuestra(pieza) {
 
 // Las piezas de la producción con lo que hace falta para dibujarlas.
 export function piezasDeProduccion(produccion, grupos, piezas, disenos) {
-  const ids = produccion.grupoIds || (produccion.grupoId ? [produccion.grupoId] : []);
-  const gruposDe = ids.map((id) => grupos.find((g) => g.id === id)).filter(Boolean);
+  // Con los moldes que la producción cambió (MANGA → MANGA LARGA): la miniatura muestra esos.
+  const gruposDe = gruposDeProduccion(produccion, grupos);
   const namespacear = gruposDe.length > 1;
   const diseno = disenos.find((d) => d.id === produccion.disenoId) || null;
   const salida = [];
