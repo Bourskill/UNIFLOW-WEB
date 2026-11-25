@@ -76,6 +76,20 @@ console.log('\n--- En el pedido, talla por talla ---');
   comprobar('sin calce, el ajuste sigue igual', conCalceResuelto('Frente', null, {}) === null);
 }
 
+console.log('\n--- Estirar el diseño ---');
+{
+  const img = { anchoImagen: 2000, altoImagen: 1000 }; // 2:1, la pieza 38x50
+  const lleno = colocarArte({ anchoCm: 38, altoCm: 50, ...img, ajuste: { base: 'estirar' } });
+  comprobar('100% × 100%: ocupa la pieza justa, deformado', cerca(lleno.x, 0) && cerca(lleno.y, 0) && cerca(lleno.ancho, 38) && cerca(lleno.alto, 50), JSON.stringify(lleno));
+  const mixto = colocarArte({ anchoCm: 38, altoCm: 50, ...img, ajuste: { base: 'estirar', estirarAncho: { modo: 'cm', valor: 30 }, estirarAlto: { modo: 'pct', valor: 50 }, alineacionV: 'arriba' } });
+  comprobar('ancho en cm y alto en %: cada uno el suyo, y se alinea igual', cerca(mixto.ancho, 30) && cerca(mixto.alto, 25) && cerca(mixto.x, 4) && cerca(mixto.y, 0), JSON.stringify(mixto));
+  const tallaGrande = colocarArte({ anchoCm: 44, altoCm: 56, ...img, ajuste: { base: 'estirar' } });
+  comprobar('en % sigue a la talla', cerca(tallaGrande.ancho, 44) && cerca(tallaGrande.alto, 56));
+  const conCalce = colocarArte({ anchoCm: 38, altoCm: 50, ...img, ajuste: { base: 'estirar', calceCm: [{ u: 0.5, v: 0, x: 19, y: 2 }] } });
+  comprobar('con calce: el tamaño es el elegido, el calce lo ubica', cerca(conCalce.ancho, 38) && cerca(conCalce.alto, 50) && cerca(conCalce.x + 0.5 * conCalce.ancho, 19) && cerca(conCalce.y, 2), JSON.stringify(conCalce));
+  comprobar('un ajuste viejo sigue igual (cubrir)', normalizarAjusteArte({}).base === 'cubrir');
+}
+
 console.log('\n--- Espejo del diseño ---');
 {
   const img = { anchoImagen: 2000, altoImagen: 1000 };

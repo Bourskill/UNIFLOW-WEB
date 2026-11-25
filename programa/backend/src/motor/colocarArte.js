@@ -8,7 +8,11 @@
 // (mismas coordenadas que zonas, textos y contorno).
 
 export const AJUSTE_ARTE_INICIAL = Object.freeze({
-  base: 'cubrir', // 'cubrir': llena la pieza (puede recortar) · 'encajar': entra entera
+  base: 'cubrir', // 'cubrir': llena la pieza (puede recortar) · 'encajar': entra entera · 'estirar': ancho y alto propios (deforma)
+  // Con 'estirar': cuánto mide el arte, cada lado por su cuenta, en % de la
+  // pieza (100% = la pieza justa) o en cm.
+  estirarAncho: { modo: 'pct', valor: 100 },
+  estirarAlto: { modo: 'pct', valor: 100 },
   escala: 100, // % sobre la base
   alineacionH: 'centro', // 'izquierda' | 'centro' | 'derecha'
   alineacionV: 'centro', // 'arriba' | 'centro' | 'abajo'
@@ -79,10 +83,17 @@ export function conCalceResuelto(clave, ajuste, anclasResueltas) {
   return { ...ajuste, calceCm };
 }
 
+function medidaDeEstirar(m) {
+  const modo = m?.modo === 'cm' ? 'cm' : 'pct';
+  return { modo, valor: Math.min(Math.max(numero(m?.valor, modo === 'cm' ? 30 : 100), 0.1), modo === 'cm' ? 1000 : 1000) };
+}
+
 export function normalizarAjusteArte(ajuste) {
   const a = ajuste || {};
   return {
-    base: a.base === 'encajar' ? 'encajar' : 'cubrir',
+    base: ['encajar', 'estirar'].includes(a.base) ? a.base : 'cubrir',
+    estirarAncho: medidaDeEstirar(a.estirarAncho),
+    estirarAlto: medidaDeEstirar(a.estirarAlto),
     escala: Math.min(Math.max(numero(a.escala, 100), 1), 1000),
     alineacionH: ['izquierda', 'derecha'].includes(a.alineacionH) ? a.alineacionH : 'centro',
     alineacionV: ['arriba', 'abajo'].includes(a.alineacionV) ? a.alineacionV : 'centro',
@@ -104,10 +115,17 @@ export function colocarArte({ anchoCm, altoCm, anchoImagen, altoImagen, ajuste }
   // Base: la imagen sin deformar, cubriendo o encajando en la pieza.
   const masAnchaQueLaPieza = proporcion > anchoCm / altoCm;
   let ancho, alto;
-  if (masAnchaQueLaPieza === (a.base === 'cubrir')) { alto = altoCm; ancho = alto * proporcion; }
-  else { ancho = anchoCm; alto = ancho / proporcion; }
-  ancho *= a.escala / 100;
-  alto *= a.escala / 100;
+  const estirar = a.base === 'estirar';
+  if (estirar) {
+    // Estirar: cada lado con su medida, sin respetar la proporción del arte.
+    ancho = a.estirarAncho.modo === 'cm' ? a.estirarAncho.valor : (anchoCm * a.estirarAncho.valor) / 100;
+    alto = a.estirarAlto.modo === 'cm' ? a.estirarAlto.valor : (altoCm * a.estirarAlto.valor) / 100;
+  } else {
+    if (masAnchaQueLaPieza === (a.base === 'cubrir')) { alto = altoCm; ancho = alto * proporcion; }
+    else { ancho = anchoCm; alto = ancho / proporcion; }
+    ancho *= a.escala / 100;
+    alto *= a.escala / 100;
+  }
 
   // Con puntos de calce resueltos, ellos mandan (la alineación y el
   // corrimiento no se usan).
@@ -120,6 +138,11 @@ export function colocarArte({ anchoCm, altoCm, anchoImagen, altoImagen, ajuste }
     const ts = calce.map((c) => [c.x, c.y]);
     const media = (l) => [l.reduce((s, q) => s + q[0], 0) / l.length, l.reduce((s, q) => s + q[1], 0) / l.length];
     const pm = media(ps), tm = media(ts);
+    // Estirado, el tamaño es el elegido: el calce solo ubica el arte.
+    if (estirar) {
+      const mu = calce.reduce((s, c) => s + c.u, 0) / calce.length, mv = calce.reduce((s, c) => s + c.v, 0) / calce.length;
+      return { x: tm[0] - ancho * mu, y: tm[1] - alto * mv, ancho, alto, espejoH: a.espejoH, espejoV: a.espejoV };
+    }
     if (calce.length > 1) {
       // Escala uniforme por mínimos cuadrados (exacta con dos puntos alineados).
       let num = 0, den = 0;

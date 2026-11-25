@@ -41,7 +41,8 @@ export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando, calce
           <span className="font-medium text-foreground">Tamaño base</span>
           <div className="flex gap-1">
             {[['cubrir', 'Cubrir', 'Llena toda la pieza sin deformar (puede recortar los costados)'],
-              ['encajar', 'Encajar', 'Entra entera en la pieza sin deformar (puede dejar espacio)']].map(([id, texto, titulo]) => (
+              ['encajar', 'Encajar', 'Entra entera en la pieza sin deformar (puede dejar espacio)'],
+              ['estirar', 'Estirar', 'Ancho y alto a tu medida (en % de la pieza o en cm), deformando el diseño']].map(([id, texto, titulo]) => (
               <button key={id} type="button" title={titulo} onClick={() => poner({ base: id })}
                 className={'rounded-md border px-2.5 py-1 ' + (a.base === id ? 'border-primary bg-primary-soft text-primary' : 'border-border text-muted-foreground hover:border-primary')}>
                 {texto}
@@ -63,7 +64,29 @@ export function PanelAjusteArte({ ajuste, onCambiar, editando, onEditando, calce
           </div>
         </div>
 
-        <div className={'flex flex-col gap-1.5 ' + (escalaPorCalce ? 'pointer-events-none opacity-40' : '')} aria-disabled={escalaPorCalce}>
+        {a.base === 'estirar' && (
+          <div className="flex flex-col gap-1.5">
+            <span className="font-medium text-foreground">Estirar a</span>
+            {[['estirarAncho', 'Ancho'], ['estirarAlto', 'Alto']].map(([campo, etiqueta]) => (
+              <div key={campo} className="flex items-center gap-2">
+                <span className="w-10 text-faint-foreground">{etiqueta}</span>
+                <div className="w-20">
+                  <InputNumero value={a[campo].valor} step={a[campo].modo === 'cm' ? 0.5 : 1} wheelStep={a[campo].modo === 'cm' ? 1 : 5} min={0.1} max={1000}
+                    onChange={(n) => poner({ [campo]: { ...a[campo], valor: n } })} aria-label={etiqueta + ' del diseño estirado'} />
+                </div>
+                <select value={a[campo].modo} aria-label={'Unidad del ' + etiqueta.toLowerCase()}
+                  onChange={(ev) => poner({ [campo]: { modo: ev.target.value, valor: ev.target.value === 'cm' ? 30 : 100 } })}
+                  className="rounded-md border border-border bg-surface px-1.5 py-1 text-xs text-foreground">
+                  <option value="pct">% de la pieza</option>
+                  <option value="cm">cm</option>
+                </select>
+              </div>
+            ))}
+            <span className="text-[11px] text-faint-foreground">100% × 100% = el diseño ocupa la pieza justa, deformado.</span>
+          </div>
+        )}
+
+        <div className={'flex flex-col gap-1.5 ' + (escalaPorCalce || a.base === 'estirar' ? 'pointer-events-none opacity-40' : '')} aria-disabled={escalaPorCalce || a.base === 'estirar'}>
           <span className="font-medium text-foreground">Escala</span>
           <div className="flex items-center gap-2">
             <input type="range" min={10} max={300} step={1} value={Math.min(Math.max(a.escala, 10), 300)}

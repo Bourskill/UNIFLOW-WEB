@@ -21,6 +21,7 @@ import { Boton, Campo, Input, InputMultilinea, Select, Tarjeta, Chip, Aviso, Ayu
 import { InputNumero } from '../componentes/InputNumero.jsx';
 import { textoDeTalla, COLOR_TALLA, escalaDentroDelMolde } from '../utilidades/capsulaTalla.js';
 import { contornosDeZona } from '../utilidades/contornosTexto.js';
+import { traductorDeClaves, anclajeTraducido, disenoTraducido, porClaveTraducido } from '../utilidades/clavesDePiezas.js';
 import { PanelDock } from '../componentes/PanelDock.jsx';
 import { PanelTexto } from '../componentes/PanelTexto.jsx';
 import { PanelAjusteArte } from '../componentes/PanelAjusteArte.jsx';
@@ -349,23 +350,49 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     firmaPiezasDeGrupos]);
 
 
-  // Elegir/sacar una prenda de la combinación reinicia el anclaje en curso
-  // -- combinar otras prendas cambia qué claves existen (namespace incluido),
-  // así que cualquier ancla/zona ya armada quedaría apuntando a algo que ya
-  // no es lo mismo. Mismo criterio que ya tenía el selector simple de antes.
-  function alternarGrupo(id) {
-    if ((anclaje.zonas.length > 0 || anclaje.anclas.length > 0) &&
-        !window.confirm('Cambiar las prendas de la producción borra las ' + anclaje.zonas.length + ' zona(s) que armaste (quedan apuntando a otras piezas). ¿Seguir?')) {
-      return;
+  // Agregar o sacar una prenda NO borra lo armado: las claves de las piezas
+  // cambian (con varias prendas llevan el id de la prenda adelante), así que
+  // se traducen en el anclaje, el diseño, los lados en par y las tallas de
+  // trabajo (utilidades/clavesDePiezas.js). Solo se quita lo de la prenda que
+  // se saca (y eso sí se confirma).
+  async function alternarGrupo(id) {
+    const antes = grupoIds;
+    const despues = antes.includes(id) ? antes.filter((x) => x !== id) : [...antes, id];
+    const traducir = traductorDeClaves(antes, despues);
+    const sacando = !despues.includes(id);
+    if (sacando) {
+      const deEsa = anclaje.zonas.filter((z) => traducir(z.pieza) === null).length;
+      const nombreG = grupos.find((g) => g.id === id)?.nombre || 'esa prenda';
+      if ((deEsa > 0 || Object.keys(disenoSeleccionado?.imagenesPorPieza || {}).some((k) => traducir(k) === null)) &&
+          !window.confirm('Sacar «' + nombreG + '» quita sus ' + deEsa + ' zona(s) y su diseño. Lo de las demás prendas queda igual. ¿Seguir?')) {
+        return;
+      }
     }
-    setGrupoIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-    setAnclaje({ anclas: [], zonas: [] });
-    setLadosPropios({});
+    setGrupoIds(despues);
+    setAnclaje((prev) => anclajeTraducido(prev, traducir));
+    setLadosPropios((prev) => porClaveTraducido(prev, traducir));
+    setTallaTrabajoPorRol((prev) => porClaveTraducido(prev, traducir));
     setSeleccion(null);
     setModo(null);
-    setDisenoId('');
-    setTallaTrabajoPorRol({});
+    // El diseño, con sus imágenes y ajustes bajo las claves nuevas. Si otra
+    // producción usa el mismo diseño, no se le cambia: esta pasa a una copia.
+    const diseno = disenoSeleccionado;
+    if (!diseno || despues.length === 0) { if (despues.length === 0) setDisenoId(''); return; }
+    const cambios = { ...disenoTraducido(diseno, traducir), grupoIds: despues };
+    try {
+      const compartido = productos.some((p) => p.id !== editandoId && p.disenoId === diseno.id);
+      if (compartido) {
+        const copia = await crearDiseno({ nombre: diseno.nombre + ' (' + gruposDeIds(despues).map((g) => g.nombre).join(' + ') + ')', ...cambios });
+        guardarDisenoLocal(copia);
+        setDisenoId(copia.id);
+      } else {
+        guardarDisenoLocal(await editarDiseno(diseno.id, cambios));
+      }
+    } catch (e) {
+      setErrorDiseno('No se pudo pasar el diseño a las prendas nuevas: ' + e.message);
+    }
   }
+  const gruposDeIds = (ids) => ids.map((x) => grupos.find((g) => g.id === x)).filter(Boolean);
 
   // El nombre del diseño se edita en su campo y se guarda al salir de él.
   useEffect(() => { setNombreDiseno(disenoSeleccionado?.nombre || ''); }, [disenoSeleccionado?.id, disenoSeleccionado?.nombre]);
