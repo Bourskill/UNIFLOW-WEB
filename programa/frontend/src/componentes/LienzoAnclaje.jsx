@@ -109,8 +109,10 @@ function offsetPoligono(vertices, distancia) {
 
 // Los candidatos que de verdad se pueden reencontrar en otra talla: nunca
 // se inventa uno. El orden en que se agregan es la prioridad al deduplicar
-// (sinMontonera): zona > piquete > extremo > borde > vértice -- un punto
+// (sinMontonera): piquete > zona > extremo > borde > vértice -- un punto
 // REAL del contorno gana al tirador gris del rectángulo que caiga encima.
+// El piquete gana incluso a la zona que ya está anclada en él: así una
+// segunda zona se puede pegar al MISMO piquete (y no a la primera zona).
 export function candidatosDe(geo, zonasDeEstaPieza, zonaEditandoId, leyenda) {
   if (!geo) return [];
   const W = geo.pieza.ancho_cm, H = geo.pieza.alto_cm;
@@ -128,7 +130,7 @@ export function candidatosDe(geo, zonasDeEstaPieza, zonaEditandoId, leyenda) {
       const parteOrigen = PARTE_DESDE_ORIGEN[origenZona] || origenZona;
       for (const [parte, fx, fy, etiqueta] of PARTES_CAJA) {
         out.push({
-          clase: 'zona', prioridad: 0, etiqueta: 'Zona ' + z.id + ' · ' + etiqueta,
+          clase: 'zona', prioridad: 1, etiqueta: 'Zona ' + z.id + ' · ' + etiqueta,
           x: caja.x + caja.ancho * fx, y: caja.y + caja.alto * fy,
           ref: { tipo: 'zona', zona: z.id, parte },
           origenActual: z.id === zonaEditandoId && parte === parteOrigen,
@@ -142,7 +144,7 @@ export function candidatosDe(geo, zonasDeEstaPieza, zonaEditandoId, leyenda) {
       const p = geo.piquetes[i];
       const rp = rel(p.x, p.y);
       out.push({
-        clase: 'piquete', prioridad: 1, etiqueta: 'Piquete ' + (i + 1) + ' de ' + geo.piquetes.length,
+        clase: 'piquete', prioridad: 0, etiqueta: 'Piquete ' + (i + 1) + ' de ' + geo.piquetes.length,
         x: p.x, y: p.y,
         ref: { tipo: 'piquete', indice: i, total: geo.piquetes.length, parte: 'centro', rx: rp.rx, ry: rp.ry },
       });
@@ -495,7 +497,11 @@ const CandidatosCapa = memo(function CandidatosCapa({ cands, modo, onElegirCandi
   ));
 });
 
-const AnclasCapa = memo(function AnclasCapa({ anclasResueltas, anclaSeleccionadaId, onSeleccionarAncla, R }) {
+const AnclasCapa = memo(function AnclasCapa({ anclasResueltas, anclaSeleccionadaId, onSeleccionarAncla, R, modo }) {
+  // Mientras se elige un punto (crear zona, recolocar, cruzar...), las
+  // cruces no atrapan el clic: el piquete que tienen debajo se puede elegir
+  // otra vez para anclar OTRA zona en el mismo lugar.
+  const pasante = !!modo;
   return anclasResueltas.map((a) => {
     const elegida = a.id === anclaSeleccionadaId;
     const r2c = R * 2;
@@ -503,7 +509,7 @@ const AnclasCapa = memo(function AnclasCapa({ anclasResueltas, anclaSeleccionada
       <g
         key={a.id}
         onClick={(e) => { e.stopPropagation(); onSeleccionarAncla(a.id); }}
-        style={{ cursor: 'pointer' }}
+        style={{ cursor: 'pointer', pointerEvents: pasante ? 'none' : undefined }}
       >
         <circle cx={a.x} cy={a.y} r={r2c * 2.2} fill="transparent" />
         <circle cx={a.x} cy={a.y} r={r2c} fill="none" stroke={COLOR.ancla} strokeWidth={elegida ? R * 0.5 : R * 0.3} vectorEffect="non-scaling-stroke" />
@@ -1104,7 +1110,7 @@ export function LienzoAnclaje({
             ancla son mecanismo interno de las zonas, no parte del diseño --
             el interruptor "zona" las oculta junto con el resto del "cuadrito". */}
         {leyenda.zonas !== false && (
-          <AnclasCapa anclasResueltas={anclasResueltas} anclaSeleccionadaId={anclaSeleccionadaId} onSeleccionarAncla={onSeleccionarAncla} R={R} />
+          <AnclasCapa anclasResueltas={anclasResueltas} anclaSeleccionadaId={anclaSeleccionadaId} onSeleccionarAncla={onSeleccionarAncla} R={R} modo={modo} />
         )}
       </svg>
 

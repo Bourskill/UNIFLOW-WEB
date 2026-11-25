@@ -26,13 +26,18 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 const OPS = pdfjs.OPS;
 const DATOS_DOCUMENTO = readFileSync(new URL('./datosDocumento.txt', import.meta.url), 'latin1');
 const SEPARACION_MESAS_PT = 40;
-const ANCHO_MAXIMO_FILA_PT = 15000; // el lienzo de Illustrator mide 16383 pt
+const SEPARACION_BLOQUES_PT = 160; // entre jugadores (o tallas): se ve dónde termina cada uno
+// El lienzo de Illustrator mide 16383 pt; el arte recortado (el diseño
+// entero detrás de la máscara de la pieza) sobresale de las mesas hasta
+// ~1000 pt, y también tiene que caer adentro.
+const ARTE_QUE_SOBRESALE_PT = 1100;
+const ANCHO_MAXIMO_FILA_PT = 16383 - 2 * ARTE_QUE_SOBRESALE_PT - 400;
 const LIENZO_CENTRO = 8191.5;
 const BLOQUE = 65536;
 
 /** Devuelve el PDF con el documento de Illustrator adentro. */
-export async function conDocumentoIllustrator(bytesPdf, { nombresDeMesas = [], titulo = 'UNIFLOW', artesNativos = null, cortesLaser = null } = {}) {
-  const partes = await documentoAiDePdf(bytesPdf, { nombresDeMesas, titulo, artesNativos, cortesLaser });
+export async function conDocumentoIllustrator(bytesPdf, { nombresDeMesas = [], gruposDeMesas = null, titulo = 'UNIFLOW', artesNativos = null, cortesLaser = null } = {}) {
+  const partes = await documentoAiDePdf(bytesPdf, { nombresDeMesas, gruposDeMesas, titulo, artesNativos, cortesLaser });
   return incrustarDocumentoAi(bytesPdf, partes);
 }
 
@@ -111,7 +116,7 @@ function fechaPdf(d) {
 // ---------------------------------------------------------------------------
 // Traducir el PDF a texto .ai
 
-export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo = 'UNIFLOW', artesNativos = null, cortesLaser = null } = {}) {
+export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], gruposDeMesas = null, titulo = 'UNIFLOW', artesNativos = null, cortesLaser = null } = {}) {
   const lector = await pdfjs.getDocument({
     data: new Uint8Array(bytesPdf), disableFontFace: true, fontExtraProperties: true,
     useSystemFonts: false, isEvalSupported: false, verbosity: 0,
@@ -120,7 +125,7 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
   for (let n = 1; n <= lector.numPages; n++) {
     const pagina = await lector.getPage(n);
     const [x0, y0, x1, y1] = pagina.view;
-    paginas.push({ pagina, ancho: x1 - x0, alto: y1 - y0, origen: [x0, y0] });
+    paginas.push({ pagina, ancho: x1 - x0, alto: y1 - y0, origen: [x0, y0], grupo: gruposDeMesas ? gruposDeMesas[n - 1] : undefined });
   }
   const mesas = acomodarMesas(paginas);
   // Coordenadas del lienzo de Illustrator (Y hacia abajo, 0 a 16383): el
@@ -169,7 +174,7 @@ export async function documentoAiDePdf(bytesPdf, { nombresDeMesas = [], titulo =
 // es el límite donde se puede dibujar.
 // Lo que entra en UN documento de Illustrator: el lienzo (16383 pt por lado,
 // con un margen) y hasta 1000 mesas de trabajo.
-const LIENZO_UTIL_PT = 16383 - 400;
+const LIENZO_UTIL_PT = 16383 - 2 * ARTE_QUE_SOBRESALE_PT;
 const MAX_MESAS_ILLUSTRATOR = 1000;
 const CM_A_PT = 72 / 2.54;
 
@@ -177,7 +182,7 @@ const CM_A_PT = 72 / 2.54;
 export function entranEnIllustrator(mesasCm) {
   if (mesasCm.length === 0) return true;
   if (mesasCm.length > MAX_MESAS_ILLUSTRATOR) return false;
-  const lugar = acomodarMesas(mesasCm.map((m) => ({ ancho: m.anchoLienzoCm * CM_A_PT, alto: m.altoLienzoCm * CM_A_PT })));
+  const lugar = acomodarMesas(mesasCm.map((m) => ({ ancho: m.anchoLienzoCm * CM_A_PT, alto: m.altoLienzoCm * CM_A_PT, grupo: m.grupo })));
   const ancho = Math.max(...lugar.map((m) => m.der)) - Math.min(...lugar.map((m) => m.izq));
   const alto = Math.max(...lugar.map((m) => m.arriba)) - Math.min(...lugar.map((m) => m.abajo));
   return ancho <= LIENZO_UTIL_PT && alto <= LIENZO_UTIL_PT;
@@ -206,22 +211,67 @@ export function partirParaIllustrator(bloques) {
   return partes.length ? partes : [[]];
 }
 
-function acomodarMesas(paginas) {
-  const ancho = (p) => p.ancho + SEPARACION_MESAS_PT;
-  const area = paginas.reduce((t, p) => t + ancho(p) * (p.alto + SEPARACION_MESAS_PT), 0);
-  const masAncha = Math.max(...paginas.map(ancho));
-  const fila = Math.max(masAncha, Math.min(ANCHO_MAXIMO_FILA_PT, Math.sqrt(area) * 1.2));
-  const mesas = [];
-  let x = 0, techo = 0, altoFila = 0;
-  for (const p of paginas) {
-    if (x > 0 && x + p.ancho > fila) {
-      techo -= altoFila + SEPARACION_MESAS_PT;
-      x = 0;
-      altoFila = 0;
+// Ordenadas por BLOQUE (`grupo` de cada página: un jugador, una talla): las
+// mesas de un bloque van juntas en su renglón, en el orden de la prenda, y
+// cada bloque arranca aparte -- nunca un jugador partido entre dos filas
+// mezclado con el siguiente. Los bloques se acomodan uno al lado del otro
+// (con más aire entre bloques que entre mesas), en filas; como los bloques de
+// una talla son iguales, quedan en grilla: la misma pieza, en la misma
+// columna. Sin `grupo`, todas son un solo bloque.
+export function acomodarMesas(paginas) {
+  if (!paginas.length) return [];
+  const area = paginas.reduce((t, p) => t + (p.ancho + SEPARACION_MESAS_PT) * (p.alto + SEPARACION_MESAS_PT), 0);
+  const masAncha = Math.max(...paginas.map((p) => p.ancho));
+  const cuadrada = Math.max(masAncha, Math.min(ANCHO_MAXIMO_FILA_PT, Math.sqrt(area) * 1.2));
+  // Más o menos cuadrado; si así no entra a lo alto del lienzo, a todo el
+  // ancho (entran más bloques por fila, y más prendas por archivo).
+  const lugar = acomodarConAncho(paginas, cuadrada);
+  if (cuadrada >= ANCHO_MAXIMO_FILA_PT) return lugar;
+  const alto = Math.max(...lugar.map((m) => m.arriba)) - Math.min(...lugar.map((m) => m.abajo));
+  return alto <= LIENZO_UTIL_PT ? lugar : acomodarConAncho(paginas, Math.max(masAncha, ANCHO_MAXIMO_FILA_PT));
+}
+
+function acomodarConAncho(paginas, fila) {
+
+  // Los bloques (páginas seguidas del mismo grupo), cada uno armado en su
+  // propio renglón (o varios, si no entra en el ancho).
+  const bloques = [];
+  paginas.forEach((p, i) => {
+    const clave = p.grupo === undefined ? '' : p.grupo;
+    const u = bloques[bloques.length - 1];
+    if (u && u.clave === clave) u.indices.push(i); else bloques.push({ clave, indices: [i] });
+  });
+  for (const b of bloques) {
+    let x = 0, techo = 0, altoFila = 0;
+    b.lugares = [];
+    b.ancho = 0;
+    for (const i of b.indices) {
+      const p = paginas[i];
+      if (x > 0 && x + p.ancho > fila) { techo -= altoFila + SEPARACION_MESAS_PT; x = 0; altoFila = 0; }
+      b.lugares.push({ i, x, y: techo });
+      altoFila = Math.max(altoFila, p.alto);
+      b.ancho = Math.max(b.ancho, x + p.ancho);
+      x += p.ancho + SEPARACION_MESAS_PT;
     }
-    mesas.push({ izq: x, arriba: techo, der: x + p.ancho, abajo: techo - p.alto });
-    altoFila = Math.max(altoFila, p.alto);
-    x += p.ancho + SEPARACION_MESAS_PT;
+    b.alto = -techo + altoFila;
+  }
+
+  const mesas = new Array(paginas.length);
+  let x = 0, techo = 0, altoFila = 0, formaFila = null;
+  // Un bloque de otra forma (las piezas de todos, otra prenda) arranca fila
+  // nueva: así cada fila es una grilla pareja.
+  const formaDe = (b) => b.indices.map((i) => Math.round(paginas[i].ancho) + 'x' + Math.round(paginas[i].alto)).join();
+  for (const b of bloques) {
+    const forma = formaDe(b);
+    if (x > 0 && (x + b.ancho > fila || forma !== formaFila)) { techo -= altoFila + SEPARACION_BLOQUES_PT; x = 0; altoFila = 0; }
+    formaFila = forma;
+    for (const l of b.lugares) {
+      const p = paginas[l.i];
+      const izq = x + l.x, arriba = techo + l.y;
+      mesas[l.i] = { izq, arriba, der: izq + p.ancho, abajo: arriba - p.alto };
+    }
+    altoFila = Math.max(altoFila, b.alto);
+    x += b.ancho + SEPARACION_BLOQUES_PT;
   }
   return mesas;
 }

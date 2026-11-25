@@ -1230,6 +1230,8 @@ router.post('/exportar-mesas/:id', async (req, res) => {
   piezasDeMesas = await ajustarTextosDePiezas(piezasDeMesas, obtenerMedidor);
 
   const todasLasMesas = armarMesas(piezasDeMesas);
+  // En Illustrator, cada talla y cada prenda en su propio bloque de mesas.
+  for (const m of todasLasMesas) m.grupo = m.talla + '|' + prendaDeMesa(m);
   const variasTallas = new Set(todasLasMesas.map((m) => m.talla)).size > 1;
   // Si no entran en un solo documento de Illustrator, en varios archivos
   // (sin separar una talla); cada pedido trae UNA parte.
@@ -1255,6 +1257,7 @@ router.post('/exportar-mesas/:id', async (req, res) => {
       titulo,
       artesNativos,
       cortesLaser,
+      gruposDeMesas: mesas.map((m) => m.grupo),
       // Solo la pieza: Illustrator ya les pone su número adelante ("01 - ...").
       nombresDeMesas: mesas.map((m) => (variasTallas ? m.talla + ' · ' : '') + (m.piezas[0]?.piezaId || m.nombre) + notaDeMesa(m)),
     });
@@ -1278,6 +1281,14 @@ const MAX_PRENDAS_CON_ILLUSTRATOR_WEB = 3;
 
 // La nota en el nombre de la mesa (se ve en Illustrator, no se imprime) cuando
 // un texto salió sin la letra que su fuente no trae: "⚠ revisar PENA→PEÑA".
+// La prenda de una mesa: con varias prendas, la pieza se llama
+// "PRENDA · PIEZA" (resolverPedido.js); con una sola, no hay prefijo.
+function prendaDeMesa(mesa) {
+  const id = String(mesa.piezas?.[0]?.piezaId || '');
+  const corte = id.indexOf(' · ');
+  return corte > 0 ? id.slice(0, corte) : '';
+}
+
 function notaDeMesa(mesa) {
   const cambios = (mesa.piezas || []).flatMap((p) => (p.textos || []))
     .filter((t) => t.ajuste?.sustituciones?.length)
@@ -1324,7 +1335,10 @@ router.post('/exportar-pedido/:id', async (req, res) => {
   // de un jugador. Cada pedido trae UNA parte (parte = 1, 2...).
   const bloques = [];
   for (const m of todasLasMesas) {
-    const clave = iguales.has(m.piezas[0]?.piezaId) ? m : m.piezas[0]?.lineaPedidoId;
+    const deTodos = iguales.has(m.piezas[0]?.piezaId);
+    const clave = deTodos ? m : m.piezas[0]?.lineaPedidoId;
+    // En Illustrator: las piezas de todos juntas en su bloque, y cada jugador en el suyo.
+    m.grupo = deTodos ? '__todos__' : 'j:' + m.piezas[0]?.lineaPedidoId;
     const ultimo = bloques[bloques.length - 1];
     if (ultimo && ultimo.clave === clave) ultimo.mesas.push(m); else bloques.push({ clave, mesas: [m] });
   }
@@ -1347,7 +1361,7 @@ router.post('/exportar-pedido/:id', async (req, res) => {
   // solo con pocas prendas -- si no, sale el PDF solo (Illustrator lo abre igual).
   if (entranEnIllustrator(mesas) && (process.env.UNIFLOW_CARPETA || lineas.length <= MAX_PRENDAS_CON_ILLUSTRATOR_WEB)) {
     try {
-      pdfBytes = await conDocumentoIllustrator(pdfBytes, { titulo: (pedido.cliente || 'Pedido') + ' ' + talla, artesNativos, cortesLaser, nombresDeMesas });
+      pdfBytes = await conDocumentoIllustrator(pdfBytes, { titulo: (pedido.cliente || 'Pedido') + ' ' + talla, artesNativos, cortesLaser, nombresDeMesas, gruposDeMesas: mesas.map((m) => m.grupo) });
     } catch (error) {
       console.error('No se pudo agregar el documento de Illustrator: ' + error.message);
     }

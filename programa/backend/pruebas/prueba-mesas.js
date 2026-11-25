@@ -143,5 +143,31 @@ console.log('\n--- Muchos jugadores: en varios archivos si no entra en Illustrat
   comprobar('más de 1000 mesas: se parte aunque entren en el lienzo', porCantidad.length >= 2 && porCantidad.every((p) => p.length <= 1000));
 }
 
+console.log('\n--- Mesas ordenadas por jugador en Illustrator ---');
+{
+  const { acomodarMesas } = await import('../src/motor/illustrator/documentoAi.js');
+  const pt = 72 / 2.54;
+  // Piezas de todos (4 chicas) y 8 jugadores con frente, espalda y pantaloneta.
+  const paginas = [
+    ...Array.from({ length: 4 }, () => ({ ancho: 40 * pt, alto: 10 * pt, grupo: 'todos' })),
+    ...Array.from({ length: 8 }, (_, j) => [[60, 76], [60, 80], [82, 61]].map(([w, h]) => ({ ancho: w * pt, alto: h * pt, grupo: 'j' + j }))).flat(),
+  ];
+  const lugar = acomodarMesas(paginas);
+  const deGrupo = (g) => lugar.filter((_, i) => paginas[i].grupo === g);
+  comprobar('las piezas de cada jugador van en el mismo renglón',
+    Array.from({ length: 8 }, (_, j) => deGrupo('j' + j)).every((ms) => ms.every((m) => m.arriba === ms[0].arriba)));
+  const filaDe = (g) => deGrupo(g)[0].arriba;
+  comprobar('las de todos van solas en su fila, arriba', deGrupo('todos').every((m) => m.arriba === 0) &&
+    Array.from({ length: 8 }, (_, j) => filaDe('j' + j)).every((y) => y < 0));
+  // Grilla: la misma pieza de cada jugador, en la misma columna (dos valores de x posibles por pieza a lo sumo).
+  const columnas = [0, 1, 2].map((k) => new Set(Array.from({ length: 8 }, (_, j) => Math.round(deGrupo('j' + j)[k].izq))).size);
+  comprobar('quedan en grilla (cada pieza en su columna)', columnas.every((n) => n === columnas[0]), columnas);
+  const ancho = Math.max(...lugar.map((m) => m.der)) - Math.min(...lugar.map((m) => m.izq));
+  const alto = Math.max(...lugar.map((m) => m.arriba)) - Math.min(...lugar.map((m) => m.abajo));
+  comprobar('con aire para el arte que sobresale, adentro del lienzo de 16383 pt', ancho + 2000 < 16383 && alto + 2000 < 16383, [Math.round(ancho), Math.round(alto)]);
+  const sinGrupo = acomodarMesas(paginas.map(({ ancho: a, alto: h }) => ({ ancho: a, alto: h })));
+  comprobar('sin grupos: todas seguidas, como antes', sinGrupo.length === paginas.length && sinGrupo[0].izq === 0);
+}
+
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');
 process.exit(fallos ? 1 : 0);
