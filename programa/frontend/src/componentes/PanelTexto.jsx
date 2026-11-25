@@ -6,7 +6,7 @@ import { NOMBRE_PESO, urlDeMuestra } from '../utilidades/bancoFuentes.js';
 import { useFuentesWeb, cssDeFamilia } from './useFuentesWeb.js';
 import { InputNumero } from './InputNumero.jsx';
 import { Ayuda } from './ui.jsx';
-import { contornosDeZona, CONTORNOS_MAX, CONTORNO_ANILLO_MAX_CM } from '../utilidades/contornosTexto.js';
+import { contornosDeZona, CONTORNOS_MAX, CONTORNO_ANILLO_MAX_CM, CONTORNO_PCT_MAX } from '../utilidades/contornosTexto.js';
 
 // Estilo del texto de una zona (nombre, número o texto fijo): fuente, color,
 // espaciado entre letras, alineación y contornos de color (uno o varios). Todo lo que se elige
@@ -266,7 +266,20 @@ export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
   const variosRenglones = !esNumero && renglones.length > 1;
   const interlineado = Number.isFinite(Number(zona.interlineado)) && zona.interlineado != null && zona.interlineado !== ''
     ? Number(zona.interlineado) : INTERLINEADO.porDefecto;
-  const contornos = contornosDeZona(zona);
+  // Contornos: cada uno guarda su grosor en cm Y en % de la letra; según
+  // "Escalar con la letra" (contornosEnlazados) se usa uno u otro
+  // (contornosTexto.js). Para pasar de uno al otro se toma de referencia el
+  // alto de la zona (en un nombre o número, casi el alto de la letra).
+  const enlazados = zona.contornosEnlazados === true;
+  // Con varios renglones, la letra es una parte del alto (con el interlineado).
+  const nRenglones = variosRenglones ? renglones.length : 1;
+  const altoRef = (zona.alto?.modo === 'fijo' && zona.alto.valor > 0 ? zona.alto.valor : 8) / (nRenglones + (nRenglones - 1) * (interlineado / 100));
+  const redondear1 = (n) => Math.round(n * 10) / 10;
+  const contornos = (Array.isArray(zona.contornos) ? zona.contornos : contornosDeZona(zona)).map((c) => ({
+    colorHex: c.colorHex || '#000000',
+    grosorCm: c.grosorCm > 0 ? c.grosorCm : c.pct > 0 ? Math.round((c.pct / 100) * altoRef * 100) / 100 : 0.2,
+    pct: c.pct > 0 ? c.pct : redondear1(((c.grosorCm > 0 ? c.grosorCm : 0.2) / altoRef) * 100),
+  }));
   const espaciado = Number(zona.espaciadoMil) || 0;
   const alineacion = zona.alineacion || 'centro';
   const alineacionV = zona.alineacionV || 'centro';
@@ -380,12 +393,26 @@ export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
           (esNumero ? 'En un número, los contornos pueden salirse de la zona (manda el alto completo).' : 'El texto deja adentro de su zona el espacio de todos juntos, así no se salen.')}
         derecha={contornos.length < CONTORNOS_MAX && (
           <button type="button" className="text-[11px] text-primary hover:underline"
-            onClick={() => guardarContornos([...contornos, nuevoContorno(contornos[contornos.length - 1])])}>
+            onClick={() => { const n = nuevoContorno(contornos[contornos.length - 1]); guardarContornos([...contornos, { ...n, pct: redondear1((n.grosorCm / altoRef) * 100) }]); }}>
             + Agregar contorno
           </button>
         )}
       >
         {contornos.length === 0 && <span className="text-[11px] text-faint-foreground">Sin contornos.</span>}
+        {contornos.length > 0 && (
+          <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted-foreground"
+            title="Encendido: el grosor va en % del alto de la letra -- un número grande lleva un contorno más grueso y uno chico, más fino, en la misma proporción.">
+            <input type="checkbox" className="h-4 w-4 rounded accent-primary" checked={enlazados}
+              onChange={(ev) => onActualizar({
+                contornosEnlazados: ev.target.checked, contorno: null,
+                // Se pasa del valor que se venía usando al otro, para que el grosor no salte.
+                contornos: contornos.map((c) => (ev.target.checked
+                  ? { ...c, pct: Math.min(Math.max(redondear1((c.grosorCm / altoRef) * 100), 0.1), CONTORNO_PCT_MAX) }
+                  : { ...c, grosorCm: Math.min(Math.max(Math.round((c.pct / 100) * altoRef * 100) / 100, 0.01), CONTORNO_ANILLO_MAX_CM) })),
+              })} />
+            Escalar con la letra (grosor en % del alto de la letra)
+          </label>
+        )}
         {contornos.map((c, i) => (
           <div key={i} className="flex flex-col gap-2 rounded-lg border border-border bg-surface-muted/40 p-2">
             <div className="flex items-center gap-1.5">
@@ -409,17 +436,36 @@ export function PanelTexto({ zona, fuentes, onActualizar, onFuenteAgregada }) {
             <SelectorColor valor={c.colorHex} etiqueta={'Color del contorno ' + (i + 1)} onCambiar={(color) => cambiarContorno(i, { colorHex: color })} />
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-faint-foreground">Grosor</span>
-              <InputNumero
-                className="w-20" step={0.05} wheelStep={0.1} min={0.01} max={CONTORNO_ANILLO_MAX_CM} value={c.grosorCm}
-                onChange={(n) => cambiarContorno(i, { grosorCm: Math.min(Math.max(n, 0.01), CONTORNO_ANILLO_MAX_CM) })}
-              />
-              <span className="text-xs text-muted-foreground">cm</span>
-              {[0.1, 0.2, 0.4].map((g) => (
-                <button key={g} type="button" onClick={() => cambiarContorno(i, { grosorCm: g })}
-                  className={'rounded-full border px-2 py-0.5 text-[10px] ' + (c.grosorCm === g ? 'border-primary bg-primary-soft text-primary' : 'border-border text-faint-foreground hover:border-primary')}>
-                  {g}
-                </button>
-              ))}
+              {enlazados ? (
+                <>
+                  <InputNumero
+                    className="w-20" step={0.5} wheelStep={1} min={0.1} max={CONTORNO_PCT_MAX} value={c.pct}
+                    onChange={(n) => cambiarContorno(i, { pct: Math.min(Math.max(redondear1(n), 0.1), CONTORNO_PCT_MAX) })}
+                    aria-label={'Grosor del contorno ' + (i + 1) + ' en % de la letra'}
+                  />
+                  <span className="text-xs text-muted-foreground">% de la letra</span>
+                  {[2, 4, 8].map((g) => (
+                    <button key={g} type="button" onClick={() => cambiarContorno(i, { pct: g })}
+                      className={'rounded-full border px-2 py-0.5 text-[10px] ' + (c.pct === g ? 'border-primary bg-primary-soft text-primary' : 'border-border text-faint-foreground hover:border-primary')}>
+                      {g}%
+                    </button>
+                  ))}
+                </>
+              ) : (
+                <>
+                  <InputNumero
+                    className="w-20" step={0.05} wheelStep={0.1} min={0.01} max={CONTORNO_ANILLO_MAX_CM} value={c.grosorCm}
+                    onChange={(n) => cambiarContorno(i, { grosorCm: Math.min(Math.max(n, 0.01), CONTORNO_ANILLO_MAX_CM) })}
+                  />
+                  <span className="text-xs text-muted-foreground">cm</span>
+                  {[0.1, 0.2, 0.4].map((g) => (
+                    <button key={g} type="button" onClick={() => cambiarContorno(i, { grosorCm: g })}
+                      className={'rounded-full border px-2 py-0.5 text-[10px] ' + (c.grosorCm === g ? 'border-primary bg-primary-soft text-primary' : 'border-border text-faint-foreground hover:border-primary')}>
+                      {g}
+                    </button>
+                  ))}
+                </>
+              )}
             </div>
           </div>
         ))}

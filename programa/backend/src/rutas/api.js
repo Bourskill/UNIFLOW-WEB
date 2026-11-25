@@ -333,6 +333,8 @@ router.post('/texto/ajustar', async (req, res) => {
         // Espacio entre renglones (texto en varias líneas); ajustarTexto lo acota.
         interlineado: Number.isFinite(z.interlineado) ? z.interlineado : undefined,
         alineacionV: ['arriba', 'abajo'].includes(z.alineacionV) ? z.alineacionV : 'centro',
+        // Contornos enlazados: su total en % del alto de la letra.
+        contornoRelativo: Number.isFinite(z.contornoPct) && z.contornoPct > 0 ? Math.min(z.contornoPct, 60) / 100 : 0,
       }),
     };
   }

@@ -5,7 +5,7 @@ import { useFuentesWeb } from './useFuentesWeb.js';
 import { colocarArte } from '../utilidades/colocarArte.js';
 import { fondoActivo, ejeDegradado } from '../utilidades/fondoPieza.js';
 import { medidasDeCapsula, caminoDeCapsula, MARGEN_CAPSULA_CM } from '../utilidades/capsulaTalla.js';
-import { grosorTotal, pasadasDeContornos } from '../utilidades/contornosTexto.js';
+import { grosorTotal, pasadasDeContornos, fraccionDeLaLetra, contornosResueltos } from '../utilidades/contornosTexto.js';
 
 // Puerto FIEL del lienzo de Anclajes del panel de Illustrator
 // (programa/panel/js/main.js: dibujarLienzo/candidatosDe/sinMontonera) --
@@ -256,7 +256,8 @@ function TextoAjustado({ z, ajuste, familia }) {
   // con el doble de lo que llega hasta su borde (contornosTexto.js), así cada
   // uno se ve exactamente con su grosor. Sin contornos, la letra va limpia
   // (pedido explícito: antes llevaba un halo oscuro siempre).
-  const pasadas = pasadasDeContornos(z.contornos || []);
+  // Los enlazados (en % de la letra), con su grosor para el tamaño que salió.
+  const pasadas = pasadasDeContornos(contornosResueltos(z.contornos || [], ajuste.altoBandaCm));
   // La talla: su cápsula blanca debajo, centrada en la zona (capsulaTalla.js).
   const capsula = z.campoPedido === 'talla'
     ? caminoDeCapsula(medidasDeCapsula(ajuste, MARGEN_CAPSULA_CM))
@@ -303,6 +304,7 @@ function pedidoDeAjuste(z) {
     // el contorno): va en el pedido para que el backend lo tenga en cuenta.
     espaciadoMil: z.espaciadoMil || 0,
     contornoCm: Math.min(grosorTotal(z.contornos || []), 6), // tope del backend (ajusteTexto.js·CONTORNO_MAX_CM)
+    ...(fraccionDeLaLetra(z.contornos || []) > 0 ? { contornoPct: Math.round(fraccionDeLaLetra(z.contornos || []) * 1000) / 10 } : {}),
     alineacion: esTalla ? 'centro' : z.alineacion || 'centro',
     ...(Number.isFinite(z.interlineado) ? { interlineado: z.interlineado } : {}),
     alineacionV: esTalla ? 'centro' : z.alineacionV || 'centro',

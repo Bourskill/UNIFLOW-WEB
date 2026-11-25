@@ -252,6 +252,24 @@ console.log('\n--- Texto en varios renglones (saltos de línea) ---');
     cerca(arriba[0].transform[5] - abajo[0].transform[5], conAjuste.textos[0].ajuste.lineas[1].dyCm * 28.3465 - conAjuste.textos[0].ajuste.lineas[0].dyCm * 28.3465, 0.05));
 }
 
+console.log('\n--- Contornos que escalan con la letra ---');
+{
+  const { contornosDeZona } = await import('../src/motor/contornosTexto.js');
+  const zona = { contornosEnlazados: true, contornos: [{ colorHex: '#000000', grosorCm: 0.2, pct: 5 }, { colorHex: '#ff0000', grosorCm: 0.1, pct: 3 }] };
+  comprobar('enlazados: la zona da los contornos en % (no en cm)', contornosDeZona(zona).every((c) => c.pct > 0 && !(c.grosorCm > 0)));
+  comprobar('sin enlazar: en cm, como siempre', contornosDeZona({ ...zona, contornosEnlazados: false }).every((c) => c.grosorCm > 0 && !c.pct));
+  const texto = (anchoCm, altoCm) => ({ texto: '10', cxCm: 30, cyCm: 30, anchoCm, altoCm, xCm: 0, yCm: 0, modo: 'calibrado', zonaClave: 'n|' + altoCm,
+    colorHex: '#fff', rotacionGrados: 0, fuenteUrl: null, contornos: contornosDeZona(zona) });
+  const [p] = await ajustarTextosDePiezas([{ id: 'p', piezaId: 'E', talla: 'm', anchoCm: 60, altoCm: 70, textos: [texto(10, 8), texto(20, 16)] }], obtenerMedidor);
+  const [chico, grande] = p.textos;
+  comprobar('el número grande lleva el contorno el doble de grueso que el chico', cerca(grande.contornos[0].grosorCm, 2 * chico.contornos[0].grosorCm, 1e-6), chico.contornos[0].grosorCm + ' / ' + grande.contornos[0].grosorCm);
+  comprobar('y es el 5% del alto de la letra', cerca(chico.contornos[0].grosorCm, 0.05 * chico.ajuste.altoBandaCm, 1e-9) && cerca(chico.contornos[1].grosorCm, 0.03 * chico.ajuste.altoBandaCm, 1e-9));
+  // Un nombre (llenar): la letra deja lugar para su contorno proporcional.
+  const nombre = ajustarTexto({ medidor, texto: 'GIL', anchoCm: 30, altoCm: 8, modo: 'llenar', contornoRelativo: 0.08 });
+  const c = nombre.contornoEnlazadoCm;
+  comprobar('un nombre deja lugar para su contorno proporcional, y entra justo', cerca(c, 0.08 * nombre.altoBandaCm, 1e-4) && cerca(nombre.altoBandaCm + 2 * c, 8, 1e-3), nombre.altoBandaCm + ' + 2×' + c);
+}
+
 console.log('\n--- Alineación vertical en la zona ---');
 {
   // Un nombre largo, limitado por el ancho: le sobra alto.

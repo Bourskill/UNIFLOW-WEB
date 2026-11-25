@@ -41,7 +41,7 @@ const CUERPO_MAXIMO_CM = 1296 / 28.3465;
 // costados genera un aviso; menos, es el desborde normal y no se menciona.
 const DESBORDE_NUMERO_AVISO = 0.25;
 
-import { contornosDeTexto, grosorTotal } from './contornosTexto.js';
+import { contornosDeTexto, grosorTotal, fraccionDeLaLetra, contornosResueltos } from './contornosTexto.js';
 
 export const REGLAS_TEXTO = {
   trackingMinimo: -30, // milésimas de em, como el "tracking" de Illustrator
@@ -268,7 +268,26 @@ export function calibrarCuerpo({ medidor, candidatos, anchoCm, altoCm, reglas = 
  * creciendo hacia ABAJO (igual que zonas y lienzo) -- la base queda debajo
  * del centro de la zona exactamente la mitad de la banda de mayúsculas.
  */
-export function ajustarTexto({
+export function ajustarTexto(parametros) {
+  // Contornos "enlazados" (en % del alto de la letra, contornosTexto.js): su
+  // grosor depende del tamaño final de la letra, y el espacio que dejan
+  // cambia ese tamaño -- se busca el punto en que coinciden (converge rápido:
+  // cada vuelta corrige una fracción chica de la anterior).
+  const fraccion = Number(parametros.contornoRelativo) || 0;
+  if (!(fraccion > 0)) return ajustarTextoNucleo(parametros);
+  const base = Number(parametros.contornoCm) || 0;
+  let extra = 0, a = null;
+  for (let i = 0; i < 12; i++) {
+    a = ajustarTextoNucleo({ ...parametros, contornoCm: base + extra });
+    if (!a) return a;
+    const nuevo = fraccion * a.altoBandaCm;
+    if (Math.abs(nuevo - extra) < 1e-5) break;
+    extra = nuevo;
+  }
+  return a && { ...a, contornoEnlazadoCm: extra };
+}
+
+function ajustarTextoNucleo({
   medidor, texto, anchoCm, altoCm, modo, cuerpoCalibradoCm = null, reglas = REGLAS_TEXTO,
   espaciadoMil = 0, contornoCm = 0, alineacion = 'centro', interlineado = INTERLINEADO.porDefecto,
   alineacionV = 'centro',
@@ -470,9 +489,13 @@ export async function ajustarTextosDePiezas(piezas, obtenerMedidor, reglas = REG
         alineacion: t.alineacion || 'centro',
         interlineado: t.interlineado,
         alineacionV: t.alineacionV || 'centro',
+        contornoRelativo: fraccionDeLaLetra(contornosDeTexto(t)),
       });
-      // El texto que se escribe en el PDF es el mismo que se midió.
-      return { ...t, texto: ajuste ? ajuste.texto : t.texto, fuenteUrl, ajuste };
+      // El texto que se escribe en el PDF es el mismo que se midió. Los
+      // contornos enlazados, ya con su grosor para el tamaño final de la letra.
+      const contornos = ajuste && fraccionDeLaLetra(contornosDeTexto(t)) > 0
+        ? contornosResueltos(contornosDeTexto(t), ajuste.altoBandaCm) : t.contornos;
+      return { ...t, texto: ajuste ? ajuste.texto : t.texto, fuenteUrl, ajuste, ...(contornos ? { contornos } : {}) };
     }),
   }));
 }
