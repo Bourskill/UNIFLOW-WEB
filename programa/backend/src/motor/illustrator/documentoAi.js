@@ -1216,7 +1216,11 @@ function armarTexto({ mesas, nombres, arte, degradados, textos, titulo, lienzo, 
   const izq = Math.min(...mesas.map((m) => m.izq)), der = Math.max(...mesas.map((m) => m.der));
   const abajo = Math.min(...mesas.map((m) => m.abajo)), arriba = Math.max(...mesas.map((m) => m.arriba));
   const m1 = mesas[0];
-  const cx = (m1.izq + m1.der) / 2, cy = (m1.abajo + m1.arriba) / 2;
+  // El centro del CONJUNTO (el mismo que va al centro del lienzo, ver
+  // documentoAiDePdf): Illustrator ubica el documento en el lienzo por la
+  // página (TemplateBox/TileBox/PageOrigin). Con el centro de la primera mesa,
+  // esa quedaba en el medio del lienzo y las de abajo a la derecha, afuera.
+  const cx = (izq + der) / 2, cy = (abajo + arriba) / 2;
   const zoom = Math.min(1400 / Math.max(der - izq, 1), 900 / Math.max(arriba - abajo, 1), 1);
   const vista = n(izq - 20 / zoom) + ' ' + n(arriba + 20 / zoom) + ' ' + n(zoom);
   const ahora = new Date();
