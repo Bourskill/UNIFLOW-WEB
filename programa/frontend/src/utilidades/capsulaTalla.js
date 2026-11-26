@@ -102,16 +102,43 @@ function cajaAdentro(cx, cy, ancho, alto, grados, poli) {
   });
 }
 
+function distanciaAlTramo([px, py], [ax, ay], [bx, by]) {
+  const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy;
+  const t = l ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l)) : 0;
+  return Math.hypot(px - ax - t * dx, py - ay - t * dy);
+}
+
+// ¿El tramo p-q (ya en coordenadas de la caja) pasa por DENTRO de la caja
+// |u| < hw, |v| < hh? Recorte de Liang-Barsky.
+function tramoCruzaCaja([pu, pv], [qu, qv], hw, hh) {
+  const du = qu - pu, dv = qv - pv;
+  let t0 = 0, t1 = 1;
+  for (const [p, q] of [[-du, pu + hw], [du, hw - pu], [-dv, pv + hh], [dv, hh - pv]]) {
+    if (p === 0) { if (q <= 0) return false; continue; }
+    const r = q / p;
+    if (p < 0) { if (r > t0) t0 = r; } else if (r < t1) t1 = r;
+    if (t0 >= t1) return false;
+  }
+  return true;
+}
+
 /**
  * Cuánto CORRER la cápsula de la talla (cm) para que entre entera en el molde
  * sin achicarla: la talla mide lo mismo en todas las piezas y tallas. Se corre
- * hacia el centro de la pieza lo justo (la talla va abajo: sube un poco). Si
- * ni corriéndola hasta el centro entra (pieza muy angosta), se queda donde
- * mejor entra. contorno: vértices de la pieza en cm ([x, y] o {x, y}).
+ * LO MENOS POSIBLE, derecho desde el borde más cercano (la talla va pegada al
+ * borde para que la tape la costura: correrla de más o de costado la deja a la
+ * vista), y queda siempre a AIRE_AL_BORDE_CM del corte. Si no entra cerca (pieza
+ * muy angosta), se busca hacia el centro de la pieza; si ni así entra, se queda
+ * donde mejor entra. contorno: vértices de la pieza en cm ([x, y] o {x, y}).
  * @returns {{dx:number, dy:number}}
  */
-// Aire mínimo entre la cápsula y el borde de corte.
-export const AIRE_AL_BORDE_CM = 0.2;
+// Aire entre la cápsula y el borde de corte: nada (pedido explícito). La
+// cápsula puede quedar pegada al borde, nunca afuera; la cápsula blanca ya
+// deja 1 mm alrededor de la letra.
+export const AIRE_AL_BORDE_CM = 0;
+// Hasta dónde se busca el corrimiento más corto (cm), y en cuántas direcciones.
+const ALCANCE_CM = 3;
+const DIRECCIONES = 72;
 
 export function corrimientoDentroDelMolde({ cx, cy, ancho: anchoCaja, alto: altoCaja, rotacionGrados = 0 }, contorno) {
   const nada = { dx: 0, dy: 0 };
@@ -120,9 +147,47 @@ export function corrimientoDentroDelMolde({ cx, cy, ancho: anchoCaja, alto: alto
   if (!Array.isArray(contorno) || contorno.length < 3 || !(ancho > 0) || !(alto > 0)) return nada;
   const poli = contorno.map((p) => (Array.isArray(p) ? p : [p.x, p.y]));
   if (cajaAdentro(cx, cy, ancho, alto, rotacionGrados, poli)) return nada;
+  // Exacto y rápido (se calcula mientras se arrastra la zona): la caja entra
+  // si su centro está en la pieza y ningún tramo del borde le cruza por
+  // dentro (tocarla sí vale: queda pegada). Solo cuentan los tramos que
+  // están al alcance de la búsqueda.
+  const a = ((rotacionGrados || 0) * Math.PI) / 180, cos = Math.cos(a), sin = Math.sin(a);
+  const medio = Math.hypot(ancho, alto) / 2 + ALCANCE_CM + 0.1;
+  const tramos = [];
+  for (let i = 0, j = poli.length - 1; i < poli.length; j = i++) {
+    if (distanciaAlTramo([cx, cy], poli[j], poli[i]) < medio) tramos.push([poli[j], poli[i]]);
+  }
+  // Una centésima de milímetro de holgura: pegada, pero sin pisar la línea.
+  const hw = ancho / 2 + 1e-3, hh = alto / 2 + 1e-3;
+  const local = ([x, y], ox, oy) => { const ex = x - ox, ey = y - oy; return [ex * cos - ey * sin, ex * sin + ey * cos]; };
+  const entra = (dx, dy) => {
+    const ox = cx + dx, oy = cy + dy;
+    if (!dentroDelPoligono([ox, oy], poli)) return false;
+    return !tramos.some(([p, q]) => tramoCruzaCaja(local(p, ox, oy), local(q, ox, oy), hw, hh));
+  };
+
+  // El corrimiento más corto: se agranda el radio de a poco y, en el primero
+  // donde alguna dirección entra, se afina la distancia de cada una de ellas.
+  const PASO = 0.05;
+  const dirs = Array.from({ length: DIRECCIONES }, (_, i) => [Math.cos((2 * Math.PI * i) / DIRECCIONES), Math.sin((2 * Math.PI * i) / DIRECCIONES)]);
+  for (let r = PASO; r <= ALCANCE_CM + 1e-9; r += PASO) {
+    const buenas = dirs.filter(([ux, uy]) => entra(ux * r, uy * r));
+    if (!buenas.length) continue;
+    let mejor = null;
+    for (const [ux, uy] of buenas) {
+      let afuera = r - PASO, adentro = r;
+      for (let i = 0; i < 16; i++) {
+        const m = (afuera + adentro) / 2;
+        if (entra(ux * m, uy * m)) adentro = m; else afuera = m;
+      }
+      if (!mejor || adentro < mejor.d - 1e-9) mejor = { d: adentro, dx: ux * adentro, dy: uy * adentro };
+    }
+    return { dx: mejor.dx, dy: mejor.dy };
+  }
+
   const xs = poli.map((p) => p[0]), ys = poli.map((p) => p[1]);
   const centro = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
-  // El primer punto del camino hacia el centro donde entra entera...
+  // Lejos del borde: el primer punto del camino hacia el centro donde entra entera...
   const N = 60;
   let hasta = null;
   for (let i = 1; i <= N; i++) {

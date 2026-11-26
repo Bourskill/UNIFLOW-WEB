@@ -123,6 +123,18 @@ console.log('\n--- La talla mide lo mismo siempre: se corre adentro, no se achic
   const { dx, dy } = corrimientoDentroDelMolde(caja, contorno);
   comprobar('sube lo justo para entrar (sin moverse de costado)', Math.abs(dx) < 0.05 && dy < 0 && dy > -0.6, dx + ',' + dy);
   comprobar('adentro no se mueve', JSON.stringify(corrimientoDentroDelMolde({ ...caja, cy: 10 }, contorno)) === '{"dx":0,"dy":0}');
+  // Pegada al borde (0 mm), sin irse hacia el centro de la pieza: en un borde
+  // inclinado se corre derecho, perpendicular a él (la tapa la costura).
+  {
+    const pierna = [[0, 0], [30, 0], [30, 20], [0, 25]]; // borde de abajo inclinado
+    const c = { cx: 6, cy: 24, ancho: 1, alto: 0.5 };
+    const r = corrimientoDentroDelMolde(c, pierna);
+    const L = Math.hypot(30, 5), nx = 5 / L, ny = 30 / L; // normal hacia afuera del borde
+    const esquinas = [[-0.5, -0.25], [0.5, -0.25], [-0.5, 0.25], [0.5, 0.25]].map(([u, v]) => [c.cx + r.dx + u, c.cy + r.dy + v]);
+    const aire = Math.min(...esquinas.map(([x, y]) => -((x - 0) * nx + (y - 25) * ny)));
+    comprobar('borde inclinado: queda pegada (aire 0 mm)', aire >= 0 && aire < 0.005, aire);
+    comprobar('y se corre derecho hacia adentro, no hacia el centro', Math.abs(r.dx * ny - r.dy * nx) < 0.15 && Math.hypot(r.dx, r.dy) < 0.6, JSON.stringify(r));
+  }
 
   // En el PDF: S y 5XL- con la letra del MISMO alto, ambas adentro del molde.
   const pieza = (texto) => ({ id: 'p', piezaId: 'MANGA', talla: 'm', anchoCm: 40, altoCm: 21.5, contornoCm: contorno, imagenes: [],
