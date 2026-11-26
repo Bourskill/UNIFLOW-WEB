@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { crearPedido, editarPedido, eliminarPedido, anidarDesdePedido, generarPdf, exportarTallaDePedido } from '../api.js';
 import { obtener } from '../datos/index.js';
 import { ordenarTallasNatural } from '../constantes.js';
-import { conjuntosDe, conjuntoDeLinea } from '../utilidades/conjuntos.js';
+import { conjuntoDeLinea } from '../utilidades/conjuntos.js';
 import { gruposDeProduccion } from '../utilidades/moldesDeProduccion.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
 import { Boton, Campo, Input, InputMultilinea, Select, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 import { leerHojas, filasDeTexto, interpretarJugadores } from '../utilidades/hojaDeCalculo.js';
-import { destinosDeImportacion, destinoSugerido, lineaDeDestino } from '../utilidades/destinosDeHojas.js';
+import { destinosDeImportacion, destinoSugerido, lineaDeDestino, separarPorPrenda } from '../utilidades/destinosDeHojas.js';
 import { tallasDeProduccion } from '../utilidades/producciones.js';
 
 // Producción → Pedidos: el pedido real de un equipo (talla + nombre + número
@@ -257,12 +257,16 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
   const tablaFinal = useRef(null);
 
   const tallasDe = (id, conjuntoId, excluidas) => tallasDelProducto(id, productos, grupos, piezas, conjuntoId, excluidas);
-  const conjuntosDeProduccion = (id) => conjuntosDe(productos.find((p) => p.id === id));
-  const conConjuntos = lineas.some((l) => conjuntosDeProduccion(l.productoId).length > 1) || conjuntosDeProduccion(productoId).length > 1;
+  // Qué prendas lleva cada línea (toda la producción, un conjunto o una
+  // prenda sola): las mismas opciones que al cargar un Excel por prenda.
+  const destinosPorProduccion = useMemo(() => new Map(productos.map((p) => [p.id, destinosDeImportacion([p], grupos, p.id)])), [productos, grupos]);
+  const destinosDe = (id) => destinosPorProduccion.get(id) || [];
+  const conConjuntos = lineas.some((l) => destinosDe(l.productoId).length > 1) || destinosDe(productoId).length > 1;
   const tallasPorDefecto = tallasDe(productoId);
   const variosProductos = productos.length > 1;
   const columnas = 4 + (variosProductos ? 1 : 0) + (conConjuntos ? 1 : 0);
-  const conPiezasExcluibles = lineas.some((l) => l.piezasExcluidas?.length);
+  // El detalle de piezas se abre solo si hay piezas sacadas a mano (no las de la columna Prenda).
+  const conPiezasExcluibles = lineas.some((l) => l.piezasExcluidas?.length && !destinoDeLinea(l, destinosDe(l.productoId), productos));
   const [verPiezas, setVerPiezas] = useState(conPiezasExcluibles);
 
   const actualizar = (id, cambios) => setLineas((prev) => prev.map((l) => (l.id === id ? { ...l, ...cambios } : l)));
@@ -285,9 +289,9 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
   async function leerArchivo(archivo) {
     setError(null);
     try {
-      const hojas = (await leerHojas(archivo.name, new Uint8Array(await archivo.arrayBuffer())))
-        .filter((h) => h.filas.some((f) => f.some((v) => v !== '')));
-      // Varias hojas con listados: cada una a su prenda (VistaHojas).
+      const hojas = separarPorPrenda((await leerHojas(archivo.name, new Uint8Array(await archivo.arrayBuffer())))
+        .filter((h) => h.filas.some((f) => f.some((v) => v !== ''))));
+      // Varias hojas con listados, o una columna PRENDA: cada listado a su prenda (VistaHojas).
       if (hojas.length > 1) {
         setImportando(null);
         setImportandoHojas({ hojas, origen: archivo.name });
@@ -301,6 +305,12 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
     }
   }
   function leerPegado(texto) {
+    const porPrenda = separarPorPrenda([{ nombre: 'Lo pegado', filas: filasDeTexto(texto) }]);
+    if (porPrenda.length > 1) {
+      setPegando(false);
+      setImportandoHojas({ hojas: porPrenda, origen: 'lo que pegaste' });
+      return;
+    }
     const r = interpretarJugadores(filasDeTexto(texto), tallasPorDefecto);
     if (r.jugadores.length === 0) { setError('No encontré jugadores en lo que pegaste.'); return; }
     setPegando(false);
@@ -379,7 +389,8 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
       <p className="-mt-2 text-xs text-faint-foreground">
         La planilla puede ser .xlsx, .ods o .csv, con columnas <b>Nombre</b>, <b>Talla</b> y <b>Número</b> (en cualquier orden;
         sin títulos se toman en ese orden). Prendas sin nombre o sin número: dejá esa celda vacía. Con varias prendas o
-        conjuntos, el Excel puede traer una hoja por cada uno (ej. «DAMA», «CABALLERO», «PANTALONETA») y elegís a cuál va cada hoja.
+        conjuntos, el Excel puede traer una hoja por cada uno (ej. «DAMA», «CABALLERO», «PANTALONETA») o una columna <b>Prenda</b>{' '}
+        (una fila por cada prenda del jugador: «CAMISA», «PANTALONETA»), y elegís a cuál prenda va cada listado.
       </p>
 
       {pegando && <PegarLista onListo={leerPegado} onCancelar={() => setPegando(false)} />}
@@ -399,7 +410,7 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
               <tr>
                 <th className="w-10 px-3 py-2 font-medium">#</th>
                 {variosProductos && <th className="px-2 py-2 font-medium">Producción</th>}
-                {conConjuntos && <th className="w-32 px-2 py-2 font-medium">Conjunto</th>}
+                {conConjuntos && <th className="w-48 px-2 py-2 font-medium">Prenda</th>}
                 <th className="w-24 px-2 py-2 font-medium">Talla</th>
                 <th className="px-2 py-2 font-medium">Nombre</th>
                 <th className="w-24 px-2 py-2 font-medium">Número</th>
@@ -410,8 +421,8 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
               {lineas.map((l, i) => {
                 const tallas = tallasDe(l.productoId, l.conjuntoId, l.piezasExcluidas);
                 const roles = verPiezas ? rolesDelProducto(l.productoId, productos, grupos, l.conjuntoId) : [];
-                const conjuntosLinea = conjuntosDeProduccion(l.productoId);
-                const conjuntoLinea = conjuntoDeLinea(productos.find((p) => p.id === l.productoId), l);
+                const destinosLinea = destinosDe(l.productoId);
+                const destinoLinea = destinoDeLinea(l, destinosLinea, productos);
                 return [
                   <tr key={l.id} className="border-t border-border">
                     <td className="px-3 py-1.5 text-xs text-faint-foreground">{i + 1}</td>
@@ -427,14 +438,18 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
                     )}
                     {conConjuntos && (
                       <td className="px-2 py-1.5">
-                        {conjuntosLinea.length > 1 ? (
-                          <Select className="h-8 text-xs" value={conjuntoLinea?.id || ''} onChange={(e) => {
-                            const nuevas = tallasDe(l.productoId, e.target.value);
-                            actualizar(l.id, { conjuntoId: e.target.value, piezasExcluidas: [], talla: nuevas.includes(l.talla) ? l.talla : '' });
-                          }}>
-                            {conjuntosLinea.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                        {destinosLinea.length > 1 ? (
+                          <Select className="h-8 max-w-[220px] text-xs" value={destinoLinea?.id || ''} title={destinoLinea?.etiqueta || 'Piezas sacadas a mano'}
+                            aria-label={'Prenda de la fila ' + (i + 1)} onChange={(e) => {
+                              const d = destinosLinea.find((x) => x.id === e.target.value);
+                              if (!d) return;
+                              const nuevas = tallasDe(l.productoId, d.conjuntoId, d.piezasExcluidas);
+                              actualizar(l.id, { conjuntoId: d.conjuntoId, piezasExcluidas: [...d.piezasExcluidas], talla: nuevas.includes(l.talla) ? l.talla : '' });
+                            }}>
+                            {!destinoLinea && <option value="">A mano (Sacar piezas)</option>}
+                            {destinosLinea.map((d) => <option key={d.id} value={d.id}>{d.etiqueta}</option>)}
                           </Select>
-                        ) : <span className="text-xs text-faint-foreground">{conjuntosLinea[0]?.nombre || '—'}</span>}
+                        ) : <span className="text-xs text-faint-foreground">{destinosLinea[0]?.etiqueta || '—'}</span>}
                       </td>
                     )}
                     <td className="px-2 py-1.5">
@@ -571,12 +586,21 @@ function VistaImportacion({ importacion, hayLineas, onSumar, onCancelar }) {
   );
 }
 
+// La opción de "Prenda" que corresponde a la línea: mismo conjunto y mismas
+// piezas sacadas. Sin ninguna (sacó piezas sueltas a mano), null.
+function destinoDeLinea(linea, destinos, productos) {
+  const conjunto = conjuntoDeLinea(productos.find((p) => p.id === linea.productoId), linea);
+  const fuera = [...(linea.piezasExcluidas || [])].sort().join('|');
+  return destinos.find((d) => (!d.conjuntoId || d.conjuntoId === conjunto?.id)
+    && [...d.piezasExcluidas].sort().join('|') === fuera) || null;
+}
+
 // Un Excel con varias hojas, cada una con el listado de una prenda (o de un
 // conjunto: dama / caballero): se elige a qué va cada hoja -- adivinado por
 // el nombre de la pestaña -- y se cargan todas juntas.
 function VistaHojas({ importacion, destinos, tallasDeDestino, hayLineas, onSumar, onCancelar }) {
   const { hojas, origen } = importacion;
-  const [asignadas, setAsignadas] = useState(() => hojas.map((h) => destinoSugerido(h.nombre, destinos)?.id || ''));
+  const [asignadas, setAsignadas] = useState(() => hojas.map((h) => destinoSugerido(h.pistas || h.nombre, destinos)?.id || ''));
   const porId = new Map(destinos.map((d) => [d.id, d]));
   const productosEnOrden = [...new Set(destinos.map((d) => d.productoId))];
 
@@ -597,14 +621,14 @@ function VistaHojas({ importacion, destinos, tallasDeDestino, hayLineas, onSumar
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary-soft/20 p-3">
       <div className="text-sm">
-        <b>{hojas.length} hojas</b> en {origen}: elegí a qué prenda va cada listado.
+        <b>{hojas.length} listados</b> en {origen} (por hoja o por la columna Prenda): elegí a qué prenda va cada uno.
         {sinTalla > 0 && <span className="text-danger"> · {sinTalla} sin talla válida (se agregan igual, para que la elijas)</span>}
       </div>
       <div className="flex flex-col gap-2">
         {leidas.map((l, i) => (
           <div key={i} className="flex flex-col gap-1.5 rounded-lg border border-border bg-surface p-2.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="min-w-[140px] text-sm font-medium" title="Nombre de la hoja">{l.hoja.nombre}</span>
+              <span className="min-w-[140px] text-sm font-medium" title="Hoja (y prenda, si la planilla tiene columna Prenda)">{l.hoja.nombre}</span>
               <span className="text-faint-foreground">→</span>
               <Select className="h-8 max-w-[320px] text-xs" value={asignadas[i]} aria-label={'Prenda de la hoja ' + l.hoja.nombre}
                 onChange={(e) => setAsignadas((prev) => prev.map((x, k) => (k === i ? e.target.value : x)))}>

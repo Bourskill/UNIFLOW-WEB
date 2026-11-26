@@ -28,6 +28,18 @@ export function destinosDeImportacion(productos, grupos, actualId) {
     if (conjuntos.length > 1) {
       for (const c of conjuntos) {
         destinos.push({ id: p.id + '|c|' + c.id, productoId: p.id, producto: p.nombre, etiqueta: c.nombre, nombre: c.nombre, conjuntoId: c.id, piezasExcluidas: [] });
+        // Un conjunto de varias prendas (camiseta + pantaloneta): también cada
+        // una sola, para el listado con columna PRENDA o la hoja "solo shorts".
+        const suyos = gs.filter((g) => c.grupoIds.includes(g.id));
+        if (suyos.length > 1) {
+          for (const g of suyos) {
+            destinos.push({
+              id: p.id + '|c|' + c.id + '|g|' + g.id, productoId: p.id, producto: p.nombre,
+              etiqueta: c.nombre + ' · solo ' + g.nombre, nombre: c.nombre + ' ' + g.nombre, conjuntoId: c.id,
+              piezasExcluidas: suyos.filter((o) => o.id !== g.id).flatMap((o) => clavesDeGrupo(o, varias)),
+            });
+          }
+        }
       }
       continue;
     }
@@ -68,16 +80,61 @@ function palabras(texto) {
  * producción actual (los destinos vienen con ella primero).
  */
 export function destinoSugerido(nombreHoja, destinos) {
-  const deHoja = new Set(palabras(nombreHoja));
+  // Varios nombres (la prenda de la columna PRENDA y su hoja): el primero pesa más.
+  const [principal, ...resto] = (Array.isArray(nombreHoja) ? nombreHoja : [nombreHoja]).map((n) => new Set(palabras(n)));
+  const deResto = new Set(resto.flatMap((r) => [...r]));
   let mejor = destinos[0] || null;
   let puntos = 0;
+  const actual = destinos[0]?.productoId;
   for (const d of destinos) {
-    const comunes = palabras(d.nombre).filter((w) => deHoja.has(w)).length;
-    // Un destino puntual (conjunto o prenda sola) gana al de "toda la producción".
-    const p = comunes ? comunes * 2 + (d.id !== d.productoId ? 1 : 0) : 0;
+    const suyas = palabras(d.nombre);
+    const dePrincipal = suyas.filter((w) => principal.has(w)).length;
+    const comunes = dePrincipal * 3 + suyas.filter((w) => !principal.has(w) && deResto.has(w)).length;
+    // Un destino puntual (conjunto o prenda sola) gana al de "toda la
+    // producción", y la producción elegida en el pedido gana a las otras si
+    // tiene esa prenda (CAMISA → su camiseta, no la de otra producción).
+    const p = comunes ? comunes * 2 + (d.id !== d.productoId ? 1 : 0) + (d.productoId === actual && dePrincipal ? 100 : 0) : 0;
     if (p > puntos) { mejor = d; puntos = p; }
   }
   return mejor;
+}
+
+// La columna que dice qué prenda lleva cada fila (CAMISA, PANTALONETA...).
+const CABECERA_PRENDA = /^(prenda|prendas|articulo|producto|tipo de prenda|tipo)$/;
+const normal = (v) => String(v ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().toLowerCase();
+
+/**
+ * Un listado con columna PRENDA (una fila por prenda de cada jugador: el 14
+ * lleva camisa y pantaloneta, el 31 solo camisa) se parte en un listado por
+ * prenda, como si cada una fuera su propia hoja: así cada una se enlaza a su
+ * prenda de la producción. Las hojas sin esa columna quedan como están.
+ * hojas: [{ nombre, filas }] (leerHojas). Devuelve la misma forma.
+ */
+export function separarPorPrenda(hojas) {
+  return hojas.flatMap((h) => {
+    const filas = h.filas || [];
+    let cab = -1, col = -1;
+    for (let i = 0; i < Math.min(filas.length, 10) && cab < 0; i++) {
+      const j = filas[i].findIndex((v) => CABECERA_PRENDA.test(normal(v)));
+      if (j >= 0) { cab = i; col = j; }
+    }
+    if (cab < 0) return [h];
+    const grupos = new Map(); // clave normalizada -> { nombre, filas }
+    for (const f of filas.slice(cab + 1)) {
+      if (!f.some((v) => String(v ?? '').trim() !== '')) continue;
+      const valor = String(f[col] ?? '').trim();
+      const clave = normal(valor);
+      if (!grupos.has(clave)) grupos.set(clave, { nombre: valor, filas: [] });
+      grupos.get(clave).filas.push(f);
+    }
+    if (grupos.size < 2 && !grupos.has('')) return [h];
+    return [...grupos.values()].map((g) => ({
+      nombre: h.nombre + (g.nombre ? ' · ' + g.nombre : ''),
+      filas: [filas[cab], ...g.filas],
+      // Para adivinar el destino pesa la prenda; la hoja ("Masculino") desempata.
+      pistas: [g.nombre || h.nombre, h.nombre],
+    }));
+  });
 }
 
 /** Lo que el destino le pone a cada línea del pedido. */

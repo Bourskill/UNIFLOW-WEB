@@ -178,6 +178,17 @@ console.log('\n--- Conjuntos (dama / caballero) en UNA producción: cada jugador
   } catch (e) { errorSolo = e.message; }
   comprobar('"Solo una prenda": sale en una talla que la otra prenda no tiene', !errorSolo && soloCab.length === 1 && soloCab[0].anchoCm === 50, errorSolo || JSON.stringify(soloCab.map(function (p) { return p.piezaId; })));
   comprobar('…y con el nombre en su zona', !errorSolo && soloCab[0].textos?.length === 1, JSON.stringify(soloCab && soloCab[0].textos));
+
+  // Un conjunto con camiseta + short (columna PRENDA del Excel: una fila por
+  // prenda): "Caballero · solo short" saca solo el short, con su zona.
+  var unConjunto = Object.assign({}, producto, { conjuntos: [{ id: 'todo', nombre: 'Caballero', grupoIds: ['g-dama', 'g-cab'] }] });
+  var soloShort, errorShort = null;
+  try {
+    soloShort = resolverPiezasDePedido({ pedido: { lineas: [{ id: 'l5', productoId: 'p-mixta', conjuntoId: 'todo', talla: 'XL', nombre: 'LUIS', numero: '', piezasExcluidas: ['g-dama::Frente'] }] },
+      productos: [unConjunto], grupos: [gDama, gCab], piezas: [piezaDama, piezaCaballero], disenos: [] });
+  } catch (e) { errorShort = e.message; }
+  comprobar('Conjunto + "solo una prenda": sale solo esa prenda, con su zona', !errorShort && soloShort.length === 1 && soloShort[0].anchoCm === 50 && soloShort[0].textos?.length === 1,
+    errorShort || JSON.stringify(soloShort.map(function (p) { return p.piezaId; })));
 })();
 
 console.log('\n--- Cambiar el molde de una pieza solo en una producción (MANGA → MANGA LARGA) ---');
