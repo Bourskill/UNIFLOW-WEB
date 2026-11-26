@@ -1258,13 +1258,26 @@ router.post('/exportar-mesas/:id', async (req, res) => {
   // Con conjuntos (dama / caballero...), cada talla sale con cada conjunto
   // que la tiene; sin conjuntos, la producción entera.
   const conjuntos = conjuntosDe(producto);
-  const combinaciones = [...new Set(tallas)].flatMap((talla) => (conjuntos.length
-    ? conjuntos.filter((c) => tallasDeGrupos(c.grupoIds, gruposDeProduccion(producto, grupos), piezas).includes(talla)).map((c) => ({ talla, conjuntoId: c.id }))
-    : [{ talla }]));
+  // Sin conjuntos pero con varias prendas de tallas distintas (lycra niña
+  // 4-16 y camiseta dama XS-XL), cada talla sale con las prendas que la
+  // tienen: las otras van como piezas sacadas (motor/resolverPedido.js).
+  const gruposProd = gruposDeProduccion(producto, grupos);
+  const sinLaTalla = (talla) => gruposProd.length > 1
+    ? gruposProd.filter((g) => !tallasDeGrupos([g.id], gruposProd, piezas).includes(talla))
+    : [];
+  const combinaciones = [...new Set(tallas)].flatMap((talla) => {
+    if (conjuntos.length) {
+      return conjuntos.filter((c) => tallasDeGrupos(c.grupoIds, gruposProd, piezas).includes(talla)).map((c) => ({ talla, conjuntoId: c.id }));
+    }
+    const faltan = sinLaTalla(talla);
+    if (faltan.length === gruposProd.length && gruposProd.length > 1) return [];
+    const piezasExcluidas = faltan.flatMap((g) => (g.piezas || []).map((gp) => g.id + '::' + gp.rol));
+    return [{ talla, ...(piezasExcluidas.length ? { piezasExcluidas } : {}) }];
+  });
   if (!combinaciones.length) return res.status(400).json({ error: 'Ningún conjunto de esta producción tiene esas tallas' });
   const pedido = {
-    lineas: combinaciones.map(({ talla, conjuntoId }, i) => ({
-      id: 'mesa' + i, productoId: producto.id, talla, ...(conjuntoId ? { conjuntoId } : {}),
+    lineas: combinaciones.map(({ talla, conjuntoId, piezasExcluidas }, i) => ({
+      id: 'mesa' + i, productoId: producto.id, talla, ...(conjuntoId ? { conjuntoId } : {}), ...(piezasExcluidas ? { piezasExcluidas } : {}),
       nombre: ejemplo('nombre'), numero: ejemplo('numero'), conEjemplo: !!conEjemplo,
     })),
   };

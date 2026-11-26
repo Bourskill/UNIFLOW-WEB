@@ -31,6 +31,11 @@ export function tallasDeProduccion(produccion, grupos, piezas) {
   if (deConjuntos.length) {
     return ordenarTallasNatural([...new Set(deConjuntos.flatMap((c) => tallasDeGrupos(c.grupoIds, propios, piezas)))]);
   }
+  // Varias prendas sin conjuntos: las tallas de cualquiera (cada talla sale
+  // con las prendas que la tienen -- rutas/api.js·prepararMesasDeProduccion).
+  if (propios.length > 1) {
+    return ordenarTallasNatural([...new Set(propios.flatMap((g) => tallasDeGrupos([g.id], propios, piezas)))]);
+  }
   const conjuntos = propios
     .flatMap((g) => g.piezas)
     .map((gp) => piezas.find((p) => p.id === gp.piezaId))

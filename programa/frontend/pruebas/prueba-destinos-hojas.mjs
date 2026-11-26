@@ -35,6 +35,24 @@ comprobar('hoja "PANTALONETAS" → Solo Pantaloneta', nombre('PANTALONETAS') ===
   comprobar('hoja "CAMISETAS" → la prenda "CMST …" (abreviatura)', destinoSugerido('CAMISETAS', conCmst)?.id === 'K|g|x', destinoSugerido('CAMISETAS', conCmst)?.id);
   comprobar('hoja "SHORTS" → la pantaloneta', destinoSugerido('SHORTS', conCmst)?.id === 'K|g|y', destinoSugerido('SHORTS', conCmst)?.id);
 }
+{
+  // El Excel real: hojas «Niña», «Femenino», «Masculino».
+  const gs = [
+    { id: 'm', nombre: 'T SHIRT VOLEY MASC', piezas: [{ rol: 'FRENTE' }] },
+    { id: 'f', nombre: 'CAMISETA VOLEY FEM', piezas: [{ rol: 'FRENTE' }] },
+    { id: 'n', nombre: 'LYCRA NIÑA', piezas: [{ rol: 'FRENTE' }] },
+  ];
+  const sinConj = destinosDeImportacion([{ id: 'V', nombre: 'NEGRO', grupoIds: ['m', 'f', 'n'] }], gs, 'V');
+  const a = (h) => destinoSugerido(h, sinConj)?.id;
+  comprobar('sin conjuntos: «Niña» → solo LYCRA NIÑA', a('Niña') === 'V|g|n', a('Niña'));
+  comprobar('sin conjuntos: «Femenino» → solo la camiseta FEM', a('Femenino') === 'V|g|f', a('Femenino'));
+  comprobar('sin conjuntos: «Masculino» → solo la de MASC', a('Masculino') === 'V|g|m', a('Masculino'));
+  const conConj = destinosDeImportacion([{ id: 'V', nombre: 'NEGRO', grupoIds: ['m', 'f', 'n'], conjuntos: [
+    { id: 'cd', nombre: 'Dama', grupoIds: ['f'] }, { id: 'cc', nombre: 'Caballero', grupoIds: ['m'] }, { id: 'cn', nombre: 'Niña', grupoIds: ['n'] }] }], gs, 'V');
+  const b = (h) => destinoSugerido(h, conConj)?.id;
+  comprobar('con conjuntos: «Femenino» → Dama, «Masculino» → Caballero, «Niña» → Niña',
+    b('Femenino') === 'V|c|cd' && b('Masculino') === 'V|c|cc' && b('Niña') === 'V|c|cn', [b('Femenino'), b('Masculino'), b('Niña')].join());
+}
 comprobar('hoja sin parecido → el primero de la producción actual', nombre('Hoja1') === 'B|c|d', nombre('Hoja1'));
 
 const solo = lineaDeDestino(destinos.find((d) => d.id === 'A|g|pan'));

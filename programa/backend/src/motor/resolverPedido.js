@@ -81,11 +81,24 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
     // línea -- con las mismas claves que si fuera la producción entera.
     const conjunto = conjuntoDeLinea(producto, linea);
     // Con moldes cambiados en esta producción (MANGA → MANGA LARGA), esos.
-    const piezasDelGrupo = resolverPiezasDeGrupos(gruposConMoldes(gruposDelProducto, producto.moldes), piezas, producto.versionesPiezas)
-      .filter((p) => !conjunto || conjunto.grupoIds.includes(p.grupoId));
-    const clavesDelConjunto = new Set(piezasDelGrupo.map((p) => p.nombre));
-    const anclajeDeLinea = conjunto ? anclajeDePiezas(producto.anclaje, clavesDelConjunto) : producto.anclaje;
     const excluidas = new Set(linea.piezasExcluidas || []);
+    const fuera = (p) => excluidas.has(p.nombre) || (p.ladoDe && excluidas.has(p.ladoDe));
+    const delConjunto = resolverPiezasDeGrupos(gruposConMoldes(gruposDelProducto, producto.moldes), piezas, producto.versionesPiezas)
+      .filter((p) => !conjunto || conjunto.grupoIds.includes(p.grupoId));
+    // Una prenda con TODAS sus piezas excluidas (la hoja "solo pantaloneta"
+    // del Excel) sale entera de la línea, como si fuera otro conjunto: así
+    // no hace falta que tenga la talla de esta línea (cada prenda puede
+    // tener sus propias tallas: niña 4-16, dama XS-XL...).
+    const gruposFuera = new Set();
+    for (const gid of new Set(delConjunto.map((p) => p.grupoId))) {
+      const suyas = delConjunto.filter((p) => p.grupoId === gid);
+      if (suyas.length && suyas.every(fuera)) gruposFuera.add(gid);
+    }
+    const piezasDelGrupo = gruposFuera.size ? delConjunto.filter((p) => !gruposFuera.has(p.grupoId)) : delConjunto;
+    // Todo sacado (a mano, pieza por pieza): esta línea no imprime nada.
+    if (!piezasDelGrupo.length) continue;
+    const clavesDelConjunto = new Set(piezasDelGrupo.map((p) => p.nombre));
+    const anclajeDeLinea = conjunto || gruposFuera.size ? anclajeDePiezas(producto.anclaje, clavesDelConjunto) : producto.anclaje;
 
     // Todas las piezas del grupo a la MISMA talla de esta línea -- a
     // diferencia del editor (Productos.jsx), que permite una "talla de
@@ -116,7 +129,7 @@ export function resolverPiezasDePedido({ pedido, productos, grupos, piezas, dise
     // sin frenar el pedido: un destino que no sale en esta talla solo se omite.
     const anclasCalce = Object.entries(diseno?.ajusteArtePorPieza || {}).flatMap(([c, aj]) => anclasDeCalce(c, aj));
     const anclasDelCalce = anclasCalce.length
-      ? resolverAnclaje({ ...(anclajeDeLinea || anclajeVacio), anclas: [...(anclajeDeLinea?.anclas || []), ...anclasCalce.filter((a) => !conjunto || clavesDelConjunto.has(a.pieza))] }, geometria, { talla: linea.talla }).anclas
+      ? resolverAnclaje({ ...(anclajeDeLinea || anclajeVacio), anclas: [...(anclajeDeLinea?.anclas || []), ...anclasCalce.filter((a) => (!conjunto && !gruposFuera.size) || clavesDelConjunto.has(a.pieza))] }, geometria, { talla: linea.talla }).anclas
       : {};
 
     const zonaCruda = {};

@@ -46,7 +46,13 @@ export function destinosDeImportacion(productos, grupos, actualId) {
 }
 
 // Cómo se abrevian las prendas en los nombres de la moldería ("CMST CUELLO R").
-const ABREVIATURAS = { cmst: 'camiseta', camisa: 'camiseta', pantalon: 'pantaloneta', short: 'pantaloneta', pant: 'pantaloneta' };
+// y de cada público: la hoja «Femenino» es el conjunto «Dama» o la prenda «… FEM».
+const ABREVIATURAS = {
+  cmst: 'camiseta', camisa: 'camiseta', pantalon: 'pantaloneta', short: 'pantaloneta', pant: 'pantaloneta',
+  femenino: 'dama', femenina: 'dama', fem: 'dama', mujer: 'dama',
+  masculino: 'caballero', masc: 'caballero', hombre: 'caballero',
+  nino: 'nino', nina: 'nina', infantil: 'nino',
+};
 
 function palabras(texto) {
   return String(texto || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()

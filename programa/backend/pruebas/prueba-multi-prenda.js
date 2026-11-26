@@ -166,6 +166,18 @@ console.log('\n--- Conjuntos (dama / caballero) en UNA producción: cada jugador
   var sinConjunto = resolverPiezasDePedido({ pedido: { lineas: [{ id: 'l3', productoId: 'p-mixta', talla: 'S', nombre: 'X', numero: '' }] },
     productos: [producto], grupos: [gDama, gCab], piezas: [piezaDama, piezaCaballero], disenos: [] });
   comprobar('Una línea sin conjunto elegido usa el primero', sinConjunto.length === 1 && sinConjunto[0].anchoCm === 38);
+
+  // Sin conjuntos, con una hoja del Excel por prenda: el jugador de la hoja
+  // "Masculino" saca las piezas de dama. Su talla (XL) solo la tiene la de
+  // caballero, y aun así sale, con la zona de su prenda.
+  var sinConjuntos = Object.assign({}, producto, { conjuntos: undefined });
+  var soloCab, errorSolo = null;
+  try {
+    soloCab = resolverPiezasDePedido({ pedido: { lineas: [{ id: 'l4', productoId: 'p-mixta', talla: 'XL', nombre: 'LUIS', numero: '', piezasExcluidas: ['g-dama::Frente'] }] },
+      productos: [sinConjuntos], grupos: [gDama, gCab], piezas: [piezaDama, piezaCaballero], disenos: [] });
+  } catch (e) { errorSolo = e.message; }
+  comprobar('"Solo una prenda": sale en una talla que la otra prenda no tiene', !errorSolo && soloCab.length === 1 && soloCab[0].anchoCm === 50, errorSolo || JSON.stringify(soloCab.map(function (p) { return p.piezaId; })));
+  comprobar('…y con el nombre en su zona', !errorSolo && soloCab[0].textos?.length === 1, JSON.stringify(soloCab && soloCab[0].textos));
 })();
 
 console.log('\n--- Cambiar el molde de una pieza solo en una producción (MANGA → MANGA LARGA) ---');

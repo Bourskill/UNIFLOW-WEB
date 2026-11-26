@@ -8,6 +8,7 @@ import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
 import { Boton, Campo, Input, InputMultilinea, Select, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
 import { leerHojas, filasDeTexto, interpretarJugadores } from '../utilidades/hojaDeCalculo.js';
 import { destinosDeImportacion, destinoSugerido, lineaDeDestino } from '../utilidades/destinosDeHojas.js';
+import { tallasDeProduccion } from '../utilidades/producciones.js';
 
 // Producción → Pedidos: el pedido real de un equipo (talla + nombre + número
 // por jugador), cargado a mano, desde una planilla o pegado de Excel, y desde
@@ -23,12 +24,17 @@ function gruposDelProducto(producto, grupos) {
 
 // Las tallas que tienen TODAS las piezas de la producción (las de talla única
 // sirven para cualquiera).
-function tallasDelProducto(productoId, productos, grupos, piezas, conjuntoId) {
+function tallasDelProducto(productoId, productos, grupos, piezas, conjuntoId, excluidas = []) {
   const producto = productos.find((p) => p.id === productoId);
   // Con conjuntos (dama / caballero...), las del conjunto de la línea.
   const conjunto = conjuntoDeLinea(producto, { conjuntoId });
-  const conjuntos = gruposDelProducto(producto, grupos)
-    .filter((g) => !conjunto || conjunto.grupoIds.includes(g.id))
+  const todos = gruposDelProducto(producto, grupos);
+  // Una prenda con todas sus piezas sacadas ("solo pantaloneta") no cuenta:
+  // cada prenda puede tener sus propias tallas (motor/resolverPedido.js).
+  const fuera = new Set(excluidas);
+  const sacada = (g) => todos.length > 1 && g.piezas.length > 0 && g.piezas.every((gp) => fuera.has(g.id + '::' + gp.rol));
+  const conjuntos = todos
+    .filter((g) => (!conjunto || conjunto.grupoIds.includes(g.id)) && !sacada(g))
     .flatMap((g) => g.piezas)
     .map((x) => piezas.find((p) => p.id === x.piezaId))
     .filter((p) => p && !p.tallaUnica)
@@ -250,7 +256,7 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
   const entradaArchivo = useRef(null);
   const tablaFinal = useRef(null);
 
-  const tallasDe = (id, conjuntoId) => tallasDelProducto(id, productos, grupos, piezas, conjuntoId);
+  const tallasDe = (id, conjuntoId, excluidas) => tallasDelProducto(id, productos, grupos, piezas, conjuntoId, excluidas);
   const conjuntosDeProduccion = (id) => conjuntosDe(productos.find((p) => p.id === id));
   const conConjuntos = lineas.some((l) => conjuntosDeProduccion(l.productoId).length > 1) || conjuntosDeProduccion(productoId).length > 1;
   const tallasPorDefecto = tallasDe(productoId);
@@ -345,7 +351,13 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
           </Select>
         </Campo>
       </div>
-      {tallasPorDefecto.length === 0 && (
+      {tallasPorDefecto.length === 0 && tallasDeProduccion(productos.find((p) => p.id === productoId), grupos, piezas).length > 0 && (
+        <Aviso tono="info">
+          Las prendas de esta producción no comparten tallas (ej. niña 4-16 y dama XS-XL). Cargá un Excel con una hoja
+          por prenda (cada hoja elige su prenda) o armá conjuntos en Diseño, así cada jugador sale con las tallas de lo suyo.
+        </Aviso>
+      )}
+      {tallasPorDefecto.length === 0 && tallasDeProduccion(productos.find((p) => p.id === productoId), grupos, piezas).length === 0 && (
         <Aviso tono="error">
           Esa producción no tiene ninguna talla con todas sus piezas cargadas (revisá la prenda en Moldería).{' '}
           {diagnosticoSinTallaComun(productoId, productos, grupos, piezas)}
@@ -376,7 +388,7 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
       )}
       {importandoHojas && (
         <VistaHojas importacion={importandoHojas} destinos={destinosDeImportacion(productos, grupos, productoId)}
-          tallasDeDestino={(d) => tallasDe(d.productoId, d.conjuntoId)} hayLineas={lineas.length > 0}
+          tallasDeDestino={(d) => tallasDe(d.productoId, d.conjuntoId, d.piezasExcluidas)} hayLineas={lineas.length > 0}
           onSumar={sumarHojas} onCancelar={() => setImportandoHojas(null)} />
       )}
 
@@ -396,7 +408,7 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
             </thead>
             <tbody>
               {lineas.map((l, i) => {
-                const tallas = tallasDe(l.productoId, l.conjuntoId);
+                const tallas = tallasDe(l.productoId, l.conjuntoId, l.piezasExcluidas);
                 const roles = verPiezas ? rolesDelProducto(l.productoId, productos, grupos, l.conjuntoId) : [];
                 const conjuntosLinea = conjuntosDeProduccion(l.productoId);
                 const conjuntoLinea = conjuntoDeLinea(productos.find((p) => p.id === l.productoId), l);

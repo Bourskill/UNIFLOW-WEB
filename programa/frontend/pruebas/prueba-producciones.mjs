@@ -29,7 +29,8 @@ console.log('\n--- Tallas con la prenda completa ---');
   ];
   const grupos = [{ id: 'g1', piezas: [{ piezaId: 'p1' }, { piezaId: 'p3' }] }, { id: 'g2', piezas: [{ piezaId: 'p2' }] }];
   comprobar('una prenda: todas sus tallas, en orden', tallasDeProduccion({ grupoIds: ['g1'] }, grupos, piezas).join() === 'S,M,L,XL');
-  comprobar('un kit: solo las que tienen todas las piezas', tallasDeProduccion({ grupoIds: ['g1', 'g2'] }, grupos, piezas).join() === 'S,M,L');
+  // Prendas con tallas distintas (niña 4-16, dama XS-XL): cada talla sale con las prendas que la tienen.
+  comprobar('varias prendas: las tallas de cualquiera', tallasDeProduccion({ grupoIds: ['g1', 'g2'] }, grupos, piezas).join() === 'S,M,L,XL');
   comprobar('prenda borrada: ninguna', tallasDeProduccion({ grupoIds: ['nada'] }, grupos, piezas).length === 0);
 }
 
