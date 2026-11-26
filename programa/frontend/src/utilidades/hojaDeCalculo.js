@@ -4,23 +4,29 @@
 // guardarlo como .xlsx o .csv.
 //
 // leerHoja(nombreArchivo, bytes) → filas (arreglo de arreglos de texto) de la
-// PRIMERA hoja. interpretarJugadores(filas, tallasValidas) → las líneas del
+// PRIMERA hoja. leerHojas(nombreArchivo, bytes) → [{ nombre, filas }], TODAS
+// las hojas del libro (un CSV es una sola, con el nombre del archivo). interpretarJugadores(filas, tallasValidas) → las líneas del
 // pedido, con avisos por fila.
 
 export async function leerHoja(nombreArchivo, bytes) {
+  return (await leerHojas(nombreArchivo, bytes))[0]?.filas || [];
+}
+
+export async function leerHojas(nombreArchivo, bytes) {
   const ext = (String(nombreArchivo).toLowerCase().match(/\.([a-z0-9]+)$/) || [])[1] || '';
   const datos = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   const esZip = datos[0] === 0x50 && datos[1] === 0x4b;
   if (esZip) {
     const archivos = await leerZip(datos);
-    if (archivos.has('xl/workbook.xml')) return filasDeXlsx(archivos);
-    if (archivos.has('content.xml')) return filasDeOds(archivos);
+    if (archivos.has('xl/workbook.xml')) return hojasDeXlsx(archivos);
+    if (archivos.has('content.xml')) return hojasDeOds(archivos);
     throw new Error('El archivo no parece una hoja de cálculo (.xlsx u .ods).');
   }
   if (ext === 'xls' || (datos[0] === 0xd0 && datos[1] === 0xcf)) {
     throw new Error('Los .xls viejos no se pueden leer: guardalo como .xlsx o .csv desde Excel.');
   }
-  return filasDeTexto(decodificarTexto(datos));
+  const nombre = String(nombreArchivo).replace(/\.[a-z0-9]+$/i, '');
+  return [{ nombre, filas: filasDeTexto(decodificarTexto(datos)) }];
 }
 
 // --- texto (CSV / TSV) ---------------------------------------------------
@@ -113,26 +119,45 @@ function textoXml(s) {
   });
 }
 
-function filasDeXlsx(archivos) {
-  // La primera hoja del libro: su archivo, por la relación del workbook.
+// Las hojas del libro en el orden de las pestañas, cada una por la relación
+// del workbook (las ocultas también: el usuario decide si cargarlas).
+function hojasDeXlsx(archivos) {
   const libro = archivos.get('xl/workbook.xml');
-  const idHoja = (libro.match(/<sheet\b[^>]*\br:id="([^"]+)"/) || libro.match(/<sheet\b[^>]*\bid="([^"]+)"/) || [])[1];
   const rels = archivos.get('xl/_rels/workbook.xml.rels') || '';
-  let destino = null;
+  const destinos = new Map();
   for (const m of rels.matchAll(/<Relationship\b([^>]*)\/?>/g)) {
     const id = (m[1].match(/\bId="([^"]+)"/) || [])[1];
-    if (id === idHoja) destino = (m[1].match(/\bTarget="([^"]+)"/) || [])[1];
+    destinos.set(id, (m[1].match(/\bTarget="([^"]+)"/) || [])[1]);
   }
-  const ruta = destino ? (destino.startsWith('/') ? destino.slice(1) : 'xl/' + destino.replace(/^\.\//, '')) : 'xl/worksheets/sheet1.xml';
-  const hoja = archivos.get(ruta) || archivos.get('xl/worksheets/sheet1.xml');
-  if (!hoja) throw new Error('No encontré la primera hoja del libro.');
+  const compartidos = textosCompartidos(archivos);
+  const hojas = [];
+  for (const s of libro.matchAll(/<sheet\b([^>]*?)\/?>/g)) {
+    const id = (s[1].match(/\br:id="([^"]+)"/) || s[1].match(/\bid="([^"]+)"/) || [])[1];
+    const nombre = textoXml((s[1].match(/\bname="([^"]*)"/) || [])[1] || 'Hoja ' + (hojas.length + 1));
+    const destino = destinos.get(id);
+    if (!destino) continue;
+    const ruta = destino.startsWith('/') ? destino.slice(1) : 'xl/' + destino.replace(/^\.\//, '');
+    const hoja = archivos.get(ruta);
+    if (hoja) hojas.push({ nombre, filas: filasDeHojaXlsx(hoja, compartidos) });
+  }
+  if (!hojas.length) {
+    const hoja = archivos.get('xl/worksheets/sheet1.xml');
+    if (!hoja) throw new Error('No encontré ninguna hoja en el libro.');
+    hojas.push({ nombre: 'Hoja 1', filas: filasDeHojaXlsx(hoja, compartidos) });
+  }
+  return hojas;
+}
 
+function textosCompartidos(archivos) {
   const compartidos = [];
   const sst = archivos.get('xl/sharedStrings.xml') || '';
   for (const si of sst.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)) {
     compartidos.push([...si[1].matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((t) => textoXml(t[1])).join(''));
   }
+  return compartidos;
+}
 
+function filasDeHojaXlsx(hoja, compartidos) {
   const filas = [];
   for (const fila of hoja.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)) {
     const valores = [];
@@ -163,9 +188,17 @@ function columnaANumero(letras) {
   return n - 1;
 }
 
-function filasDeOds(archivos) {
+function hojasDeOds(archivos) {
   const contenido = archivos.get('content.xml');
-  const tabla = (contenido.match(/<table:table\b[^>]*>([\s\S]*?)<\/table:table>/) || [])[1] || '';
+  const hojas = [];
+  for (const t of contenido.matchAll(/<table:table\b([^>]*)>([\s\S]*?)<\/table:table>/g)) {
+    const nombre = textoXml((t[1].match(/table:name="([^"]*)"/) || [])[1] || 'Hoja ' + (hojas.length + 1));
+    hojas.push({ nombre, filas: filasDeTablaOds(t[2]) });
+  }
+  return hojas.length ? hojas : [{ nombre: 'Hoja 1', filas: [] }];
+}
+
+function filasDeTablaOds(tabla) {
   const filas = [];
   for (const fila of tabla.matchAll(/<table:table-row\b([^>]*)>([\s\S]*?)<\/table:table-row>/g)) {
     const valores = [];

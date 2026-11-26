@@ -4,6 +4,8 @@ import { obtener } from '../datos/index.js';
 import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
+import { CampoAgrupacion } from '../componentes/CampoAgrupacion.jsx';
+import { agrupacionSugerida, nombresDeAgrupaciones } from '../utilidades/agrupaciones.js';
 
 // Clave con la que se guarda la única geometría de una pieza de talla única
 // (una capa con un solo contorno, ej. un tapacuellos): la pieza va marcada
@@ -103,6 +105,10 @@ export function ImportarPrenda({ archivo, onQuitar, onGuardado }) {
   const [presetAngulos, setPresetAngulos] = useState(PRESETS_ANGULOS[0].id);
   const [armarPrenda, setArmarPrenda] = useState(false);
   const [nombrePrenda, setNombrePrenda] = useState('');
+  // Agrupada por defecto con el nombre del archivo: así la moldería subida
+  // no se pierde entre todas las piezas de la Biblioteca.
+  const [agrupar, setAgrupar] = useState({ activa: true, nombre: agrupacionSugerida(archivo.name) });
+  const [agrupacionesExistentes, setAgrupacionesExistentes] = useState([]);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState(null);
 
@@ -129,6 +135,7 @@ export function ImportarPrenda({ archivo, onQuitar, onGuardado }) {
       setAnalisis(r);
       setFilas(r.piezas.map((p) => ({ incluir: p.tallas.length > 0, nombre: p.nombre })));
       setNombrePrenda(nuevo.name.replace(/\.pdf$/i, '').trim());
+      setAgrupacionesExistentes(nombresDeAgrupaciones(biblioteca));
       const cantidad = cantidadDeTallasComun(r.piezas);
       setTextoTallas(tallasDelArchivo(r.piezas) || tallasSugeridas(biblioteca, cantidad) || tallasRecordadas(cantidad));
       setEstado('listo');
@@ -187,6 +194,7 @@ export function ImportarPrenda({ archivo, onQuitar, onGuardado }) {
   if (incluidas.some((f) => !f.nombre.trim())) pendientes.push('nombre en todas las piezas');
   if (nombresRepetidos) pendientes.push('nombres repetidos');
   if (armarPrenda && !nombrePrenda.trim()) pendientes.push('nombre de la prenda');
+  if (agrupar.activa && !agrupar.nombre.trim()) pendientes.push('nombre de la agrupación');
   const puedeGuardar = estado === 'listo' && pendientes.length === 0;
 
   async function guardar() {
@@ -206,12 +214,14 @@ export function ImportarPrenda({ archivo, onQuitar, onGuardado }) {
           tallaUnica: !!r.tallaUnica,
           archivoOriginal: archivoUrl,
           formatoOriginal: 'pdf-prenda',
+          agrupacion: agrupar.activa ? agrupar.nombre.trim() : null,
         });
         creadas.push({ piezaId: pieza.id, rol: f.nombre.trim() });
       }
       if (armarPrenda) await crearGrupo({ nombre: nombrePrenda.trim(), piezas: creadas });
       onGuardado?.(
         archivo.name + ': ' + creadas.length + (creadas.length === 1 ? ' pieza guardada' : ' piezas guardadas') +
+          (agrupar.activa ? ' en la agrupación "' + agrupar.nombre.trim() + '"' : '') +
           (armarPrenda ? ' · prenda "' + nombrePrenda.trim() + '" armada.' : '.')
       );
     } catch (e) {
@@ -331,7 +341,9 @@ export function ImportarPrenda({ archivo, onQuitar, onGuardado }) {
             })}
           </div>
 
-          <Tarjeta className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <Tarjeta className="flex flex-col gap-3">
+            <CampoAgrupacion valor={agrupar} onCambiar={setAgrupar} existentes={agrupacionesExistentes} />
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
             <label className="flex items-center gap-2 text-sm font-medium text-foreground">
               <input type="checkbox" checked={armarPrenda} onChange={(e) => setArmarPrenda(e.target.checked)} />
               Juntar las piezas elegidas en una prenda
@@ -344,6 +356,7 @@ export function ImportarPrenda({ archivo, onQuitar, onGuardado }) {
                 className="max-w-[320px]"
               />
             )}
+            </div>
           </Tarjeta>
 
           <div className="flex flex-col gap-2">

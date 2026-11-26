@@ -6,7 +6,8 @@ import { conjuntosDe, conjuntoDeLinea } from '../utilidades/conjuntos.js';
 import { gruposDeProduccion } from '../utilidades/moldesDeProduccion.js';
 import { VistaPreviaNesting } from '../componentes/VistaPreviaNesting.jsx';
 import { Boton, Campo, Input, InputMultilinea, Select, Tarjeta, Chip, Aviso, ErrorCarga } from '../componentes/ui.jsx';
-import { leerHoja, filasDeTexto, interpretarJugadores } from '../utilidades/hojaDeCalculo.js';
+import { leerHojas, filasDeTexto, interpretarJugadores } from '../utilidades/hojaDeCalculo.js';
+import { destinosDeImportacion, destinoSugerido, lineaDeDestino } from '../utilidades/destinosDeHojas.js';
 
 // Producción → Pedidos: el pedido real de un equipo (talla + nombre + número
 // por jugador), cargado a mano, desde una planilla o pegado de Excel, y desde
@@ -244,6 +245,7 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState(null);
   const [importando, setImportando] = useState(null); // { jugadores, avisos, origen }
+  const [importandoHojas, setImportandoHojas] = useState(null); // { hojas: [{ nombre, filas }], origen }
   const [pegando, setPegando] = useState(false);
   const entradaArchivo = useRef(null);
   const tablaFinal = useRef(null);
@@ -277,8 +279,15 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
   async function leerArchivo(archivo) {
     setError(null);
     try {
-      const filas = await leerHoja(archivo.name, new Uint8Array(await archivo.arrayBuffer()));
-      const r = interpretarJugadores(filas, tallasPorDefecto);
+      const hojas = (await leerHojas(archivo.name, new Uint8Array(await archivo.arrayBuffer())))
+        .filter((h) => h.filas.some((f) => f.some((v) => v !== '')));
+      // Varias hojas con listados: cada una a su prenda (VistaHojas).
+      if (hojas.length > 1) {
+        setImportando(null);
+        setImportandoHojas({ hojas, origen: archivo.name });
+        return;
+      }
+      const r = interpretarJugadores(hojas[0]?.filas || [], tallasPorDefecto);
       if (r.jugadores.length === 0) throw new Error('La planilla no tiene jugadores (revisá que tenga columnas de nombre, talla y número).');
       setImportando({ ...r, origen: archivo.name });
     } catch (e) {
@@ -295,6 +304,10 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
     const nuevas = importando.jugadores.map((j) => nuevaLinea(productoId, j.talla, { nombre: j.nombre, numero: j.numero }));
     setLineas((prev) => (reemplazar ? nuevas : [...prev, ...nuevas]));
     setImportando(null);
+  }
+  function sumarHojas(nuevas, reemplazar) {
+    setLineas((prev) => (reemplazar ? nuevas : [...prev, ...nuevas]));
+    setImportandoHojas(null);
   }
 
   const sinTalla = lineas.filter((l) => !l.talla).length;
@@ -353,12 +366,18 @@ function EditorPedido({ inicial, datos, onCerrar, onGuardado }) {
       </div>
       <p className="-mt-2 text-xs text-faint-foreground">
         La planilla puede ser .xlsx, .ods o .csv, con columnas <b>Nombre</b>, <b>Talla</b> y <b>Número</b> (en cualquier orden;
-        sin títulos se toman en ese orden). Prendas sin nombre o sin número: dejá esa celda vacía.
+        sin títulos se toman en ese orden). Prendas sin nombre o sin número: dejá esa celda vacía. Con varias prendas o
+        conjuntos, el Excel puede traer una hoja por cada uno (ej. «DAMA», «CABALLERO», «PANTALONETA») y elegís a cuál va cada hoja.
       </p>
 
       {pegando && <PegarLista onListo={leerPegado} onCancelar={() => setPegando(false)} />}
       {importando && (
         <VistaImportacion importacion={importando} hayLineas={lineas.length > 0} onSumar={sumarImportados} onCancelar={() => setImportando(null)} />
+      )}
+      {importandoHojas && (
+        <VistaHojas importacion={importandoHojas} destinos={destinosDeImportacion(productos, grupos, productoId)}
+          tallasDeDestino={(d) => tallasDe(d.productoId, d.conjuntoId)} hayLineas={lineas.length > 0}
+          onSumar={sumarHojas} onCancelar={() => setImportandoHojas(null)} />
       )}
 
       {lineas.length > 0 ? (
@@ -533,6 +552,89 @@ function VistaImportacion({ importacion, hayLineas, onSumar, onCancelar }) {
           </>
         ) : (
           <Boton variante="primario" tamano="sm" onClick={() => onSumar(true)}>Cargar estos jugadores</Boton>
+        )}
+        <Boton variante="fantasma" tamano="sm" onClick={onCancelar}>Descartar</Boton>
+      </div>
+    </div>
+  );
+}
+
+// Un Excel con varias hojas, cada una con el listado de una prenda (o de un
+// conjunto: dama / caballero): se elige a qué va cada hoja -- adivinado por
+// el nombre de la pestaña -- y se cargan todas juntas.
+function VistaHojas({ importacion, destinos, tallasDeDestino, hayLineas, onSumar, onCancelar }) {
+  const { hojas, origen } = importacion;
+  const [asignadas, setAsignadas] = useState(() => hojas.map((h) => destinoSugerido(h.nombre, destinos)?.id || ''));
+  const porId = new Map(destinos.map((d) => [d.id, d]));
+  const productosEnOrden = [...new Set(destinos.map((d) => d.productoId))];
+
+  const leidas = hojas.map((h, i) => {
+    const d = porId.get(asignadas[i]);
+    return { hoja: h, destino: d, ...(d ? interpretarJugadores(h.filas, tallasDeDestino(d)) : { jugadores: [], avisos: [] }) };
+  });
+  const total = leidas.reduce((n, l) => n + l.jugadores.length, 0);
+  const sinTalla = leidas.reduce((n, l) => n + l.jugadores.filter((j) => !j.talla).length, 0);
+
+  function sumar(reemplazar) {
+    const nuevas = leidas.flatMap((l) => (l.destino
+      ? l.jugadores.map((j) => nuevaLinea(l.destino.productoId, j.talla, { nombre: j.nombre, numero: j.numero, ...lineaDeDestino(l.destino) }))
+      : []));
+    onSumar(nuevas, reemplazar);
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary-soft/20 p-3">
+      <div className="text-sm">
+        <b>{hojas.length} hojas</b> en {origen}: elegí a qué prenda va cada listado.
+        {sinTalla > 0 && <span className="text-danger"> · {sinTalla} sin talla válida (se agregan igual, para que la elijas)</span>}
+      </div>
+      <div className="flex flex-col gap-2">
+        {leidas.map((l, i) => (
+          <div key={i} className="flex flex-col gap-1.5 rounded-lg border border-border bg-surface p-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="min-w-[140px] text-sm font-medium" title="Nombre de la hoja">{l.hoja.nombre}</span>
+              <span className="text-faint-foreground">→</span>
+              <Select className="h-8 max-w-[320px] text-xs" value={asignadas[i]} aria-label={'Prenda de la hoja ' + l.hoja.nombre}
+                onChange={(e) => setAsignadas((prev) => prev.map((x, k) => (k === i ? e.target.value : x)))}>
+                {productosEnOrden.map((pid) => {
+                  const suyos = destinos.filter((d) => d.productoId === pid);
+                  return (
+                    <optgroup key={pid} label={suyos[0].producto}>
+                      {suyos.map((d) => <option key={d.id} value={d.id}>{d.etiqueta}</option>)}
+                    </optgroup>
+                  );
+                })}
+                <option value="">No cargar esta hoja</option>
+              </Select>
+              <span className="text-xs text-muted-foreground">
+                {l.destino ? l.jugadores.length + (l.jugadores.length === 1 ? ' jugador' : ' jugadores') : 'no se carga'}
+              </span>
+            </div>
+            {l.destino && l.jugadores.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {resumenPorTalla(l.jugadores).map(([t, n]) => <Chip key={t} tono={t === '?' ? 'peligro' : 'neutro'} className="uppercase">{t === '?' ? 'sin talla' : t} × {n}</Chip>)}
+              </div>
+            )}
+            {l.destino && l.jugadores.length === 0 && (
+              <span className="text-xs text-faint-foreground">Esta hoja no tiene jugadores (revisá que tenga columnas de nombre, talla y número).</span>
+            )}
+            {l.destino && l.avisos.length > 0 && (
+              <details className="text-xs text-danger">
+                <summary className="cursor-pointer">{l.avisos.length === 1 ? '1 aviso' : l.avisos.length + ' avisos'}</summary>
+                <ul className="mt-1 list-disc pl-5">{l.avisos.map((a, k) => <li key={k}>{a.mensaje}</li>)}</ul>
+              </details>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {hayLineas ? (
+          <>
+            <Boton variante="primario" tamano="sm" disabled={!total} onClick={() => sumar(false)}>Agregar {total} al final</Boton>
+            <Boton tamano="sm" disabled={!total} onClick={() => sumar(true)}>Reemplazar la lista</Boton>
+          </>
+        ) : (
+          <Boton variante="primario" tamano="sm" disabled={!total} onClick={() => sumar(true)}>Cargar {total} {total === 1 ? 'jugador' : 'jugadores'}</Boton>
         )}
         <Boton variante="fantasma" tamano="sm" onClick={onCancelar}>Descartar</Boton>
       </div>

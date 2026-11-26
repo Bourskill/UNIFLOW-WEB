@@ -11,6 +11,11 @@ import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
 import { FichaPieza } from './Formulario.jsx';
 import { FormularioPrenda } from '../componentes/FormularioPrenda.jsx';
 import { nombreDeEspejo } from '../utilidades/nombreEspejo.js';
+import { agrupacionDe, nombresDeAgrupaciones, piezasPorAgrupacion, SUELTAS } from '../utilidades/agrupaciones.js';
+
+// Lista (datalist) con las agrupaciones que existen, para los campos de
+// agrupación de esta pantalla.
+const ID_LISTA_AGRUPACIONES = 'biblioteca-agrupaciones';
 
 function presetDe(angulosPermitidos) {
   if (angulosPermitidos === 'libre') return 'libre';
@@ -265,6 +270,7 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
   const [editando, setEditando] = useState(false);
   const [categoria, setCategoria] = useState(pieza.categoria || '');
   const [tela, setTela] = useState(pieza.tela || '');
+  const [agrupacion, setAgrupacion] = useState(pieza.agrupacion || '');
   const [presetAngulos, setPresetAngulos] = useState(presetDe(pieza.angulosPermitidos));
   const [tallaUnica, setTallaUnica] = useState(!!pieza.tallaUnica);
   const [reprocesando, setReprocesando] = useState(false);
@@ -280,7 +286,7 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
 
   async function guardar() {
     const preset = PRESETS_ANGULOS.find((p) => p.id === presetAngulos);
-    const actualizada = await editarPieza(pieza.id, { categoria: categoria || null, tela: tela || null, angulosPermitidos: preset.valores, tallaUnica });
+    const actualizada = await editarPieza(pieza.id, { categoria: categoria || null, tela: tela || null, agrupacion: agrupacion.trim() || null, angulosPermitidos: preset.valores, tallaUnica });
     // El servidor ya devolvió la pieza como quedó: va directo a la caché, sin
     // volver a pedir la lista entera de piezas (eso era lo lento).
     confirmarGuardado('piezas', actualizada);
@@ -464,6 +470,9 @@ function FilaPieza({ pieza, rol, usadaEn, productosQueLaUsan, onCambio, onBorrar
           <Campo etiqueta="Tela por defecto" className="max-w-[180px]">
             <Input value={tela} onChange={(e) => setTela(e.target.value)} placeholder="Dry Fit" />
           </Campo>
+          <Campo etiqueta="Agrupación" className="max-w-[200px]">
+            <Input value={agrupacion} onChange={(e) => setAgrupacion(e.target.value)} placeholder="Sin agrupación" list={ID_LISTA_AGRUPACIONES} />
+          </Campo>
           <Campo etiqueta="Ángulos de rotación permitidos" className="max-w-[240px]">
             <Select value={presetAngulos} onChange={(e) => setPresetAngulos(e.target.value)}>
               {PRESETS_ANGULOS.map((p) => <option key={p.id} value={p.id}>{p.etiqueta}</option>)}
@@ -498,6 +507,14 @@ export function Piezas({ recargarSenal, onCambio }) {
   const [grupos, setGrupos] = useState([]);
   const [productos, setProductos] = useState([]);
   const [filtroCategoria, setFiltroCategoria] = useState('');
+  const [filtroAgrupacion, setFiltroAgrupacion] = useState('*'); // '*' = todas
+  // Modo "Agrupar piezas": se marcan piezas y se mueven a una agrupación.
+  const [eligiendo, setEligiendo] = useState(false);
+  const [elegidas, setElegidas] = useState(() => new Set());
+  const [destino, setDestino] = useState('');
+  const [moviendo, setMoviendo] = useState(false);
+  const [errorMover, setErrorMover] = useState(null);
+  const [cerradas, setCerradas] = useState(() => new Set()); // agrupaciones plegadas
   const [busqueda, setBusqueda] = useState('');
   const [prendaAbierta, setPrendaAbierta] = useState(null); // id de la prenda desplegada
   const [creandoPrenda, setCreandoPrenda] = useState(false);
@@ -554,6 +571,8 @@ export function Piezas({ recargarSenal, onCambio }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recargarSenal]);
 
+  const agrupaciones = useMemo(() => nombresDeAgrupaciones(piezas), [piezas]);
+
   const categorias = useMemo(
     () => [...new Set(piezas.map((p) => p.categoria).filter(Boolean))].sort(),
     [piezas]
@@ -599,6 +618,7 @@ export function Piezas({ recargarSenal, onCambio }) {
   const busquedaNormal = busqueda.trim().toLowerCase();
   const piezaCoincide = (p) =>
     (!filtroCategoria || p.categoria === filtroCategoria) &&
+    (filtroAgrupacion === '*' || agrupacionDe(p) === filtroAgrupacion) &&
     (!busquedaNormal || p.nombre.toLowerCase().includes(busquedaNormal));
 
   // TODAS las piezas, también las que ya son parte de una prenda: así se ven
@@ -606,7 +626,7 @@ export function Piezas({ recargarSenal, onCambio }) {
   const piezasVisibles = piezas.filter(piezaCoincide);
   const prendasVisibles = grupos.filter((g) => {
     const suyas = g.piezas.map((gp) => piezas.find((p) => p.id === gp.piezaId)).filter(Boolean);
-    if (busquedaNormal && g.nombre.toLowerCase().includes(busquedaNormal) && !filtroCategoria) return true;
+    if (busquedaNormal && g.nombre.toLowerCase().includes(busquedaNormal) && !filtroCategoria && filtroAgrupacion === '*') return true;
     return suyas.some(piezaCoincide);
   });
 
@@ -663,6 +683,61 @@ export function Piezas({ recargarSenal, onCambio }) {
     );
   }
 
+  // Mueve las piezas marcadas a la agrupación `nombre` ('' = sueltas). Cada
+  // pieza se guarda aparte; si alguna falla, se avisa y las demás quedan.
+  async function moverElegidas(nombre) {
+    setMoviendo(true);
+    setErrorMover(null);
+    const fallas = [];
+    const guardadas = new Map();
+    for (const id of elegidas) {
+      try {
+        const pieza = await editarPieza(id, { agrupacion: nombre.trim() || null });
+        confirmarGuardado('piezas', pieza);
+        guardadas.set(id, pieza);
+      } catch (e) {
+        fallas.push(e.message);
+      }
+    }
+    // Lo que devolvió el servidor va directo a la pantalla: releer la lista
+    // podía traer la copia de la caché de antes de mover alguna.
+    setPiezas((prev) => prev.map((p) => guardadas.get(p.id) || p));
+    setMoviendo(false);
+    if (fallas.length) {
+      setErrorMover('No se pudieron mover ' + fallas.length + ' piezas: ' + fallas[0]);
+      return;
+    }
+    setElegidas(new Set());
+    setEligiendo(false);
+    setDestino('');
+    onCambio?.();
+  }
+
+  function alternarElegida(id) {
+    setElegidas((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }
+
+  // En modo "Agrupar piezas", cada tarjeta lleva su casilla encima.
+  function tarjetaEligible(p) {
+    if (!eligiendo) return tarjetaDePieza(p);
+    const marcada = elegidas.has(p.id);
+    return (
+      <div key={p.id} className={'relative rounded-xl ' + (marcada ? 'ring-2 ring-primary' : '')}>
+        {tarjetaDePieza(p)}
+        <button type="button" onClick={() => alternarElegida(p.id)} aria-pressed={marcada}
+          aria-label={(marcada ? 'Desmarcar ' : 'Marcar ') + p.nombre}
+          className="absolute inset-0 z-10 flex items-start justify-end rounded-xl bg-transparent p-2">
+          <span className={'flex h-6 w-6 items-center justify-center rounded-md border text-sm font-bold ' +
+            (marcada ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-surface/90 text-transparent')}>✓</span>
+        </button>
+      </div>
+    );
+  }
+
   // Crear o editar una prenda (FormularioPrenda):
   // la prenda guardada entra a la lista en el acto y queda abierta.
   function alGuardarPrenda(guardada) {
@@ -697,6 +772,16 @@ export function Piezas({ recargarSenal, onCambio }) {
             placeholder="Buscar prenda o pieza…"
             className="max-w-[220px]"
           />
+          {agrupaciones.length > 0 && (
+            <>
+              <span className="text-xs font-medium text-faint-foreground">Agrupación:</span>
+              <Select value={filtroAgrupacion} onChange={(e) => setFiltroAgrupacion(e.target.value)} className="max-w-[200px]">
+                <option value="*">Todas</option>
+                {agrupaciones.map((n) => <option key={n} value={n}>{n}</option>)}
+                <option value={SUELTAS}>Sueltas</option>
+              </Select>
+            </>
+          )}
           {categorias.length > 0 && (
             <>
               <span className="text-xs font-medium text-faint-foreground">Categoría:</span>
@@ -772,14 +857,68 @@ export function Piezas({ recargarSenal, onCambio }) {
 
           {piezasVisibles.length > 0 && (
             <section className="flex flex-col gap-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">
-                Todas las piezas · {piezasVisibles.length}
-              </h3>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
-                {piezasVisibles.map((p) => tarjetaDePieza(p))}
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">
+                  Todas las piezas · {piezasVisibles.length}
+                </h3>
+                <Boton variante={eligiendo ? 'acento' : 'fantasma'} tamano="sm" className="ml-auto"
+                  title="Marcá piezas y juntalas bajo un nombre, para encontrarlas fácil al armar una prenda"
+                  onClick={() => { setEligiendo((v) => !v); setElegidas(new Set()); setErrorMover(null); }}>
+                  {eligiendo ? 'Cancelar' : 'Agrupar piezas…'}
+                </Boton>
               </div>
+              {eligiendo && (
+                <div className="sticky top-2 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-primary/40 bg-surface p-3 shadow-sm">
+                  <span className="text-sm text-foreground">
+                    {elegidas.size === 0 ? 'Marcá las piezas a agrupar' : elegidas.size + (elegidas.size === 1 ? ' pieza marcada' : ' piezas marcadas')}
+                  </span>
+                  <Input value={destino} onChange={(e) => setDestino(e.target.value)} list={ID_LISTA_AGRUPACIONES}
+                    placeholder="Agrupación nueva o existente" className="max-w-[260px]" aria-label="Agrupación de destino" />
+                  <Boton variante="primario" tamano="sm" disabled={moviendo || !elegidas.size || !destino.trim()} onClick={() => moverElegidas(destino)}>
+                    {moviendo ? 'Guardando…' : 'Agrupar'}
+                  </Boton>
+                  <Boton variante="fantasma" tamano="sm" disabled={moviendo || !elegidas.size} onClick={() => moverElegidas('')}
+                    title="Las marcadas quedan sueltas, sin agrupación">
+                    Quitar de su agrupación
+                  </Boton>
+                  {errorMover && <span className="text-xs text-danger">{errorMover}</span>}
+                </div>
+              )}
+              {piezasPorAgrupacion(piezasVisibles).map((s) => {
+                const sinNombres = agrupaciones.length === 0;
+                const plegada = cerradas.has(s.nombre);
+                return (
+                  <div key={'ag:' + s.nombre} className="flex flex-col gap-3">
+                    {!sinNombres && (
+                      <div className="flex items-center gap-2 border-b border-border pb-1">
+                        <button type="button" className="flex items-center gap-2 text-sm font-semibold text-foreground"
+                          aria-expanded={!plegada}
+                          onClick={() => setCerradas((prev) => { const n = new Set(prev); if (n.has(s.nombre)) n.delete(s.nombre); else n.add(s.nombre); return n; })}>
+                          <span className="text-faint-foreground">{plegada ? '▸' : '▾'}</span>
+                          {s.nombre || 'Sueltas (sin agrupación)'}
+                          <span className="text-xs font-normal text-faint-foreground">{s.piezas.length}</span>
+                        </button>
+                        {eligiendo && (
+                          <button type="button" className="ml-auto text-xs text-primary hover:underline"
+                            onClick={() => setElegidas((prev) => new Set([...prev, ...s.piezas.map((p) => p.id)]))}>
+                            Marcar todas
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {!plegada && (
+                      <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
+                        {s.piezas.map((p) => tarjetaEligible(p))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </section>
           )}
+          <datalist id={ID_LISTA_AGRUPACIONES}>
+            {agrupaciones.map((n) => <option key={n} value={n} />)}
+          </datalist>
         </>
       )}
     </div>

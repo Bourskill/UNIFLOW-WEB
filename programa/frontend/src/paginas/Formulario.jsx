@@ -5,6 +5,9 @@ import { PRESETS_ANGULOS, ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Tarjeta, Chip, Aviso, Ayuda } from '../componentes/ui.jsx';
 import { TrazosPreview } from '../componentes/TrazosPreview.jsx';
 import { ImportarPrenda } from './ImportarPrenda.jsx';
+import { obtener } from '../datos/index.js';
+import { CampoAgrupacion } from '../componentes/CampoAgrupacion.jsx';
+import { agrupacionSugerida, nombresDeAgrupaciones } from '../utilidades/agrupaciones.js';
 
 function leerArchivoComoTexto(archivo) {
   return new Promise((resolve, reject) => {
@@ -286,6 +289,13 @@ export function Formulario({ onCambio }) {
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState(null);
   const [exito, setExito] = useState(null);
+  // Las piezas sueltas que se suben juntas quedan agrupadas (con el nombre
+  // del primer archivo, editable), salvo que se destilde.
+  const [agrupar, setAgrupar] = useState({ activa: true, nombre: '' });
+  const [agrupacionesExistentes, setAgrupacionesExistentes] = useState([]);
+  useEffect(() => {
+    obtener('piezas').then((ps) => setAgrupacionesExistentes(nombresDeAgrupaciones(ps))).catch(() => {});
+  }, [exito]);
 
   function ponerTipo(id, tipo) {
     setFichas((prev) => prev.map((f) => (f.id === id ? { ...f, tipo } : f)));
@@ -299,6 +309,7 @@ export function Formulario({ onCambio }) {
       tipo: formatoDeArchivo(archivo) === 'pdf' ? 'detectando' : 'pieza',
     }));
     setFichas((prev) => [...prev, ...nuevas]);
+    setAgrupar((a) => (a.nombre ? a : { ...a, nombre: agrupacionSugerida(archivos[0]?.name) }));
     for (const f of nuevas) {
       if (f.tipo !== 'detectando') continue;
       leerArchivoComoBase64(f.archivo)
@@ -359,6 +370,7 @@ export function Formulario({ onCambio }) {
   if (armarPrenda && !nombrePrenda.trim()) pendientes.push('nombre de la prenda');
   if (armarPrenda && sinRol > 0) pendientes.push('rol en ' + sinRol + (sinRol === 1 ? ' pieza' : ' piezas'));
   if (armarPrenda && hayRolesRepetidos) pendientes.push('roles repetidos');
+  if (agrupar.activa && !agrupar.nombre.trim()) pendientes.push('nombre de la agrupación');
   const puedeGuardar = fichasPieza.length > 0 && pendientes.length === 0;
 
   async function guardarTodo() {
@@ -376,6 +388,7 @@ export function Formulario({ onCambio }) {
           geometriaPorTalla: datos.geometriaPorTalla,
           archivoOriginal: datos.archivoOriginal,
           formatoOriginal: datos.formatoOriginal,
+          agrupacion: agrupar.activa ? agrupar.nombre.trim() : null,
         });
         piezasDelGrupo.push({ piezaId: creada.id, rol: datos.rol });
       }
@@ -390,6 +403,7 @@ export function Formulario({ onCambio }) {
       setDatosPorFicha({});
       setArmarPrenda(false);
       setNombrePrenda('');
+      setAgrupar((a) => ({ ...a, nombre: '' }));
       onCambio?.();
     } catch (e) {
       setError(e.message);
@@ -444,6 +458,7 @@ export function Formulario({ onCambio }) {
 
       {fichasPieza.length > 0 && (
         <Tarjeta className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <CampoAgrupacion valor={agrupar} onCambiar={setAgrupar} existentes={agrupacionesExistentes} />
           <label className="flex items-center gap-2 text-sm font-medium text-foreground">
             <input type="checkbox" checked={armarPrenda} onChange={(e) => setArmarPrenda(e.target.checked)} />
             Juntar en una prenda

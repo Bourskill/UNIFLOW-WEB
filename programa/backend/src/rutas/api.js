@@ -577,7 +577,7 @@ router.post('/piezas/resolver-multitalla', async (req, res) => {
 // Crea la Pieza con las geometrías YA resueltas por talla (el frontend
 // analizó y confirmó cada archivo del rango de tallas antes de llegar acá).
 router.post('/piezas', async (req, res) => {
-  const { nombre, categoria, angulosPermitidos, tela, geometriaPorTalla, archivoOriginal, formatoOriginal, tallaUnica } = req.body;
+  const { nombre, categoria, angulosPermitidos, tela, geometriaPorTalla, archivoOriginal, formatoOriginal, tallaUnica, agrupacion } = req.body;
   if (!nombre || !geometriaPorTalla || Object.keys(geometriaPorTalla).length === 0) {
     return res.status(400).json({ error: 'Falta nombre o geometriaPorTalla' });
   }
@@ -594,6 +594,9 @@ router.post('/piezas', async (req, res) => {
     // Libre, no un enum -- una pieza puede ser "Delantero", "Manga", "Cuello",
     // lo que use cada taller; solo sirve para filtrar/agrupar en la biblioteca.
     categoria: categoria || null,
+    // Agrupación de moldería (ej. el archivo del que salió): solo ordena la
+    // Biblioteca y el selector de piezas al armar una prenda. No es una prenda.
+    agrupacion: String(agrupacion || '').trim() || null,
     angulosPermitidos: angulosPermitidos?.length ? angulosPermitidos : [0, 180],
     tela: tela || null,
     // Un solo archivo por Pieza (no uno por talla, sería el mismo repetido
@@ -632,6 +635,7 @@ router.post('/piezas/:id/espejo', async (req, res) => {
     id: nanoid(),
     nombre,
     categoria: original.categoria || null,
+    agrupacion: original.agrupacion || null,
     angulosPermitidos: original.angulosPermitidos?.length ? original.angulosPermitidos : [0, 180],
     tela: original.tela || null,
     archivoOriginal: original.archivoOriginal || null,
@@ -655,7 +659,7 @@ router.post('/piezas/:id/espejo', async (req, res) => {
 });
 
 router.put('/piezas/:id', async (req, res) => {
-  const { nombre, categoria, angulosPermitidos, tela, tallaUnica } = req.body;
+  const { nombre, categoria, angulosPermitidos, tela, tallaUnica, agrupacion } = req.body;
   const pieza = await leerRegistro('piezas', req.params.id);
   if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' });
 
@@ -663,6 +667,7 @@ router.put('/piezas/:id', async (req, res) => {
   if (categoria !== undefined) pieza.categoria = categoria;
   if (angulosPermitidos !== undefined) pieza.angulosPermitidos = angulosPermitidos;
   if (tela !== undefined) pieza.tela = tela;
+  if (agrupacion !== undefined) pieza.agrupacion = String(agrupacion || '').trim() || null;
   // Marca explícita del usuario -- nunca se infiere solo de "tiene una sola
   // talla cargada" (motor/resolverPedido.js·tallaRealDePieza): una pieza a
   // mitad de cargar sus tallas (PUT /piezas/:id/tallas/:talla de a una)

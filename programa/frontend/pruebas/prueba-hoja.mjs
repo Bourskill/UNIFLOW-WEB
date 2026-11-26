@@ -2,7 +2,7 @@
 // CSV (con ; , o tabulador, UTF-8 o Windows-1252), Excel .xlsx y .ods, con
 // archivos armados acá igual que los guardan esos programas (zip con deflate).
 import zlib from 'node:zlib';
-import { leerHoja, interpretarJugadores } from '../src/utilidades/hojaDeCalculo.js';
+import { leerHoja, leerHojas, interpretarJugadores } from '../src/utilidades/hojaDeCalculo.js';
 
 let fallos = 0, pasadas = 0;
 function comprobar(desc, cond, detalle) {
@@ -77,6 +77,31 @@ console.log('\n--- LibreOffice (.ods) ---');
   });
   const r = interpretarJugadores(await leerHoja('equipo.ods', ods), tallas);
   comprobar('lee el .ods (con espacios y filas vacías)', r.jugadores.map((j) => j.nombre + '/' + j.talla + '/' + j.numero).join(' ') === 'RUIZ DÍAZ/l/8', JSON.stringify(r.jugadores));
+}
+
+console.log('\n--- Varias hojas (una por prenda) ---');
+{
+  const xlsx = zip({
+    'xl/workbook.xml': '<workbook xmlns:r="r"><sheets><sheet name="CAMISETA DAMA" sheetId="1" r:id="rId3"/><sheet name="Pantaloneta &amp; medias" sheetId="2" r:id="rId1"/></sheets></workbook>',
+    'xl/_rels/workbook.xml.rels': '<Relationships><Relationship Id="rId1" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Target="/xl/worksheets/sheet1.xml"/></Relationships>',
+    'xl/sharedStrings.xml': '<sst><si><t>Nombre</t></si><si><t>Talla</t></si><si><t>ANA</t></si><si><t>LUIS</t></si></sst>',
+    'xl/worksheets/sheet1.xml': '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="inlineStr"><is><t>S</t></is></c></row></sheetData></worksheet>',
+    'xl/worksheets/sheet2.xml': '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>3</v></c><c r="B2" t="inlineStr"><is><t>L</t></is></c></row></sheetData></worksheet>',
+  });
+  const hojas = await leerHojas('pedido.xlsx', xlsx);
+  comprobar('lee todas las hojas, en el orden de las pestañas y con su nombre', hojas.map((h) => h.nombre).join('|') === 'CAMISETA DAMA|Pantaloneta & medias', JSON.stringify(hojas.map((h) => h.nombre)));
+  comprobar('cada hoja con sus propias filas', hojas[0].filas[1][0] === 'ANA' && hojas[1].filas[1][0] === 'LUIS', JSON.stringify(hojas));
+  comprobar('leerHoja sigue dando la primera', (await leerHoja('pedido.xlsx', xlsx))[1][0] === 'ANA');
+  const ods = zip({
+    'content.xml': '<office:document-content><office:body><office:spreadsheet>' +
+      '<table:table table:name="Dama"><table:table-row><table:table-cell><text:p>ANA</text:p></table:table-cell><table:table-cell><text:p>s</text:p></table:table-cell></table:table-row></table:table>' +
+      '<table:table table:name="Caballero"><table:table-row><table:table-cell><text:p>LUIS</text:p></table:table-cell><table:table-cell><text:p>l</text:p></table:table-cell></table:table-row></table:table>' +
+      '</office:spreadsheet></office:body></office:document-content>',
+  });
+  const hojasOds = await leerHojas('pedido.ods', ods);
+  comprobar('.ods: todas las hojas con su nombre', hojasOds.map((h) => h.nombre + ':' + h.filas[0][0]).join('|') === 'Dama:ANA|Caballero:LUIS', JSON.stringify(hojasOds));
+  const csv = await leerHojas('lista dama.csv', new TextEncoder().encode('ANA;s\n'));
+  comprobar('un CSV es una sola hoja, con el nombre del archivo', csv.length === 1 && csv[0].nombre === 'lista dama', JSON.stringify(csv));
 }
 
 console.log('\n--- Lo que no se puede leer ---');

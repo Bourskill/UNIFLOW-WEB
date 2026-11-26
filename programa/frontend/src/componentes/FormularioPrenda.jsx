@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { crearGrupo, editarGrupo } from '../api.js';
 import { confirmarGuardado } from '../datos/index.js';
 import { ordenarTallasNatural } from '../constantes.js';
-import { Boton, Campo, Input, Aviso } from './ui.jsx';
+import { Boton, Campo, Input, Select, Aviso } from './ui.jsx';
 import { TrazosPreview } from './TrazosPreview.jsx';
+import { agrupacionDe, nombresDeAgrupaciones, piezasPorAgrupacion, SUELTAS } from '../utilidades/agrupaciones.js';
 
 function tallasDe(pieza) {
   return pieza && !pieza.tallaUnica ? ordenarTallasNatural(Object.keys(pieza.dimensionesPorTalla || {})) : [];
@@ -37,6 +38,13 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
     (grupo?.piezas || []).map((gp) => ({ id: crypto.randomUUID(), piezaId: gp.piezaId, rol: gp.rol, par: !!gp.par }))
   );
   const [busqueda, setBusqueda] = useState('');
+  // Agrupación de moldería que se muestra (utilidades/agrupaciones.js): al
+  // editar, la de sus piezas; '*' = todas.
+  const [verAgrupacion, setVerAgrupacion] = useState(() => {
+    const suyas = (grupo?.piezas || []).map((gp) => agrupacionDe(piezas.find((p) => p.id === gp.piezaId))).filter(Boolean);
+    return suyas.length ? suyas[0] : '*';
+  });
+  const agrupaciones = useMemo(() => nombresDeAgrupaciones(piezas), [piezas]);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState(null);
 
@@ -48,8 +56,22 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
   }, [filas]);
 
   const disponibles = piezas.filter(
-    (p) => !busqueda.trim() || p.nombre.toLowerCase().includes(busqueda.trim().toLowerCase())
+    (p) => (!busqueda.trim() || p.nombre.toLowerCase().includes(busqueda.trim().toLowerCase())) &&
+      (verAgrupacion === '*' || agrupacionDe(p) === verAgrupacion)
   );
+  const secciones = piezasPorAgrupacion(disponibles);
+
+  // "+ Todas": suma las piezas de una agrupación que todavía no están.
+  function agregarTodas(lista) {
+    setFilas((prev) => {
+      const filasNuevas = [...prev];
+      for (const p of lista) {
+        if (filasNuevas.some((f) => f.piezaId === p.id)) continue;
+        filasNuevas.push({ id: crypto.randomUUID(), piezaId: p.id, rol: rolLibre(p.nombre, filasNuevas) });
+      }
+      return filasNuevas;
+    });
+  }
 
   function agregar(pieza) {
     setFilas((prev) => [...prev, { id: crypto.randomUUID(), piezaId: pieza.id, rol: rolLibre(pieza.nombre, prev) }]);
@@ -167,17 +189,39 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
 
         {/* La biblioteca para elegir */}
         <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">Biblioteca</h4>
-            <Input
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar pieza…"
-              className="max-w-[200px] py-1.5"
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              {agrupaciones.length > 0 && (
+                <Select value={verAgrupacion} onChange={(e) => setVerAgrupacion(e.target.value)} className="max-w-[200px] py-1.5" aria-label="Agrupación">
+                  <option value="*">Todas las agrupaciones</option>
+                  {agrupaciones.map((n) => <option key={n} value={n}>{n}</option>)}
+                  <option value={SUELTAS}>Sueltas (sin agrupación)</option>
+                </Select>
+              )}
+              <Input
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar pieza…"
+                className="max-w-[200px] py-1.5"
+              />
+            </div>
           </div>
           <div className="grid max-h-[420px] grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2 overflow-y-auto pr-1">
-            {disponibles.map((p) => {
+            {secciones.map((s) => [
+              agrupaciones.length > 0 && (
+                <div key={'h:' + s.nombre} className="col-span-full flex items-center gap-2 pt-1">
+                  <span className="text-xs font-semibold text-muted-foreground">{s.nombre || 'Sueltas'}</span>
+                  <span className="text-[11px] text-faint-foreground">{s.piezas.length}</span>
+                  {s.nombre && (
+                    <button type="button" className="ml-auto text-[11px] text-primary hover:underline" onClick={() => agregarTodas(s.piezas)}
+                      title="Suma todas las piezas de esta agrupación que todavía no están en la prenda">
+                      + Todas
+                    </button>
+                  )}
+                </div>
+              ),
+              ...s.piezas.map((p) => {
               const veces = vecesElegida.get(p.id) || 0;
               const tallas = tallasDe(p);
               return (
@@ -209,7 +253,7 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
                   </div>
                 </button>
               );
-            })}
+            })])}
             {disponibles.length === 0 && (
               <p className="col-span-full text-sm text-faint-foreground">
                 {piezas.length === 0 ? 'La biblioteca está vacía -- subí piezas primero.' : 'Ninguna pieza coincide.'}
