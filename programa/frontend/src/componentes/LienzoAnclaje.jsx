@@ -155,7 +155,22 @@ export function candidatosDe(geo, zonasDeEstaPieza, zonaEditandoId, leyenda) {
     for (const k of ['arriba', 'abajo', 'izquierda', 'derecha']) {
       const e = geo.extremos ? geo.extremos[k] : null;
       if (!e) continue;
-      out.push({ clase: 'extremo', prioridad: 2, etiqueta: 'El ' + NOMBRES_EXTREMO[k], x: e.x, y: e.y, ref: { tipo: 'extremo', parte: k } });
+      // Empatados (los dos hombros igual de altos): uno por lugar, y el ancla
+      // se acuerda de cuál (rx/ry), así no salta al otro en otra talla.
+      // Ordenados por lado y nombrados por lado (no "1 de 2": el orden del
+      // archivo cambia de talla a talla).
+      const horizontal = k === 'arriba' || k === 'abajo';
+      const lugares = [...(geo.extremosEmpatados?.[k] || [e])].sort((p, q) => (horizontal ? p.x - q.x : p.y - q.y));
+      const lados = horizontal ? ['izquierda', 'centro', 'derecha'] : ['arriba', 'medio', 'abajo'];
+      lugares.forEach((p, i) => {
+        const rp = rel(p.x, p.y);
+        const lado = lugares.length === 2 ? [lados[0], lados[2]][i] : lugares.length === 3 ? lados[i] : (i + 1) + ' de ' + lugares.length;
+        out.push({
+          clase: 'extremo', prioridad: 2, x: p.x, y: p.y,
+          etiqueta: 'El ' + NOMBRES_EXTREMO[k] + (lugares.length > 1 ? ' (' + lado + ')' : ''),
+          ref: { tipo: 'extremo', parte: k, rx: rp.rx, ry: rp.ry },
+        });
+      });
     }
     for (let i = 0; i < (geo.salientes || []).length; i++) {
       const s = geo.salientes[i];

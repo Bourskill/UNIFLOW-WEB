@@ -73,5 +73,31 @@ console.log('\n--- Lo que ya andaba, igual ---');
   comprobar('misma cuenta de piquetes: manda el índice, sin aviso', r.ok && !r.aviso && cerca(r.punto.x, 0.539 * 78, 1e-6));
 }
 
+console.log('\n--- El punto más alto con los dos hombros empatados (frente 7993 MASC) ---');
+{
+  const { geometriaParaAnclaje } = await import('../src/motor/geometriaAnclaje.js');
+  // Un frente con dos hombros igual de altos; en una talla el archivo trae
+  // primero el hombro izquierdo, en la otra el derecho.
+  const frente = (W, H, derechoPrimero) => {
+    const izq = [W * 0.3, H], der = [W * 0.7, H];
+    const puntos = [[0, 0], [W, 0], [W, H * 0.7], ...(derechoPrimero ? [der, [W * 0.5, H * 0.85], izq] : [izq, [W * 0.5, H * 0.85], der].reverse()), [0, H * 0.7]];
+    return { nombre: 'F', dimensionesPorTalla: { T: { anchoCm: W / 10, altoCm: H / 10 } }, geometriaPorTalla: { T: { poligonoMm: puntos } } };
+  };
+  const enTalla = (derechoPrimero, refExtra) => {
+    const geo = geometriaParaAnclaje(frente(540, 750, derechoPrimero), 'T');
+    return resolverReferencia({ tipo: 'extremo', parte: 'arriba', ...refExtra }, { geometria: { P: geo }, pieza: 'P' });
+  };
+  const izqA = enTalla(false, { rx: 0.3, ry: 0 }), izqB = enTalla(true, { rx: 0.3, ry: 0 });
+  comprobar('con el hombro elegido (rx/ry): el mismo en las dos tallas', izqA.ok && izqB.ok && cerca(izqA.punto.x, 16.2, 0.01) && cerca(izqB.punto.x, 16.2, 0.01), izqA.punto?.x + ' / ' + izqB.punto?.x);
+  const der = enTalla(true, { rx: 0.7, ry: 0 });
+  comprobar('y el derecho si se eligió el derecho', der.ok && cerca(der.punto.x, 37.8, 0.01), der.punto?.x);
+  const viejaA = enTalla(false, {}), viejaB = enTalla(true, {});
+  comprobar('un ancla vieja (sin rx/ry) sigue como antes: el primero del archivo', viejaA.ok && viejaB.ok && cerca(viejaA.punto.x, 37.8, 0.01) && cerca(viejaB.punto.x, 37.8, 0.01), viejaA.punto?.x + ' / ' + viejaB.punto?.x);
+  const geo = geometriaParaAnclaje(frente(540, 750, false), 'T');
+  comprobar('arriba quedan los dos hombros como lugares empatados', geo.extremosEmpatados.arriba?.length === 2 && geo.extremosEmpatados.arriba.map((p) => p.x.toFixed(1)).sort().join() === '16.2,37.8', JSON.stringify(geo.extremosEmpatados.arriba));
+  const unico = geometriaParaAnclaje({ nombre: 'M', dimensionesPorTalla: { T: { anchoCm: 40, altoCm: 30 } }, geometriaPorTalla: { T: { poligonoMm: [[0, 0], [400, 0], [200, 300]] } } }, 'T');
+  comprobar('con un solo punto más alto no se marca empate', !unico.extremosEmpatados.arriba, JSON.stringify(unico.extremosEmpatados));
+}
+
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');
 process.exit(fallos ? 1 : 0);

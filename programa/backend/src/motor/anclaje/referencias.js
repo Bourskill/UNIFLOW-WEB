@@ -272,6 +272,17 @@ function resolverReferencia(ref, ctx) {
                      ref.parte + "».");
       }
       var e = geo.extremos[ref.parte];
+      // Empatados (dos hombros igual de altos): el que se eligió en Diseño,
+      // por su posición relativa -- no el primero del archivo, que cambia
+      // de talla a talla. Anclas viejas (sin rx/ry): como siempre.
+      var empatados = geo.extremosEmpatados && geo.extremosEmpatados[ref.parte];
+      if (empatados && empatados.length > 1 && typeof ref.rx === "number" && typeof ref.ry === "number" && geo.pieza) {
+        var W = geo.pieza.ancho_cm || 1, H = geo.pieza.alto_cm || 1;
+        e = empatados.reduce(function (mejor, p) {
+          var d = Math.abs(p.x / W - ref.rx) + Math.abs(p.y / H - ref.ry);
+          return d < mejor.d ? { p: p, d: d } : mejor;
+        }, { p: e, d: Infinity }).p;
+      }
       return logro({ x: e.x, y: e.y }, null,
                    "extremo " + ref.parte + " de " + nombrePieza);
 

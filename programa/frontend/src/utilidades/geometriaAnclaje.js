@@ -18,6 +18,27 @@ function calcularExtremos(vertices) {
   return { arriba, abajo, izquierda, derecha };
 }
 
+// Extremos empatados: dos lugares distintos igual de altos (los dos hombros
+// de un frente). calcularExtremos se queda con el primero del archivo, y ese
+// orden cambia de talla a talla: lo anclado ahí saltaba al otro hombro. Acá
+// van todos los lugares empatados (a medio milímetro, separados más de 1 cm),
+// para que el ancla elija el que se eligió en Diseño (su rx/ry, ver
+// referencias.js·"extremo"). Solo cuando hay más de uno.
+function extremosEmpatados(vertices, extremos) {
+  const EMPATE = 0.05, SEPARADOS = 1;
+  const valor = { arriba: (v) => -v.y, abajo: (v) => v.y, izquierda: (v) => -v.x, derecha: (v) => v.x };
+  const out = {};
+  for (const k of Object.keys(valor)) {
+    const tope = valor[k](extremos[k]);
+    const lugares = [extremos[k]];
+    for (const v of vertices) {
+      if (tope - valor[k](v) <= EMPATE && lugares.every((l) => Math.hypot(l.x - v.x, l.y - v.y) > SEPARADOS)) lugares.push(v);
+    }
+    if (lugares.length > 1) out[k] = lugares;
+  }
+  return out;
+}
+
 function round3(n) { return Math.round(n * 1000) / 1000; }
 
 export function geometriaParaAnclaje(pieza, talla) {
@@ -58,6 +79,7 @@ export function geometriaParaAnclaje(pieza, talla) {
     pieza: { ancho_cm: dim.anchoCm, alto_cm: dim.altoCm },
     vertices,
     extremos: calcularExtremos(vertices),
+    extremosEmpatados: extremosEmpatados(vertices, calcularExtremos(vertices)),
     piquetes,
     salientes,
   };
