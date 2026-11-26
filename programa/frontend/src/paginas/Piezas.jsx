@@ -738,6 +738,12 @@ export function Piezas({ recargarSenal, onCambio }) {
     );
   }
 
+  // Piezas agrupadas desde el selector de una prenda: van directo a la lista.
+  function alAgruparDesdePrenda(guardadas) {
+    const porId = new Map(guardadas.map((p) => [p.id, p]));
+    setPiezas((prev) => prev.map((p) => porId.get(p.id) || p));
+  }
+
   // Crear o editar una prenda (FormularioPrenda):
   // la prenda guardada entra a la lista en el acto y queda abierta.
   function alGuardarPrenda(guardada) {
@@ -803,7 +809,7 @@ export function Piezas({ recargarSenal, onCambio }) {
       )}
 
       {creandoPrenda && (
-        <FormularioPrenda piezas={piezas} onGuardado={alGuardarPrenda} onCancelar={() => setCreandoPrenda(false)} />
+        <FormularioPrenda piezas={piezas} onPiezasCambiadas={alAgruparDesdePrenda} onGuardado={alGuardarPrenda} onCancelar={() => setCreandoPrenda(false)} />
       )}
 
       {cargando ? (
@@ -827,7 +833,7 @@ export function Piezas({ recargarSenal, onCambio }) {
                     <FormularioPrenda
                       key={g.id}
                       grupo={g}
-                      piezas={piezas}
+                      piezas={piezas} onPiezasCambiadas={alAgruparDesdePrenda}
                       onGuardado={alGuardarPrenda}
                       onCancelar={() => setEditandoPrenda(null)}
                     />

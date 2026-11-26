@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { crearGrupo, editarGrupo } from '../api.js';
+import { crearGrupo, editarGrupo, editarPieza } from '../api.js';
+import { pedirTexto } from './pedirTexto.jsx';
 import { confirmarGuardado } from '../datos/index.js';
 import { ordenarTallasNatural } from '../constantes.js';
 import { Boton, Campo, Input, Select, Aviso } from './ui.jsx';
@@ -31,7 +32,12 @@ function rolLibre(base, filas) {
  * @param {(grupo: object) => void} props.onGuardado  con la prenda como quedó en el servidor
  * @param {() => void} props.onCancelar
  */
-export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
+export function FormularioPrenda({ grupo, piezas: piezasRecibidas, onGuardado, onCancelar, onPiezasCambiadas }) {
+  // Las piezas que se agruparon desde acá, ya con su agrupación nueva (el
+  // servidor las devolvió), hasta que la Biblioteca las traiga.
+  const [cambiadas, setCambiadas] = useState(() => new Map());
+  const piezas = useMemo(() => piezasRecibidas.map((p) => cambiadas.get(p.id) || p), [piezasRecibidas, cambiadas]);
+  const [agrupando, setAgrupando] = useState(false);
   const editando = !!grupo;
   const [nombre, setNombre] = useState(grupo?.nombre || '');
   const [filas, setFilas] = useState(() =>
@@ -60,6 +66,33 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
       (verAgrupacion === '*' || agrupacionDe(p) === verAgrupacion)
   );
   const secciones = piezasPorAgrupacion(disponibles);
+
+  // "Agrupar estas": las piezas que se ven (por la búsqueda o la
+  // agrupación elegida) pasan a una agrupación, sin salir de acá.
+  async function agruparVisibles() {
+    const nombre = await pedirTexto(
+      'Nombre de la agrupación para estas ' + disponibles.length + ' piezas (si ya existe, se suman a ella):',
+      verAgrupacion !== '*' && verAgrupacion ? verAgrupacion : busqueda.trim().toUpperCase()
+    );
+    if (!nombre?.trim()) return;
+    setAgrupando(true);
+    setError(null);
+    const nuevas = new Map(cambiadas);
+    try {
+      for (const p of disponibles) {
+        const guardada = await editarPieza(p.id, { agrupacion: nombre.trim() });
+        confirmarGuardado('piezas', guardada);
+        nuevas.set(p.id, guardada);
+      }
+    } catch (e) {
+      setError('No se pudieron agrupar todas: ' + e.message);
+    }
+    setCambiadas(nuevas);
+    onPiezasCambiadas?.([...nuevas.values()]);
+    setBusqueda('');
+    setVerAgrupacion(nombre.trim());
+    setAgrupando(false);
+  }
 
   // "+ Todas": suma las piezas de una agrupación que todavía no están.
   function agregarTodas(lista) {
@@ -192,7 +225,7 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-faint-foreground">Biblioteca</h4>
             <div className="flex flex-wrap items-center gap-2">
-              {agrupaciones.length > 0 && (
+              {(agrupaciones.length > 0 || verAgrupacion !== '*') && (
                 <Select value={verAgrupacion} onChange={(e) => setVerAgrupacion(e.target.value)} className="max-w-[200px] py-1.5" aria-label="Agrupación">
                   <option value="*">Todas las agrupaciones</option>
                   {agrupaciones.map((n) => <option key={n} value={n}>{n}</option>)}
@@ -205,9 +238,22 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
                 placeholder="Buscar pieza…"
                 className="max-w-[200px] py-1.5"
               />
+              {disponibles.length > 0 && (busqueda.trim() || verAgrupacion === SUELTAS) && (
+                <Boton type="button" variante="fantasma" tamano="sm" onClick={agruparVisibles} disabled={agrupando}
+                  title="Junta las piezas que se ven ahora bajo un nombre, para encontrarlas fácil la próxima vez">
+                  {agrupando ? 'Agrupando…' : 'Agrupar estas ' + disponibles.length + '…'}
+                </Boton>
+              )}
             </div>
           </div>
-          <div className="grid max-h-[420px] grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2 overflow-y-auto pr-1">
+          {agrupaciones.length === 0 && piezas.length > 12 && !busqueda.trim() && (
+            <p className="text-xs text-faint-foreground">
+              Para no buscar entre todas: escribí parte del nombre (ej. «voley») y tocá «Agrupar estas…».
+            </p>
+          )}
+          {/* auto-rows-max: sin esto, con muchas piezas las filas se achicaban
+              para caber en el alto de la caja y las vistas quedaban aplastadas. */}
+          <div className="grid max-h-[460px] auto-rows-max content-start grid-cols-[repeat(auto-fill,minmax(130px,1fr))] gap-2 overflow-y-auto pr-1">
             {secciones.map((s) => [
               agrupaciones.length > 0 && (
                 <div key={'h:' + s.nombre} className="col-span-full flex items-center gap-2 pt-1">
@@ -246,7 +292,7 @@ export function FormularioPrenda({ grupo, piezas, onGuardado, onCancelar }) {
                     )}
                   </div>
                   <div className="px-2 py-1.5">
-                    <div className="truncate text-xs font-medium">{p.nombre}</div>
+                    <div className="line-clamp-2 break-words text-xs font-medium leading-tight" title={p.nombre}>{p.nombre}</div>
                     <div className="text-[10px] text-faint-foreground">
                       {p.tallaUnica || tallas.length <= 1 ? 'talla única' : tallas.length + ' tallas'}
                     </div>
