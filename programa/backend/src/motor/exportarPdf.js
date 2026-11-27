@@ -552,6 +552,9 @@ export async function generarPdfPaginas(paginas, { artesNativos, cortesLaser } =
         // El molde con sus nodos originales (ver trazado.js).
         ops.push(setStrokingColor(colorMarca(null)), ...trazadoEnPagina, closePath(), stroke());
         for (const q of pieza.piquetesCm || []) {
+          // Los pegados ya van en el molde: una raya encima, centrada en su
+          // punta, los alargaba hacia adentro con un quiebre.
+          if (q.pegado) continue;
           // Con su trazo real (forma y orientación del archivo); los de
           // piezas importadas antes, con la raya de su caja.
           const forma = Array.isArray(q.puntos) && q.puntos.length >= 2 ? q.puntos : rayaDePiquete(q, pieza.contornoCm);

@@ -87,5 +87,26 @@ console.log('\n--- En la mesa: forma real y color ---');
   comprobar('con un color elegido, ese', manual.trazos.slice(-2).every((c) => /ff00ff|255,0,255/i.test(c)), JSON.stringify(manual.trazos));
 }
 
+console.log('\n--- Piquete PEGADO al contorno (aguja): solo el del molde ---');
+{
+  const { geometriaParaAnclaje } = await import('../src/motor/geometriaAnclaje.js');
+  // Borde de arriba con una aguja de 5 mm hacia adentro en x = 200 mm.
+  const poligonoMm = [[0, 0], [400, 0], [400, 200], [201, 200], [200, 200], [200, 195], [200, 200], [199, 200], [0, 200]];
+  const geo = contornoYPiquetesDeTrazos([{ puntos: poligonoMm, cerrado: true, segmentos: null }], 1);
+  comprobar('se detecta la aguja', geo.piquetesMm.some((p) => p.tipo === 'aguja'), JSON.stringify(geo.piquetesMm));
+  const pieza = { nombre: 'F', dimensionesPorTalla: { T: { anchoCm: 40, altoCm: 20 } }, geometriaPorTalla: { T: geo } };
+  const a = geometriaParaAnclaje(pieza, 'T');
+  comprobar('llega a la mesa marcado como pegado', a.piquetes.length === 1 && a.piquetes[0].pegado === true, JSON.stringify(a.piquetes));
+  const trazos = async (piquetesCm) => {
+    const bytes = await generarPdfPaginas(armarMesas([{ piezaId: 'F', talla: 'T', anchoCm: 40, altoCm: 20, contornoCm: a.vertices, trazadoCm: a.trazado,
+      piquetesCm, fondo: { tipo: 'solido', color1: '#000000' }, textos: [], imagenes: [] }]));
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes) }).promise;
+    const ops = await (await doc.getPage(1)).getOperatorList();
+    return ops.fnArray.filter((f) => f === pdfjs.OPS.constructPath).length;
+  };
+  const con = await trazos(a.piquetes), sin = await trazos([]);
+  comprobar('no se le suma una raya encima (antes: centrada en la punta, se pasaba 2,5 mm)', con === sin, con + ' vs ' + sin);
+}
+
 console.log('\n' + pasadas + ' pasadas, ' + fallos + ' fallos');
 process.exit(fallos ? 1 : 0);

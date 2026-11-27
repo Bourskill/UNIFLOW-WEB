@@ -107,6 +107,9 @@ export function geometriaParaAnclaje(pieza, talla) {
       // Su trazo real, si la pieza se importó guardándolo.
       ...(Array.isArray(p.puntosMm) && p.puntosMm.length >= 2
         ? { puntos: p.puntosMm.map(([px, py]) => ({ x: (px - minX) / 10, y: (maxY - py) / 10 })), cerrado: !!p.cerrado } : {}),
+      // Recortado en el contorno mismo (aguja o muesca): ya se dibuja con el
+      // molde, no lleva raya aparte (su x/y es la PUNTA, no el centro).
+      ...(Array.isArray(p.nodos) ? { pegado: true } : {}),
     };
   });
 
