@@ -23,6 +23,9 @@ import { InputNumero } from '../componentes/InputNumero.jsx';
 import { textoDeTalla, COLOR_TALLA } from '../utilidades/capsulaTalla.js';
 import { contornosDeZona } from '../utilidades/contornosTexto.js';
 import { traductorDeClaves, anclajeTraducido, disenoTraducido, porClaveTraducido } from '../utilidades/clavesDePiezas.js';
+import { copiarEnlazado, sincronizarEnlaces, disenoCopiado, enlazadasCon, desenlazarZona, sinEnlaces } from '../utilidades/enlacePrendas.js';
+import { PanelHeredarPrenda } from '../componentes/PanelHeredarPrenda.jsx';
+import { AgregarPiezaAPrenda } from '../componentes/AgregarPiezaAPrenda.jsx';
 import { PanelDock } from '../componentes/PanelDock.jsx';
 import { PanelTexto } from '../componentes/PanelTexto.jsx';
 import { PanelAjusteArte } from '../componentes/PanelAjusteArte.jsx';
@@ -40,6 +43,7 @@ import {
   firmaEditor, haySinGuardar, puedeGuardarseSolo, guardarBorrador, leerBorrador, borrarBorrador, borradorParaOfrecer, haceCuanto,
 } from '../utilidades/borradorDiseno.js';
 import { LienzoAnclaje, COLOR, candidatosDe } from '../componentes/LienzoAnclaje.jsx';
+import { rolLibre } from '../componentes/FormularioPrenda.jsx';
 import { PanelConjuntos } from '../componentes/PanelConjuntos.jsx';
 import { SelectorColor } from '../componentes/SelectorColor.jsx';
 import { pedirTexto } from '../componentes/pedirTexto.jsx';
@@ -191,7 +195,11 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
   // + medias en un solo armado). Un solo elemento es el caso de siempre.
   const [grupoIds, setGrupoIds] = useState([]);
   const [disenoId, setDisenoId] = useState('');
-  const [anclaje, setAnclaje] = useState({ anclas: [], zonas: [] });
+  const [anclaje, setAnclajeCrudo] = useState({ anclas: [], zonas: [] });
+  // Toda edición pasa por acá: lo que cambia en una zona o ancla ENLAZADA
+  // (heredada de otra prenda) pasa a las demás de su enlace. Al cargar otra
+  // producción se usa setAnclajeCrudo.
+  const setAnclaje = useCallback((cambio) => setAnclajeCrudo((prev) => sincronizarEnlaces(prev, typeof cambio === 'function' ? cambio(prev) : cambio)), []);
   // Piezas "en par" (marcadas en la prenda) cuyo OTRO LADO lleva diseño
   // propio en esta producción: clave del rol -> true. Sin marca, el otro
   // lado lleva lo mismo que su par. Ver PanelLadoPar.
@@ -286,7 +294,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setFirmaGuardada(null);
     setNombre('');
     setGrupoIds(plantillaParaUsar.grupoIds || (plantillaParaUsar.grupoId ? [plantillaParaUsar.grupoId] : []));
-    setAnclaje(plantillaParaUsar.anclaje || { anclas: [], zonas: [] });
+    setAnclajeCrudo(plantillaParaUsar.anclaje || { anclas: [], zonas: [] });
     setLadosPropios(plantillaParaUsar.ladosPropios || {});
     setConjuntosPrendas([]);
     setMoldes({});
@@ -409,6 +417,50 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     }
   }
   const gruposDeIds = (ids) => ids.map((x) => grupos.find((g) => g.id === x)).filter(Boolean);
+
+  // Heredar de otra prenda (PanelHeredarPrenda): las zonas de cada pieza de
+  // origen se copian a su pieza de destino ENLAZADAS (utilidades/enlacePrendas.js),
+  // y si se pide, también su diseño (imagen, vista, ajuste y fondo).
+  function nombreDePieza(clave) {
+    const pd = piezasDisponibles.find((x) => x.clave === clave);
+    return pd ? pd.rol + (gruposSeleccionados.length > 1 ? ' · ' + pd.grupoNombre : '') : clave;
+  }
+  async function heredarDePrenda(pares, conDiseno) {
+    const { anclaje: nuevo, zonas } = copiarEnlazado(anclaje, pares);
+    setAnclajeCrudo(nuevo);
+    let piezasDiseno = 0;
+    if (conDiseno && disenoSeleccionado) {
+      const { cambios, piezas: copiadas } = disenoCopiado(disenoSeleccionado, pares);
+      if (copiadas) {
+        // Si otra producción usa el mismo diseño, no se le cambia: esta pasa a una copia.
+        const compartido = productos.some((p) => p.id !== editandoId && p.disenoId === disenoSeleccionado.id);
+        if (compartido) {
+          const copia = await crearDiseno({ nombre: disenoSeleccionado.nombre + ' (copia)', grupoIds,
+            ...(disenoSeleccionado.fondo ? { fondo: disenoSeleccionado.fondo } : {}), ...cambios });
+          guardarDisenoLocal(copia);
+          setDisenoId(copia.id);
+        } else {
+          guardarDisenoLocal(await editarDiseno(disenoSeleccionado.id, cambios));
+        }
+        piezasDiseno = copiadas;
+      }
+    }
+    return { zonas, piezasDiseno };
+  }
+
+  // "+ Pieza": piezas de la Biblioteca que pasan a ser parte de la prenda
+  // (para todas las producciones que la usan, igual que Editar prenda).
+  async function agregarPiezasAPrenda(grupoId, piezaIds) {
+    const grupo = grupos.find((g) => g.id === grupoId);
+    if (!grupo || !piezaIds.length) return;
+    const filas = [...grupo.piezas];
+    for (const id of piezaIds) {
+      const p = piezas.find((x) => x.id === id);
+      if (p) filas.push({ piezaId: id, rol: rolLibre(p.nombre, filas) });
+    }
+    const actualizado = confirmarGuardado('grupos', await editarGrupo(grupo.id, { piezas: filas }));
+    setGrupos((prev) => prev.map((g) => (g.id === actualizado.id ? actualizado : g)));
+  }
 
   // El nombre del diseño se edita en su campo y se guarda al salir de él.
   useEffect(() => { setNombreDiseno(disenoSeleccionado?.nombre || ''); }, [disenoSeleccionado?.id, disenoSeleccionado?.nombre]);
@@ -884,7 +936,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     if (modo === 'importar' && conjuntoAImportar) {
       // El conjunto se pega con su raíz en el punto elegido; el resto de
       // sus zonas, colgando de ella como estaban (utilidades/conjuntosZonas.js).
-      const { anclaje: nuevo, idsZonasNuevas } = importarConjunto(anclaje, conjuntoAImportar.anclaje, piezaActiva, cand.ref);
+      const { anclaje: nuevo, idsZonasNuevas } = importarConjunto(anclaje, sinEnlaces(conjuntoAImportar.anclaje), piezaActiva, cand.ref);
       setAnclaje(nuevo);
       if (idsZonasNuevas.length) setSeleccion({ tipo: 'zona', id: idsZonasNuevas[0] });
       setModo(null);
@@ -1009,7 +1061,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
 
   function duplicarZona(zona) {
     const id = idLibre(zona.id + '_', anclaje.zonas);
-    const copia = { ...JSON.parse(JSON.stringify(zona)), id, nombre: id };
+    const { enlace: _enlace, ...sinEnlace } = JSON.parse(JSON.stringify(zona));
+    const copia = { ...sinEnlace, id, nombre: id };
     setAnclaje((prev) => ({ ...prev, zonas: [...prev.zonas, copia] }));
     setSeleccion({ tipo: 'zona', id });
   }
@@ -1181,7 +1234,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setNombre(b.nombre);
     setGrupoIds(b.grupoIds);
     setDisenoId(b.disenoId || '');
-    setAnclaje(b.anclaje);
+    setAnclajeCrudo(b.anclaje);
     setLadosPropios(b.ladosPropios || {});
     setConjuntosPrendas(b.conjuntos || []);
     setMoldes(b.moldes || {});
@@ -1231,7 +1284,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setNombre(producto.nombre);
     setGrupoIds(producto.grupoIds || (producto.grupoId ? [producto.grupoId] : []));
     setDisenoId(producto.disenoId || '');
-    setAnclaje(producto.anclaje || { anclas: [], zonas: [] });
+    setAnclajeCrudo(producto.anclaje || { anclas: [], zonas: [] });
     setLadosPropios(producto.ladosPropios || {});
     setConjuntosPrendas(producto.conjuntos || []);
     setMoldes(producto.moldes || {});
@@ -1254,7 +1307,7 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
     setEstadoGuardado(null);
     borrarBorrador();
     setNombre('');
-    setAnclaje({ anclas: [], zonas: [] });
+    setAnclajeCrudo({ anclas: [], zonas: [] });
     setLadosPropios({});
     setConjuntosPrendas([]);
     setMoldes({});
@@ -1512,6 +1565,18 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
             </div>
             <PanelConjuntos prendas={grupos} enProduccion={grupoIds} conjuntos={conjuntosPrendas} onCambiar={setConjuntosPrendas}
               onAgregarPrenda={(id) => { if (!grupoIds.includes(id)) alternarGrupo(id); }} />
+            {gruposSeleccionados.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {grupoIds.map((id) => grupos.find((g) => g.id === id)).filter(Boolean).map((g) => (
+                  <AgregarPiezaAPrenda key={g.id} grupo={g} piezas={piezas}
+                    otrasProducciones={productos.filter((p) => p.id !== editandoId && (p.grupoIds || (p.grupoId ? [p.grupoId] : [])).includes(g.id)).map((p) => p.nombre)}
+                    onAgregar={(ids) => agregarPiezasAPrenda(g.id, ids)} />
+                ))}
+              </div>
+            )}
+            <PanelHeredarPrenda hayDiseno={!!disenoSeleccionado} onHeredar={heredarDePrenda}
+              prendas={gruposSeleccionados.length > 1 ? gruposSeleccionados.map((g) => ({ id: g.id, nombre: g.nombre,
+                piezas: piezasDisponibles.filter((pd) => pd.grupoId === g.id).map((pd) => ({ clave: pd.clave, rol: pd.rol })) })) : []} />
           </div>
 
           <div className="max-w-3xl">
@@ -2027,6 +2092,8 @@ export function Productos({ recargarSenal, onCambio, plantillaParaUsar, onConsum
                     onActualizar={(cambios) => actualizarZonaConSincronia(seleccionado, cambios)}
                     onCambiarGrupo={(g) => cambiarGrupoDeZona(seleccionado, g)}
                     hermanas={zonasDelMismoGrupo(seleccionado)}
+                    enlazadas={enlazadasCon(anclaje, seleccionado).map((z) => z.id + ' (' + nombreDePieza(z.pieza) + ')')}
+                    onDesenlazar={() => setAnclajeCrudo((prev) => desenlazarZona(prev, seleccionado.id))}
                     onQuitar={() => borrarNodo('zona', seleccionado.id)}
                     onDuplicar={() => duplicarZona(seleccionado)}
                     onCruzar={() => { setModo('cruzar'); setCruzandoZonaId(seleccionado.id); }}
@@ -2303,7 +2370,7 @@ function SelectorCruce({ zona, etiquetaActual, etiquetaOtra, horiz, vert, onEleg
 }
 
 // ============ panel: zona ============
-function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasResueltas, onRenombrar, onActualizar, onCambiarGrupo, hermanas, onQuitar, onDuplicar, onCruzar, onVolverAUnPunto }) {
+function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasResueltas, onRenombrar, onActualizar, onCambiarGrupo, hermanas, enlazadas = [], onDesenlazar, onQuitar, onDuplicar, onCruzar, onVolverAUnPunto }) {
   const cruzada = !!(zona.anclaX && zona.anclaY && zona.anclaX !== zona.anclaY);
   const rxA = anclasResueltas[zona.anclaX], ryA = anclasResueltas[zona.anclaY];
   let etiquetaEsquinaActual = 'esquina', etiquetaEsquinaOtra = 'la otra esquina';
@@ -2326,6 +2393,12 @@ function PanelZona({ zona, fuentes, onFuenteAgregada, anclasDisponibles, anclasR
           <Boton variante="fantasma" tamano="sm" type="button" onClick={onQuitar}>Quitar</Boton>
         </div>
       </div>
+      {enlazadas.length > 0 && (
+        <div className="flex flex-col items-start gap-1 rounded-lg bg-primary-soft px-2.5 py-1.5 text-xs text-primary">
+          <span>Enlazada con {enlazadas.join(', ')}: lo que cambies acá cambia también allá.</span>
+          <Boton variante="secundario" tamano="sm" type="button" onClick={onDesenlazar} title="Que esta zona se pueda cambiar sola">Desenlazar</Boton>
+        </div>
+      )}
       <Campo etiqueta="Se llama">
         <Input defaultValue={zona.id} onBlur={(e) => onRenombrar(e.target.value)} />
       </Campo>

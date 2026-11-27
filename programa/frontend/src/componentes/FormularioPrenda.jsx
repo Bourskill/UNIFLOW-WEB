@@ -13,7 +13,7 @@ function tallasDe(pieza) {
 
 // Un rol libre para la pieza: su nombre, y si ya está usado (la misma pieza
 // dos veces, ej. manga izquierda y derecha) se numera: "MANGA 2".
-function rolLibre(base, filas) {
+export function rolLibre(base, filas) {
   const usados = new Set(filas.map((f) => f.rol.trim().toLowerCase()));
   if (!usados.has(base.toLowerCase())) return base;
   for (let n = 2; ; n++) if (!usados.has((base + ' ' + n).toLowerCase())) return base + ' ' + n;
